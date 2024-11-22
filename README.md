@@ -15,5 +15,7 @@ pip install git+https://github.com/MorganResearchLab/scarecrow.git
 ```bash
 git clone https://github.com/pachterlab/seqspec.git
 scarecrow --help
-scarecrow extract ./seqspec/examples/specs/SPLiT-seq/spec.yaml -v
+scarecrow extract ../seqspec/examples/specs/SPLiT-seq/spec.yaml \
+  ../cellatlas-examples/rna-splitseq/fastqs/R1.fastq.gz ../cellatlas-examples/rna-splitseq/fastqs/R2.fastq.gz \
+  -vp
 ```
