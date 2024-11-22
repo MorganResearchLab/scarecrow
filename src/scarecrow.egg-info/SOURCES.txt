@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+setup.cfg
+src/scarecrow/__init__.py
+src/scarecrow/main.py
+src/scarecrow/scarecrow_extract.py
+src/scarecrow.egg-info/PKG-INFO
+src/scarecrow.egg-info/SOURCES.txt
+src/scarecrow.egg-info/dependency_links.txt
+src/scarecrow.egg-info/entry_points.txt
+src/scarecrow.egg-info/top_level.txt

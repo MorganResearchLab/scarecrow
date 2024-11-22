@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: scarecrow
+Version: 0.1.0
+Summary: Your package description
+Author-email: David Wragg <david.wragg@abdn.ac.uk>
+Requires-Python: >=3.7
+License-File: LICENSE
