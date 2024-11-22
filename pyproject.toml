@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scarecrow"
+version = "0.1.0"
+description = "Your package description"
+authors = [{name = "David Wragg", email = "david.wragg@abdn.ac.uk"}]
+requires-python = ">=3.7"
+
+[project.scripts]
+scarecrow = "scarecrow.main:main"
