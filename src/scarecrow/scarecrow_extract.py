@@ -70,15 +70,11 @@ def run_extract(yaml, fastqs, outdir, paired, verbose):
     elements = region_indices(spec, fastqs)
 
     # Extract elements from sequencing reads
-    results = process_paired_fastq_batches(elements, batch_size=1000, max_batches=5, output_file='fastq_regions.jsonl')
-    
-
-    if outdir:
-        # This needs to be edited still
-        print("")
-    else:
-        print("")
-    return spec
+    process_paired_fastq_batches(elements, batch_size = 1000,
+                                 region_ids = ['UMI', 'Round_1_BC', 'Round_2_BC', 'Round_3_BC'],
+                                 output_file = outdir)
+        
+    return 
 
 
 
