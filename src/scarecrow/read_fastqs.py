@@ -1,12 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+@author: David Wragg
+"""
+
 import logging
 import pysam
 import os
-#import json
-#import numpy as np
-from typing import List, Dict, Generator, Any, Optional, Set
+from typing import List, Dict, Generator, Optional, Set
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import resource
+from seqspec.Region import RegionCoordinate
 
 # Configure logging
 logging.basicConfig(
@@ -24,7 +29,6 @@ class FastqProcessingError(Exception):
     """Custom exception for FASTQ processing errors."""
     pass
 
-
 def get_memory_usage() -> float:
     """
     Get current memory usage of the process.
@@ -34,10 +38,10 @@ def get_memory_usage() -> float:
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
-
 def extract_region_details(
     entry: pysam.FastxRecord, 
-    regions: List
+    regions: List[RegionCoordinate],
+    rev: bool = False
 ) -> List[Dict]:
     """
     Extract region-specific details from a single FASTQ entry.
@@ -55,6 +59,9 @@ def extract_region_details(
     try:
         full_sequence = entry.sequence
         full_qualities = entry.quality
+        if rev:
+            full_sequence = full_sequence[::-1]
+            full_qualities = full_qualities[::-1]
         
         region_details = []
         for region_coord in regions:
@@ -89,7 +96,6 @@ def extract_region_details(
     except Exception as e:
         logger.error(f"Error extracting region details: {e}")
         raise
-
 
 def batch_process_paired_fastq(
     fastq_info: List[Dict], 
@@ -136,8 +142,8 @@ def batch_process_paired_fastq(
                     break
                 
                 # Extract region details
-                r1_region_details = extract_region_details(r1_entry, r1_regions)
-                r2_region_details = extract_region_details(r2_entry, r2_regions)
+                r1_region_details = extract_region_details(r1_entry, r1_regions, rev = False)
+                r2_region_details = extract_region_details(r2_entry, r2_regions, rev = True)
                 
                 # Combine pair information
                 read_pair_info = {
@@ -176,7 +182,6 @@ def batch_process_paired_fastq(
         logger.error(f"File reading error: {e}")
         raise FastqProcessingError(f"Unable to process FASTQ files: {e}")
     
-
 def process_paired_fastq_batches(
     fastq_info: List[Dict], 
     batch_size: int = 10000, 
@@ -229,10 +234,12 @@ def process_paired_fastq_batches(
                                 not_found_tracker=not_found_regions
                             )
                             
-                            # Barcode tracking logic
-                            barcode_key = "_".join(
-                                str(seq['sequence']) for seq in extracted_sequences.values()
-                            )
+                            # Barcode tracking logic                            
+                            barcode_key = []
+                            for region_id in region_ids:
+                                if region_id in extracted_sequences:
+                                    barcode_key.append(extracted_sequences[region_id]['sequence'])
+                            barcode_key = "_".join([str(element) for element in barcode_key])
                             barcode_counts[barcode_key] = barcode_counts.get(barcode_key, 0) + 1
                             
                             # Optional file writing
@@ -257,8 +264,6 @@ def process_paired_fastq_batches(
         logger.error(f"Processing failed: {e}")
 
     return barcode_counts
-
-
 
 def report_processing_results(
     total_read_pairs: int, 
@@ -295,7 +300,7 @@ def report_processing_results(
     # Write barcode counts to file
     if output_file:
         with open(f"{output_file}.barcode_counts.csv", 'w') as f:
-            f.write("Barcode,Count\n")  # CSV header
+            f.write("umi_barcodes,Count\n")  # CSV header
             for barcode, count in sorted(barcode_counts.items(), key=lambda x: x[1], reverse=True):
                 f.write(f"{barcode},{count}\n")
     
@@ -304,8 +309,6 @@ def report_processing_results(
 
     # Create binned ASCII histogram of barcode distribution and output to console
     create_binned_ascii_histogram(barcode_counts)
-
-
 
 def write_output(read_pair: Dict, extracted_sequences: Dict, region_ids: List, output_handler):
     """
@@ -321,14 +324,11 @@ def write_output(read_pair: Dict, extracted_sequences: Dict, region_ids: List, o
     for region_id in region_ids:
         if region_id in extracted_sequences:
             header.append(extracted_sequences[region_id]['sequence'])
-    delim = "_"
     # Write to file
-    output_handler.write(f"@{delim.join([str(element) for element in header])}\n")
+    output_handler.write(f"@{"_".join([str(element) for element in header])}\n")
     output_handler.write(f"{safe_extract_sequences([read_pair], ['cDNA'])['cDNA']['sequence']}\n")
     output_handler.write("+\n")
     output_handler.write(f"{safe_extract_sequences([read_pair], ['cDNA'])['cDNA']['qualities']}\n")
-
-
 
 def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):
     """
@@ -404,8 +404,6 @@ def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=No
     
     return sequences
 
-
-
 def safe_extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):
     """
     Safely extract sequences with additional error handling
@@ -416,8 +414,6 @@ def safe_extract_sequences(data, region_ids=None, verbose=False, not_found_track
         if verbose:
             print(f"Unexpected error in extraction: {e}")
         return {}
-
-
 
 def create_binned_ascii_histogram(counts, num_bins=10):
     """

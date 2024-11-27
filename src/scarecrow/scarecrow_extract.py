@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Nov 22 09:37:12 2024
-
 @author: David Wragg
 """
 
 from seqspec import Assay
 from seqspec.utils import load_spec
 from seqspec.seqspec_print import run_seqspec_print
-from seqspec.seqspec_index import get_index_by_primer
+from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
 from scarecrow.read_fastqs import process_paired_fastq_batches
 
@@ -66,12 +64,10 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz -o ~/path/to/output -r UMI R
     )
     return subparser
 
-
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
                 outdir = args.o, batches = args.b, regions = args.r,
                 threads = args.t, max_batches = args.m)
-
 
 def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
     """
@@ -92,10 +88,13 @@ def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
     # Extract elements from sequencing reads
     process_paired_fastq_batches(elements, batch_size = batches, max_batches = max_batches,
                                  num_workers = threads, region_ids = regions, output_file = outdir)
-        
+
+    # Return kallisto bus -x string, equivalent to:
+    # seqspec index -t kb -m rna -r {R1.fastq.gz},{R2.fastq.gz} {yaml}
+    x = format_kallisto_bus(elements)
+    print(f"\033[32m\nkallisto bus -x \033[34m{x}\033[0m\n")
+
     return 
-
-
 
 def region_indices(spec: Assay, fastqs):
     """
@@ -115,3 +114,5 @@ def region_indices(spec: Assay, fastqs):
                     print(f"\t{region.region_id}: {region.start}-{region.stop}")        
     
     return indices
+
+
