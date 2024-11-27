@@ -20,7 +20,7 @@ def parser_extract(parser):
 Extract cDNA sequence from fastq files
 
 Examples:
-scarecrow extract spec.yaml fastqs -v -o ~/path/to/output
+scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz -o ~/path/to/output -r UMI Round_1_BC Round_2_BC Round_3_BC
 ---
 """,
         help="Extract cDNA from fastqs",
@@ -30,37 +30,57 @@ scarecrow extract spec.yaml fastqs -v -o ~/path/to/output
     subparser.add_argument("fastqs", nargs="+", help="List of FASTQ files")
     subparser.add_argument(
         "-o",
-        metavar="OUT",
+        metavar="out",
         help=("Path to output cDNA fastq files"),
         type=str,
         default=None,
     )
     subparser.add_argument(
-        "-p",
-        help=("Paired-end sequencing"),
-        action='store_true'
+        "-r",
+        metavar="region_id",
+        help=("List of regions for cell barcode"),
+        nargs="*",
+        type=str,
+        default=[],
     )
     subparser.add_argument(
-        "-v",
-        help=("Verbose output"),
-        action='store_true'
+        "-b",
+        metavar="batches",
+        help=("Number of read batches to process at a time before writing to file [1000]"),
+        type=int,
+        default=1000,
+    )
+    subparser.add_argument(
+        "-m",
+        metavar="max_batches",
+        help=("Maximum number of read batches to process"),
+        type=int,
+        default=None,
+    )
+    subparser.add_argument(
+        "-t",
+        metavar="threads",
+        help=("Number of processing threads [4]"),
+        type=int,
+        default=4,
     )
     return subparser
 
 
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
-                outdir = args.o, paired = args.p, verbose = args.v)
+                outdir = args.o, batches = args.b, regions = args.r,
+                threads = args.t, max_batches = args.m)
 
 
-def run_extract(yaml, fastqs, outdir, paired, verbose):
+def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
     """
     Employs seqspec functions to (1) output library spec and (2) identify elements contained in sequencing reads.
     The identified elements are then extracted from paired-end fastq files in batches and written to file (jsonl).
     """
     
     # Run seqspec print to get format
-    print(f"\033[32m\nseqspec print {yaml}:\033[0m\n")
+    print(f"\033[32m\nseqspec print \033[34m{yaml}\033[0m\n")
     run_seqspec_print(yaml, fmt="library-ascii", o = None)
 
     # import seqspec.yaml
@@ -70,9 +90,8 @@ def run_extract(yaml, fastqs, outdir, paired, verbose):
     elements = region_indices(spec, fastqs)
 
     # Extract elements from sequencing reads
-    process_paired_fastq_batches(elements, batch_size = 1000,
-                                 region_ids = ['UMI', 'Round_1_BC', 'Round_2_BC', 'Round_3_BC'],
-                                 output_file = outdir)
+    process_paired_fastq_batches(elements, batch_size = batches, max_batches = max_batches,
+                                 num_workers = threads, region_ids = regions, output_file = outdir)
         
     return 
 
@@ -94,5 +113,5 @@ def region_indices(spec: Assay, fastqs):
                 print(f"\033[34m\n{file}\033[0m")
                 for region in regions:
                     print(f"\t{region.region_id}: {region.start}-{region.stop}")        
-
+    
     return indices
