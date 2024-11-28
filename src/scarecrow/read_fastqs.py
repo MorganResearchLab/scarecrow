@@ -288,7 +288,7 @@ def report_processing_results(
     for barcode, count in barcode_summary[:10]:  # Log top 10 barcodes
         logger.info(f"Barcode: {barcode}, Count: {count}")
     
-    logger.info(f"Total unique barcodes: {len(barcode_counts)}")
+    logger.info(f"Total unique UMI + barcode combinations: {len(barcode_counts)}")
     logger.info(f"Min barcode count: {min(barcode_counts.values()) if barcode_counts else 0}")
     logger.info(f"Max barcode count: {max(barcode_counts.values()) if barcode_counts else 0}")
     
