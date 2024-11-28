@@ -49,6 +49,7 @@ def extract_region_details(
     try:
         full_sequence = entry.sequence
         full_qualities = entry.quality
+        logger.info(f"{entry.name}: {full_sequence}")
         # If read2 we need to reverse the sequence so that the RegionCoordinate element positions
         # are reading from the correct end. After extracting the sequence, it may be necessary to
         # reverse the extracted region_sequence so that it matches the expected barcode sequence.
@@ -65,6 +66,8 @@ def extract_region_details(
             
             region_sequence = full_sequence[region_coord.start:region_coord.stop]
             region_qualities = full_qualities[region_coord.start:region_coord.stop] if full_qualities else ''
+            
+            logger.info(f"Region {region_coord.name}:{region_coord.start}-{region_coord.stop}: {region_sequence}")
             
             # Optional length validation
             #if (region_coord.min_len and len(region_sequence) < region_coord.min_len) or \
