@@ -1,11 +1,11 @@
 import gzip
 from Bio.Seq import Seq
 from collections import defaultdict
-
+from argparse import RawTextHelpFormatter
 
 def parser_barcode_check(parser):
     subparser = parser.add_parser(
-        "barcde_check",
+        "barcode_check",
         description="""
 Check barcode whitelist against a fastq file and return counts of matched barcode sequences and their start position
 
@@ -17,8 +17,8 @@ scarecrow check_barcodes barcodes.txt R1.fastq.gz barcode_counts.txt
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument("barcodes", help="Text file list of barcodes (one per line)")
-    subparser.add_argument("fastq", nargs="+", help="A single FASTQ files")
-    subparser.add_argument("counts", nargs="+", help="Output file for barcode counts")
+    subparser.add_argument("fastq", help="A single FASTQ files")
+    subparser.add_argument("counts", help="Output file for barcode counts")
     return subparser
 
 def validate_barcode_check_args(parser, args):
@@ -49,7 +49,7 @@ def count_barcodes(fastq_file, barcodes):
     """
     barcode_data = defaultdict(lambda: {"direct": 0, "reverse": 0, "positions": []})
     reverse_complements = {barcode: str(Seq(barcode).reverse_complement()) for barcode in barcodes}
-
+    
     with gzip.open(fastq_file, 'rt') as f:
         for i, line in enumerate(f):
             # Process only sequence lines (2nd line in every 4-line FASTQ entry)

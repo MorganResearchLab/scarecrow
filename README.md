@@ -105,9 +105,9 @@ The barcode whitelists for the `seqspec` SPLiT-seq example are available in the 
 To check if barcode sequences from a whitelist are present in a fastq file.
 
 ```bash
-python ./scarecrow/src/scarecrow/barcode_check.py \
-    ./seqspec/examples/specs/SPLiT-seq/onlist_round1.txt \
-    ./cellatlas/examples/rna-splitseq/fastqs/R1.fastq.gz \
+scarecrow barcode_check ./seqspec/examples/specs/SPLiT-seq/onlist_round1.txt \
+    ./cellatlas/examples/rna-splitseq/fastqs/R1.fastq.gz\
     ./Round_1_BC_counts.txt
 ```
 
+This reports matches for all barcodes, but across a range of positions within the sequencing read rather than at the expected position (115) reported by seqspec above.
