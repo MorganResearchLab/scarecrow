@@ -4,7 +4,7 @@
 @author: David Wragg
 """
 
-import logging
+from scarecrow.fastq_logging import logger, log_errors
 import pysam
 import os
 from typing import List, Dict, Generator, Optional, Set
@@ -12,17 +12,6 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import resource
 from seqspec.Region import RegionCoordinate
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s: %(message)s',
-    filename='fastq_processor.log',  # Write only to file
-    filemode='w'  # Overwrite log file on each run
-)
-logger = logging.getLogger(__name__)
-# Disable console handlers
-logger.propagate = False
 
 
 class FastqProcessingError(Exception):
@@ -38,6 +27,7 @@ def get_memory_usage() -> float:
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
+@log_errors
 def extract_region_details(
     entry: pysam.FastxRecord, 
     regions: List[RegionCoordinate],
@@ -59,6 +49,9 @@ def extract_region_details(
     try:
         full_sequence = entry.sequence
         full_qualities = entry.quality
+        # If read2 we need to reverse the sequence so that the RegionCoordinate element positions
+        # are reading from the correct end. After extracting the sequence, it may be necessary to
+        # reverse the extracted region_sequence so that it matches the expected barcode sequence.
         if rev:
             full_sequence = full_sequence[::-1]
             full_qualities = full_qualities[::-1]
@@ -97,6 +90,7 @@ def extract_region_details(
         logger.error(f"Error extracting region details: {e}")
         raise
 
+@log_errors
 def batch_process_paired_fastq(
     fastq_info: List[Dict], 
     batch_size: int = 10000, 
@@ -182,6 +176,7 @@ def batch_process_paired_fastq(
         logger.error(f"File reading error: {e}")
         raise FastqProcessingError(f"Unable to process FASTQ files: {e}")
     
+@log_errors
 def process_paired_fastq_batches(
     fastq_info: List[Dict], 
     batch_size: int = 10000, 
@@ -289,7 +284,7 @@ def report_processing_results(
     
     # Convert barcode distribution to log-friendly format
     barcode_summary = sorted(barcode_counts.items(), key=lambda x: x[1], reverse=True)
-    logger.info("Barcode Distribution:")
+    logger.info("Barcode Distribution (10 most frequent umi + barcode combinations):")
     for barcode, count in barcode_summary[:10]:  # Log top 10 barcodes
         logger.info(f"Barcode: {barcode}, Count: {count}")
     
@@ -330,6 +325,7 @@ def write_output(read_pair: Dict, extracted_sequences: Dict, region_ids: List, o
     output_handler.write("+\n")
     output_handler.write(f"{safe_extract_sequences([read_pair], ['cDNA'])['cDNA']['qualities']}\n")
 
+@log_errors
 def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):
     """
     Extract sequences for specified region_ids from read1 and read2
@@ -404,6 +400,7 @@ def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=No
     
     return sequences
 
+@log_errors
 def safe_extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):
     """
     Safely extract sequences with additional error handling

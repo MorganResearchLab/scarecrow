@@ -72,7 +72,7 @@ def validate_extract_args(parser, args):
 def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
     """
     Employs seqspec functions to (1) output library spec and (2) identify elements contained in sequencing reads.
-    The identified elements are then extracted from paired-end fastq files in batches and written to file (jsonl).
+    The identified elements are then extracted from paired-end fastq files in batches and written to file.
     """
     
     # Run seqspec print to get format
