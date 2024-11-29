@@ -308,6 +308,7 @@ def report_processing_results(
     # Create binned ASCII histogram of barcode distribution and output to console
     create_binned_ascii_histogram(barcode_counts)
 
+@log_errors
 def write_output(read_pair: Dict, extracted_sequences: Dict, region_ids: List, output_handler):
     """
     Write processed read pair to output file.
@@ -322,11 +323,18 @@ def write_output(read_pair: Dict, extracted_sequences: Dict, region_ids: List, o
     for region_id in region_ids:
         if region_id in extracted_sequences:
             header.append(extracted_sequences[region_id]['sequence'])
+    # Extract cDNA
+    """
+    An issue here is that it is looking for 'cdna' so if the region is labeled cDNA for example it will not find it.
+    Solution is to lowercase the region, probably when running region_indices in scarecrow_extract.py
+    """
+    cdna_seq = {safe_extract_sequences([read_pair], ['cdna'])['cdna']['sequence']}
+    cdna_qual = {safe_extract_sequences([read_pair], ['cdna'])['cdna']['qualities']}
     # Write to file
     output_handler.write(f"@{"_".join([str(element) for element in header])}\n")
-    output_handler.write(f"{safe_extract_sequences([read_pair], ['cDNA'])['cDNA']['sequence']}\n")
+    output_handler.write(f"{cdna_seq}\n")
     output_handler.write("+\n")
-    output_handler.write(f"{safe_extract_sequences([read_pair], ['cDNA'])['cDNA']['qualities']}\n")
+    output_handler.write(f"{cdna_qual}\n")
 
 @log_errors
 def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):

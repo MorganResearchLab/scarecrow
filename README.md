@@ -132,3 +132,39 @@ The logger records for each read the sequence that has been extracted along with
 2024-11-28 16:31:21 - scarecrow - INFO - Region Round_2_BC:48-56: GCTACGCT
 2024-11-28 16:31:21 - scarecrow - INFO - Region linker_1:56-86: TTGTAGCCTGAGAACCATACGGGATGTGTA
 ```
+
+
+#### 10xv2
+```bash
+scarecrow extract ./scarecrow/specs/10xv2/10xv2.yaml \
+    /Users/s14dw4/Documents/Repos/scarecrow/specs/10xv2/R1.fastq \
+    /Users/s14dw4/Documents/Repos/scarecrow/specs/10xv2/R2.fastq \
+    -o ./cDNA.fq -r umi barcode
+```
+
+#### Evercode
+```bash
+scarecrow extract ./scarecrow/specs/evercode/evercode-v3.yaml \
+    /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
+    /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
+    -o ./cDNA.fq -r BC1 BC2 BC3
+```
+
+Positions/sequences not correct:
+
+```bash
+2024-11-29 15:49:21 - scarecrow - INFO - ERR12167395.1: CAATTCTGACCGACTCTCGAGTCCGATGTCTCGCATCGGCGTACGACTCCTCTATCATCCACGTGCTTGAGACTGTGGGCTTAAAGTAGTGACTGTCGGC
+2024-11-29 15:49:21 - scarecrow - INFO - Region cdna:0-64: CAATTCTGACCGACTCTCGAGTCCGATGTCTCGCATCGGCGTACGACTCCTCTATCATCCACGT
+2024-11-29 15:49:21 - scarecrow - INFO - Region BC1:64-72: GCTTGAGA
+2024-11-29 15:49:21 - scarecrow - INFO - Region L1:72-82: CTGTGGGCTT
+2024-11-29 15:49:21 - scarecrow - INFO - Region BC2:82-90: AAAGTAGT
+2024-11-29 15:49:21 - scarecrow - INFO - Region L2:90-100: GACTGTCGGC
+2024-11-29 15:49:21 - scarecrow - INFO - ERR12167395.1: AAGCAGTGGTATCAACGCAGAGTGAATGGGACCGGCACCCTGGGCTCTGTATCCCTTCCTGTCTCTGAGCTCCTCCTGGTGGACCAGCTCTGCGTGGACC
+2024-11-29 15:49:21 - scarecrow - INFO - Region polyN:0-10: CCAGGTGCGT
+2024-11-29 15:49:21 - scarecrow - INFO - Region BC3:10-18: CTCGACCA
+2024-11-29 15:49:21 - scarecrow - INFO - Region L2:18-28: GGTGGTCCTC
+2024-11-29 15:49:21 - scarecrow - INFO - Region BC2:28-36: CTCGAGTC
+2024-11-29 15:49:21 - scarecrow - INFO - Region L1:36-46: TCTGTCCTTC
+2024-11-29 15:49:21 - scarecrow - INFO - Region BC1:46-54: CCTATGTC
+2024-11-29 15:49:21 - scarecrow - INFO - Region cdna:54-100: TCGGGTCCCACGGCCAGGGTAAGTGAGACGCAACTATGGTGACGAA    
+```

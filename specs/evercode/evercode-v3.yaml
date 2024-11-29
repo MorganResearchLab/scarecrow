@@ -1,0 +1,240 @@
+!Assay
+seqspec_version: 0.3.0
+assay_id: Evercode WT Mini v3
+name: Evercode WT Mini v3
+doi: https://support.parsebiosciences.com/hc/en-us/articles/23911840786196-Evercode-WT-v3-User-Guides
+date: 29 November 2024
+description: Parse Evercode WT Mini v3
+modalities:
+- rna
+lib_struct: https://support.parsebiosciences.com/hc/en-us/article_attachments/31841796715284
+sequence_protocol: Illumina NextSeq 2000 (EFO:0010963)
+sequence_kit: NextSeq 1000/2000 P3 Reagent Kit
+library_protocol: single-cell RNA sequencing assay (OBI:0002631)
+library_kit: Not-specified
+sequence_spec:
+- !Read
+  read_id: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq
+  name: Read 1
+  modality: rna
+  primer_id: R1
+  min_len: 100
+  max_len: 100
+  strand: pos
+  files:
+  - !File
+    file_id: R1.fastq
+    filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq
+    filetype: fastq
+    filesize: 0
+    url: ''
+    urltype: local
+    md5: 7aa3e968bf53b335c0a402b03917dd55
+- !Read
+  read_id: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq
+  name: Read 2
+  modality: rna
+  primer_id: R2
+  min_len: 100
+  max_len: 100
+  strand: neg
+  files:
+  - !File
+    file_id: R2.fastq
+    filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq
+    filetype: fastq
+    filesize: 0
+    url: ''
+    urltype: local
+    md5: d22ba1ed072ea6355eef2871212c3db8
+library_spec:
+- !Region
+  parent_id: null
+  region_id: rna
+  region_type: rna
+  name: rna
+  sequence_type: joined
+  sequence: NNNNNNNNTCTTTCCCTACACGACGCTCTTCCGATCTXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXNNNNNNNNXXXXXXXXXXXXNNNNNNNNXXXXXXXXXXXXNNNNNNNNXXXXXXXXXXAGATCGGAAGAGCACACGTCTGAACTCCAGTCACNNNNNNNN
+  min_len: 134
+  max_len: 197
+  onlist: null
+  regions:
+  - !Region
+    parent_id: rna
+    region_id: P5
+    region_type: illumina_p5
+    name: P5
+    sequence_type: fixed
+    sequence: ''
+    min_len: 0
+    max_len: 0
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: I5
+    region_type: index5
+    name: I5
+    sequence_type: onlist
+    sequence: NNNNNNNN
+    min_len: 8
+    max_len: 8
+    onlist: !Onlist
+      file_id: i5_whitelist.txt
+      filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/i5_whitelist.txt
+      filetype: txt
+      filesize: 0
+      url: ''
+      urltype: local
+      md5: 0a9d99e31ad66a265ac6eb08520fcfe6
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: R1
+    region_type: truseq_read1
+    name: R1
+    sequence_type: fixed
+    sequence: TCTTTCCCTACACGACGCTCTTCCGATCT
+    min_len: 29
+    max_len: 29
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: cdna
+    region_type: cdna
+    name: cdna
+    sequence_type: random
+    sequence: X
+    min_len: 1
+    max_len: 64
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: BC1
+    region_type: barcode
+    name: BC1
+    sequence_type: onlist
+    sequence: NNNNNNNN
+    min_len: 8
+    max_len: 8
+    onlist: !Onlist
+      file_id: BC1.txt
+      filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt
+      filetype: txt
+      filesize: 0
+      url: ''
+      urltype: local
+      md5: f9198609b966aa1925be967647f18887
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: L1
+    region_type: linker
+    name: L1
+    sequence_type: random
+    sequence: XXXXXXXXXX
+    min_len: 10
+    max_len: 10
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: BC2
+    region_type: barcode
+    name: BC2
+    sequence_type: onlist
+    sequence: NNNNNNNN
+    min_len: 8
+    max_len: 8
+    onlist: !Onlist
+      file_id: BC2-3.txt
+      filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt
+      filetype: txt
+      filesize: 0
+      url: ''
+      urltype: local
+      md5: 204cd21281e9b8851ca055c103c4756a
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: L2
+    region_type: linker
+    name: L2
+    sequence_type: random
+    sequence: XXXXXXXXXX
+    min_len: 10
+    max_len: 10
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: BC3
+    region_type: barcode
+    name: BC3
+    sequence_type: onlist
+    sequence: NNNNNNNN
+    min_len: 8
+    max_len: 8
+    onlist: !Onlist
+      file_id: BC2-3.txt
+      filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt
+      filetype: txt
+      filesize: 0
+      url: ''
+      urltype: local
+      md5: 204cd21281e9b8851ca055c103c4756a
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: polyN
+    region_type: named
+    name: polyN
+    sequence_type: fixed
+    sequence: NNNNNNNNNN
+    min_len: 10
+    max_len: 10
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: R2
+    region_type: truseq_read2
+    name: R2
+    sequence_type: fixed
+    sequence: AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC
+    min_len: 34
+    max_len: 34
+    onlist: null
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: I7
+    region_type: index7
+    name: I7
+    sequence_type: onlist
+    sequence: NNNNNNNN
+    min_len: 8
+    max_len: 8
+    onlist: !Onlist
+      file_id: i7_whitelist.txt
+      filename: /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/i7_whitelist.txt
+      filetype: txt
+      filesize: 0
+      url: ''
+      urltype: local
+      md5: 774eecb6d92214b335f50182f5480af4
+    regions: null
+  - !Region
+    parent_id: rna
+    region_id: P7
+    region_type: illumina_p7
+    name: P7
+    sequence_type: fixed
+    sequence: ''
+    min_len: 0
+    max_len: 0
+    onlist: null
+    regions: null
+

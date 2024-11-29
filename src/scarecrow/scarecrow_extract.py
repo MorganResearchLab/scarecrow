@@ -105,14 +105,14 @@ def region_indices(spec: Assay, fastqs):
     for fastq in fastqs:
         index = get_index_by_primer(spec, "rna", fastq)
         indices.append(index)
-    
+
     for index in indices:
         for file, regions in index.items():
             if file in fastqs:
-                print(f"\033[34m\n{file}\033[0m")
+                print(f"\033[34m\n{file}\033[0m")                
                 for region in regions:
-                    print(f"\t{region.region_id}: {region.start}-{region.stop}")        
-    
+                    print(f"\t{region.region_id}: {region.start}-{region.stop}") 
+
     return indices
 
 
