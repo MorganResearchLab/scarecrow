@@ -1,28 +1,45 @@
 import gzip
+import os
 from Bio.Seq import Seq
 from collections import defaultdict
 from argparse import RawTextHelpFormatter
+
+def open_file(filename, mode='rt'):
+    """
+    Open file with support for both regular and gzipped files.
+    
+    Args:
+        filename (str): Path to the file
+        mode (str, optional): File open mode. Defaults to 'rt' (read text)
+    
+    Returns:
+        file object: Opened file handle
+    """
+    if filename.endswith('.gz'):
+        return gzip.open(filename, mode)
+    else:
+        return open(filename, mode)
 
 def parser_barcode_check(parser):
     subparser = parser.add_parser(
         "barcode_check",
         description="""
-Check barcode whitelist against a fastq file and return counts of matched barcode sequences and their start position
-
-Examples:
-scarecrow check_barcodes barcodes.txt R1.fastq.gz barcode_counts.txt
----
-""",
+        Check barcode whitelist against a fastq or fastq.gz file and return counts of matched barcode sequences and their start position
+        Examples:
+        scarecrow check_barcodes barcodes.txt R1.fastq.gz barcode_counts.txt
+        scarecrow check_barcodes barcodes.txt R1.fastq barcode_counts.txt
+        ---
+        """,
         help="Check barcodes",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument("barcodes", help="Text file list of barcodes (one per line)")
-    subparser.add_argument("fastq", help="A single FASTQ files")
+    subparser.add_argument("fastq", help="A single FASTQ file (can be .fastq or .fastq.gz)")
     subparser.add_argument("counts", help="Output file for barcode counts")
     return subparser
 
 def validate_barcode_check_args(parser, args):
-    run_barcode_check(barcode_file = args.barcodes, fastq_file = args.fastq, counts_file = args.counts)
+    run_barcode_check(barcode_file=args.barcodes, fastq_file=args.fastq, counts_file=args.counts)
 
 def run_barcode_check(barcode_file, fastq_file, counts_file):
     # Load barcodes
@@ -32,7 +49,6 @@ def run_barcode_check(barcode_file, fastq_file, counts_file):
     # Save results
     save_results(barcode_data, counts_file)
     print(f"Results saved to {counts_file}")
-
 
 def load_barcodes(barcode_file):
     """
@@ -50,7 +66,7 @@ def count_barcodes(fastq_file, barcodes):
     barcode_data = defaultdict(lambda: {"direct": 0, "reverse": 0, "positions": []})
     reverse_complements = {barcode: str(Seq(barcode).reverse_complement()) for barcode in barcodes}
     
-    with gzip.open(fastq_file, 'rt') as f:
+    with open_file(fastq_file) as f:
         for i, line in enumerate(f):
             # Process only sequence lines (2nd line in every 4-line FASTQ entry)
             if i % 4 == 1:
@@ -62,7 +78,7 @@ def count_barcodes(fastq_file, barcodes):
                         barcode_data[barcode]["direct"] += 1
                         barcode_data[barcode]["positions"].append(f"F:{pos}")
                         pos = sequence.find(barcode, pos + 1)
-
+                    
                     # Check reverse complement
                     rev_barcode = reverse_complements[barcode]
                     pos = sequence.find(rev_barcode)
@@ -70,7 +86,7 @@ def count_barcodes(fastq_file, barcodes):
                         barcode_data[barcode]["reverse"] += 1
                         barcode_data[barcode]["positions"].append(f"R:{pos}")
                         pos = sequence.find(rev_barcode, pos + 1)
-
+    
     return barcode_data
 
 def save_results(barcode_data, output_file):
@@ -81,13 +97,13 @@ def save_results(barcode_data, output_file):
         f.write("Barcode\tCount\tDirection\tPositions\n")
         for barcode, data in barcode_data.items():
             total_count = data["direct"] + data["reverse"]
+            
             if data["direct"] > data["reverse"]:
                 direction = "forward"
             elif data["reverse"] > data["direct"]:
                 direction = "reverse complement"
             else:
-                direction = "both"  # In case counts are equal
+                direction = "both" # In case counts are equal
+            
             positions = ",".join(data["positions"]) if data["positions"] else "None"
             f.write(f"{barcode}\t{total_count}\t{direction}\t{positions}\n")
-
-

@@ -1,4 +1,3 @@
-sequence
 AACGTGAT
 AAACATCG
 ATGCCTAA

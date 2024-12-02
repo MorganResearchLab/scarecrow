@@ -9,6 +9,7 @@ from seqspec.utils import load_spec
 from seqspec.seqspec_print import run_seqspec_print
 from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
+from scarecrow.read_fastqs import parse_barcode_arguments
 from scarecrow.read_fastqs import process_paired_fastq_batches
 
 def parser_extract(parser):
@@ -17,8 +18,11 @@ def parser_extract(parser):
         description="""
 Extract cDNA sequence from fastq files
 
-Examples:
+Example extracting sequence elements using regions from spec.yaml:
 scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz -o ~/path/to/output -r UMI Round_1_BC Round_2_BC Round_3_BC
+
+Example identifying barcode elements using whitelists to help with debugging (results recorded to log file):
+scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt BC2:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt BC3:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt
 ---
 """,
         help="Extract cDNA from fastqs",
@@ -62,14 +66,20 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz -o ~/path/to/output -r UMI R
         type=int,
         default=4,
     )
+    subparser.add_argument(
+        "--barcodes",
+        metavar="barcodes",
+        nargs='+', 
+        help='Barcode files in format BC1:path/to/barcodes1.txt BC2:path/to/barcodes2.txt',
+    )
     return subparser
 
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
                 outdir = args.o, batches = args.b, regions = args.r,
-                threads = args.t, max_batches = args.m)
+                threads = args.t, max_batches = args.m, barcodes = args.barcodes)
 
-def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
+def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads, barcodes):
     """
     Employs seqspec functions to (1) output library spec and (2) identify elements contained in sequencing reads.
     The identified elements are then extracted from paired-end fastq files in batches and written to file.
@@ -85,9 +95,13 @@ def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads):
     # Run seqspec get_index_by_primer to identify library elements contained in reads
     elements = region_indices(spec, fastqs)
 
+    # Load barcodes
+    expected_barcodes = parse_barcode_arguments(barcodes)
+
     # Extract elements from sequencing reads
     process_paired_fastq_batches(elements, batch_size = batches, max_batches = max_batches,
-                                 num_workers = threads, region_ids = regions, output_file = outdir)
+                                 num_workers = threads, region_ids = regions, output_file = outdir,
+                                 barcodes = expected_barcodes)
 
     # Return kallisto bus -x string, equivalent to:
     # seqspec index -t kb -m rna -r {R1.fastq.gz},{R2.fastq.gz} {yaml}
