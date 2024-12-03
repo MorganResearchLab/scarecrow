@@ -14,7 +14,7 @@ import sys
 import argparse
 import warnings
 from .scarecrow_extract import parser_extract, validate_extract_args
-from .barcode_check import parser_barcode_check, validate_barcode_check_args
+from .scarecrow_barcodes import parser_barcodes, validate_barcodes_args
 
 
 def main():
@@ -47,7 +47,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup the arguments for all subcommands
     command_to_parser = {
         "extract": parser_extract(subparsers),
-        "check_barcodes": parser_barcode_check(subparsers)
+        "barcodes": parser_barcodes(subparsers)
     }
     
     # Show help when no arguments are given
@@ -68,7 +68,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup validator and runner for all subcommands (validate and run if valid)
     COMMAND_TO_FUNCTION = {
         "extract": validate_extract_args,
-        "barcode_check": validate_barcode_check_args
+        "barcodes": validate_barcodes_args
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 

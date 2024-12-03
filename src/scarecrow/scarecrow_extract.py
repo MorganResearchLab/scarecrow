@@ -9,8 +9,7 @@ from seqspec.utils import load_spec
 from seqspec.seqspec_print import run_seqspec_print
 from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
-from scarecrow.read_fastqs import parse_barcode_arguments
-from scarecrow.read_fastqs import process_paired_fastq_batches
+from scarecrow.tools import process_paired_fastq_batches
 
 def parser_extract(parser):
     subparser = parser.add_parser(
@@ -33,9 +32,9 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
     subparser.add_argument(
         "-o",
         metavar="out",
-        help=("Path to output cDNA fastq files"),
+        help=("Path to output cDNA fastq file"),
         type=str,
-        default=None,
+        default="./cDNA.fq",
     )
     subparser.add_argument(
         "-r",
@@ -76,10 +75,10 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
 
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
-                outdir = args.o, batches = args.b, regions = args.r,
+                output_file = args.o, batches = args.b, regions = args.r,
                 threads = args.t, max_batches = args.m, barcodes = args.barcodes)
 
-def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads, barcodes):
+def run_extract(yaml, fastqs, output_file, batches, max_batches, regions, threads, barcodes):
     """
     Employs seqspec functions to (1) output library spec and (2) identify elements contained in sequencing reads.
     The identified elements are then extracted from paired-end fastq files in batches and written to file.
@@ -95,13 +94,14 @@ def run_extract(yaml, fastqs, outdir, batches, max_batches, regions, threads, ba
     # Run seqspec get_index_by_primer to identify library elements contained in reads
     elements = region_indices(spec, fastqs)
 
-    # Load barcodes
-    expected_barcodes = parse_barcode_arguments(barcodes)
+    # Open file for writing output
+    if output_file:
+        f = open(f"{output_file}", 'w')
 
     # Extract elements from sequencing reads
     process_paired_fastq_batches(elements, batch_size = batches, max_batches = max_batches,
-                                 num_workers = threads, region_ids = regions, output_file = outdir,
-                                 barcodes = expected_barcodes)
+                                 num_workers = threads, region_ids = regions, output_handler = f,
+                                 barcodes = None)
 
     # Return kallisto bus -x string, equivalent to:
     # seqspec index -t kb -m rna -r {R1.fastq.gz},{R2.fastq.gz} {yaml}

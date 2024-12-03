@@ -7,7 +7,7 @@
 from scarecrow.fastq_logging import logger, log_errors
 import pysam
 import os
-from typing import List, Dict, Generator, Optional, Set
+from typing import List, Dict, Generator, Optional, Set, Union
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import resource
@@ -27,77 +27,83 @@ def get_memory_usage() -> float:
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
-@log_errors
-def extract_region_details(
-    entry: pysam.FastxRecord, 
-    regions: List[RegionCoordinate],
-    rev: bool = False
-) -> List[Dict]:
+def reverse_complement(seq):
     """
-    Extract region-specific details from a single FASTQ entry.
+    Short function to reverse complement a sequence
+    """
+    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    return ''.join(complement[base] for base in reversed(seq))
+
+@log_errors
+def read_barcode_file(file_path):
+    """
+    Read barcode sequences from a text file.
     
     Args:
-        entry (pysam.FastxRecord): Input sequencing read
-        regions (List[RegionCoordinate]): Regions to extract
+        file_path (str): Path to the barcode file
     
     Returns:
-        List[Dict]: Detailed region information
-    
-    Raises:
-        ValueError: If region coordinates are invalid
+        List[str]: List of unique barcode sequences
     """
     try:
-        full_sequence = entry.sequence
-        full_qualities = entry.quality
-        logger.info(f"{entry.name}: {full_sequence}")
-        # If read2 we need to reverse the sequence so that the RegionCoordinate element positions
-        # are reading from the correct end. After extracting the sequence, it may be necessary to
-        # reverse the extracted region_sequence so that it matches the expected barcode sequence.
-        if rev:
-            full_sequence = full_sequence[::-1]
-            full_qualities = full_qualities[::-1]
+        with open(file_path, 'r') as f:
+            # Read lines, strip whitespace, remove empty lines
+            barcodes = [line.strip() for line in f if line.strip()]
         
-        region_details = []
-        for region_coord in regions:
-            # Validate region coordinates
-            if region_coord.start < 0 or region_coord.stop > len(full_sequence):
-                logger.warning(f"Invalid region coordinates for {region_coord.name}")
-                continue
-            
-            region_sequence = full_sequence[region_coord.start:region_coord.stop]
-            region_qualities = full_qualities[region_coord.start:region_coord.stop] if full_qualities else ''
-            
-            logger.info(f"Region {region_coord.name}:{region_coord.start}-{region_coord.stop}: {region_sequence}")
-            
-            # Optional length validation
-            #if (region_coord.min_len and len(region_sequence) < region_coord.min_len) or \
-            #   (region_coord.max_len and len(region_sequence) > region_coord.max_len):
-            #    logger.warning(f"Region {region_coord.name} fails length constraints")
-            
-            region_details.append({
-                'region_id': region_coord.region_id,
-                'region_type': region_coord.region_type,
-                'name': region_coord.name,
-                'sequence_type': region_coord.sequence_type,
-                'sequence': region_sequence,
-                'qualities': region_qualities,
-                'start': region_coord.start,
-                'stop': region_coord.stop,
-                'min_len': region_coord.min_len,
-                'max_len': region_coord.max_len
-            })
+        # Remove duplicates while preserving order
+        unique_barcodes = list(dict.fromkeys(barcodes))
         
-        return region_details
+        if not unique_barcodes:
+            logger.warning(f"No barcodes found in file: {file_path}")
+        
+        return unique_barcodes
     
+    except FileNotFoundError:
+        logger.error(f"Barcode file not found: {file_path}")
+        return []
     except Exception as e:
-        logger.error(f"Error extracting region details: {e}")
-        raise
+        logger.error(f"Error reading barcode file {file_path}: {e}")
+        return []
+
+@log_errors
+def parse_barcode_arguments(barcode_args):
+    """
+    Parse barcode arguments from command line.
+    
+    Args:
+        barcode_args (List[str]): List of barcode arguments in format 'KEY:FILE'
+    
+    Returns:
+        Dict[str, List[str]]: Dictionary of barcodes with keys as region identifiers
+    """
+    expected_barcodes = {}
+    
+    for arg in barcode_args:
+        try:
+            # Split the argument into key and file path
+            key, file_path = arg.split(':')
+            
+            # Read barcodes from the file
+            barcodes = read_barcode_file(file_path)
+            
+            # Store barcodes in the dictionary
+            if barcodes:
+                expected_barcodes[key] = barcodes
+                logger.info(f"Loaded {len(barcodes)} barcodes for {key} from {file_path}")
+            else:
+                logger.warning(f"No barcodes loaded for {key} from {file_path}")
+        
+        except ValueError:
+            logger.error(f"Invalid barcode argument format: {arg}. Use 'KEY:FILE'")
+    
+    return expected_barcodes
 
 @log_errors
 def batch_process_paired_fastq(
     fastq_info: List[Dict], 
     batch_size: int = 10000, 
-    max_batches: Optional[int] = None
+    max_batches: Optional[int] = None,
+    barcodes: List[Dict] = None,
 ) -> Generator[List[Dict], None, None]:
     """
     Process paired-end FASTQ files in memory-efficient batches.
@@ -139,8 +145,8 @@ def batch_process_paired_fastq(
                     break
                 
                 # Extract region details
-                r1_region_details = extract_region_details(r1_entry, r1_regions, rev = False)
-                r2_region_details = extract_region_details(r2_entry, r2_regions, rev = True)
+                r1_region_details = extract_region_details(r1_entry, r1_regions, rev = False, expected_barcodes = barcodes)
+                r2_region_details = extract_region_details(r2_entry, r2_regions, rev = True, expected_barcodes = barcodes)
                 
                 # Combine pair information
                 read_pair_info = {
@@ -186,7 +192,8 @@ def process_paired_fastq_batches(
     max_batches: Optional[int] = None,
     output_file: Optional[str] = None,
     region_ids: Optional[List[str]] = None,
-    num_workers: int = 4
+    num_workers: int = 4,
+    barcodes: Union[Dict[str, List[str]], List[str], None] = None,
 ) -> Dict[str, int]:
     """
     Process paired-end FASTQ files with parallel and memory-efficient processing.
@@ -206,6 +213,10 @@ def process_paired_fastq_batches(
     total_read_pairs = 0
     not_found_regions = set()
 
+    logger.info(f"Expected barcodes")
+    for barcode in barcodes:
+        logger.info(f"{barcode}: {barcodes[barcode]}")
+
     try:
         # Parallel processing setup
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -213,11 +224,15 @@ def process_paired_fastq_batches(
             batches = list(batch_process_paired_fastq(
                 fastq_info, 
                 batch_size=batch_size, 
-                max_batches=max_batches
+                max_batches=max_batches,
+                barcodes=barcodes
             ))
             
-            print(f"\033[32m\nProcessing cDNA and writing to {output_file}\033[0m")
-            output_handler = open(output_file, 'w') if output_file else None
+            if output_file:
+                print(f"\033[32m\nProcessing cDNA and writing to {output_file}\033[0m")
+                output_handler = open(output_file, 'w') 
+            else:
+                output_handler = None
             
             # Progress tracking
             with tqdm(total=len(batches), desc="Processing Batches") as pbar:
@@ -241,9 +256,9 @@ def process_paired_fastq_batches(
                             barcode_counts[barcode_key] = barcode_counts.get(barcode_key, 0) + 1
                             
                             # Optional file writing
-                            if output_file:
+                            if output_file and barcodes is None:
                                 write_output(read_pair, extracted_sequences, region_ids, output_handler)
-                        
+
                         except Exception as e:
                             logger.error(f"Error processing read pair: {e}")
                     
@@ -251,12 +266,13 @@ def process_paired_fastq_batches(
                     pbar.update(1)
         
         # Report and visualization
-        report_processing_results(
-            total_read_pairs, 
-            not_found_regions, 
-            barcode_counts, 
-            output_file
-        )
+        if barcodes is None:
+            report_processing_results(
+                total_read_pairs, 
+                not_found_regions, 
+                barcode_counts, 
+                output_file
+            )
 
     except Exception as e:
         logger.error(f"Processing failed: {e}")
@@ -478,3 +494,174 @@ def create_binned_ascii_histogram(counts, num_bins=10):
     print(f"\n\033[32mTotal unique barcodes\033[0m: {len(counts)}")
     print(f"\033[32mMin count\033[0m: {min_count}")
     print(f"\033[32mMax count\033[0m: {max_count}")            
+
+@log_errors
+def find_barcode_positions(sequence, barcodes, max_mismatches=1):
+    """
+    Find all positions of barcodes in a sequence with tolerance for mismatches.
+    
+    Args:
+        sequence (str): The input DNA sequence to search
+        barcodes (List[str]): List of expected barcode sequences
+        max_mismatches (int): Maximum allowed mismatches when matching barcodes
+    
+    Returns:
+        List[Dict]: A list of dictionaries with details of all barcode matches
+    """
+    def hamming_distance(s1, s2):
+        """Calculate Hamming distance between two strings."""
+        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+    
+    # List to store all barcode matches
+    barcode_matches = []
+    
+    # Iterate through all possible start positions
+    for start in range(len(sequence)):
+        for barcode in barcodes:
+            # Check all possible end positions for this barcode
+            for end in range(start + len(barcode), len(sequence) + 1):
+                candidate = sequence[start:end]
+                
+                # Check if candidate matches barcode within max mismatches
+                if len(candidate) == len(barcode):
+                    mismatches = hamming_distance(candidate, barcode)
+                    if mismatches <= max_mismatches:
+                        match_details = {
+                            'barcode': barcode,
+                            'sequence': candidate,
+                            'start': start,
+                            'end': end,
+                            'mismatches': mismatches
+                        }
+                        barcode_matches.append(match_details)
+    
+    # Sort matches by start position
+    barcode_matches.sort(key=lambda x: x['start'])
+    
+    return barcode_matches
+
+@log_errors
+def extract_region_details(
+    entry: pysam.FastxRecord,
+    regions: Optional[List[RegionCoordinate]] = None,
+    expected_barcodes: Optional[Union[Dict[str, List[str]], List[str]]] = None,
+    rev: bool = False
+) -> List[Dict]:
+    """
+    Extract either specific regions or find barcodes in a sequence.
+    
+    Args:
+        entry (pysam.FastxRecord): Input sequencing read
+        regions (Optional[List[RegionCoordinate]]): Regions to extract coordinates
+        expected_barcodes (Optional[Union[Dict[str, List[str]], List[str]]]): 
+            Barcodes to cross-reference
+        rev (bool): Whether to reverse the sequence
+    
+    Returns:
+        List[Dict]: Extracted region or barcode details
+    
+    Raises:
+        ValueError: If neither regions nor barcodes are provided
+    """
+    try:
+        # Validate input
+        if regions is None and expected_barcodes is None:
+            raise ValueError("Must provide either regions or barcodes for extraction")
+        
+        # Prepare sequence
+        full_sequence = entry.sequence
+        full_qualities = entry.quality
+        
+        # Extract by regions if provided
+        if regions is not None and expected_barcodes is None:
+            region_details = []
+            for region_coord in regions:
+                # Validate region coordinates
+                if region_coord.start < 0 or region_coord.stop > len(full_sequence):
+                    logger.warning(f"Invalid region coordinates for {region_coord.name}")
+                    continue
+                # Reverse sequence to align with region positions from seqspec
+                if rev:
+                    full_sequence = full_sequence[::-1]
+                    full_qualities = full_qualities[::-1]                       
+                region_sequence = full_sequence[region_coord.start:region_coord.stop]
+                region_qualities = full_qualities[region_coord.start:region_coord.stop] if full_qualities else ''
+                
+                region_details.append({
+                    'region_id': region_coord.region_id,
+                    'region_type': region_coord.region_type,
+                    'name': region_coord.name,
+                    'sequence_type': region_coord.sequence_type,
+                    'sequence': region_sequence,
+                    'qualities': region_qualities,
+                    'start': region_coord.start,
+                    'stop': region_coord.stop,
+                    'min_len': region_coord.min_len,
+                    'max_len': region_coord.max_len
+                })
+            
+            return region_details
+        
+        # Find barcodes if regions are not provided
+        if expected_barcodes is not None:
+            # Prepare variables to track dictionary keys
+            barcode_dict_keys = {}
+            if isinstance(expected_barcodes, dict):
+                # Create a reverse mapping of barcodes to their original dictionary keys
+                barcode_dict_keys = {}
+                for key, barcode_list in expected_barcodes.items():
+                    for barcode in barcode_list:
+                        if barcode not in barcode_dict_keys:
+                            barcode_dict_keys[barcode] = []
+                        barcode_dict_keys[barcode].append(key)
+                
+                # Flatten barcodes for searching
+                barcodes_to_search = list(barcode_dict_keys.keys())
+            elif isinstance(expected_barcodes, list):
+                barcodes_to_search = expected_barcodes
+            else:
+                raise ValueError(f"Unexpected barcode type: {type(expected_barcodes)}")
+            
+            # Paired-end reads are both 5' to 3', but on opposite strands (Read1 =  forward, Read2 = reverse)
+            # 5' ---Read1--->         <---Read2--- 5'
+            # So read 2 needs reverse complement as barcodes are on forward strand
+            if rev:
+                full_sequence = reverse_complement(full_sequence)
+
+            # Find barcode positions
+            barcode_matches = find_barcode_positions(full_sequence, barcodes_to_search)
+
+            logger.info(f">{entry.name} {entry.comment}")
+            logger.info(f"{full_sequence}")
+            
+            # Prepare barcode match details
+            barcode_details = []
+            for match in barcode_matches:
+                barcode_detail = {
+                    'barcode': match['barcode'],
+                    'sequence': match['sequence'],
+                    'start': match['start'],
+                    'end': match['end'],
+                    'mismatches': match['mismatches']
+                }
+                
+                # Add all matching dictionary keys if available
+                if barcode_dict_keys and match['barcode'] in barcode_dict_keys:
+                    barcode_detail['dict_keys'] = barcode_dict_keys[match['barcode']]
+                
+                barcode_details.append(barcode_detail)
+                
+                logger.info(f"...{barcode_detail['dict_keys']} ({match['barcode']}) hit: {match['sequence']}, "
+                        f"Start: {match['start']}, "
+                        f"End: {match['end']}, "
+                        f"Mismatches: {match['mismatches']}")
+
+            
+            return barcode_details
+        
+        # This should never be reached due to initial validation
+        raise ValueError("No extraction method selected")
+    
+    except Exception as e:
+        logger.error(f"Error in extract_region_details: {e}")
+        raise
