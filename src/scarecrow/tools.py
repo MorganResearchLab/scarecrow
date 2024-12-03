@@ -32,7 +32,7 @@ def reverse_complement(seq):
     """
     Short function to reverse complement a sequence
     """
-    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C' 'N': 'N'}
     return ''.join(complement[base] for base in reversed(seq))
 
 
