@@ -86,7 +86,7 @@ def process_paired_fastq_batches(
     try:
         # Parallel processing setup
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Prepare batches
+            # Prepare batches (this is outside the progress bar but takes a long time on a large fastq file)
             batches = list(batch_process_paired_fastq(
                 fastq_info, 
                 batch_size = batch_size, 

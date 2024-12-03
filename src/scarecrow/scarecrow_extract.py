@@ -10,6 +10,7 @@ from seqspec.seqspec_print import run_seqspec_print
 from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
 from scarecrow.tools import process_paired_fastq_batches
+from scarecrow.fastq_logging import logger, log_errors, setup_logger
 
 def parser_extract(parser):
     subparser = parser.add_parser(
@@ -71,11 +72,18 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
         nargs='+', 
         help='Barcode files in format BC1:path/to/barcodes1.txt BC2:path/to/barcodes2.txt',
     )
+    subparser.add_argument(
+        "-l",
+        metavar="logfile",
+        help=("File to write log to"),
+        type=str,
+        default="./scarecrow.log",
+    )
     return subparser
 
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
-                output_file = args.o, batches = args.b, regions = args.r,
+                output_file = args.o, batches = args.b, regions = args.r, logfile = args.l,
                 threads = args.t, max_batches = args.m, barcodes = args.barcodes)
 
 def run_extract(yaml, fastqs, output_file, batches, max_batches, regions, threads, barcodes):
@@ -84,6 +92,9 @@ def run_extract(yaml, fastqs, output_file, batches, max_batches, regions, thread
     The identified elements are then extracted from paired-end fastq files in batches and written to file.
     """
     
+    # Global logger setup
+    logger = setup_logger(logfile)
+
     # Run seqspec print to get format
     print(f"\033[32m\nseqspec print \033[34m{yaml}\033[0m\n")
     run_seqspec_print(yaml, fmt="library-ascii", o = None)

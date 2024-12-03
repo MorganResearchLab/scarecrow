@@ -16,7 +16,6 @@ import warnings
 from .scarecrow_extract import parser_extract, validate_extract_args
 from .scarecrow_barcodes import parser_barcodes, validate_barcodes_args
 
-
 def main():
     warnings.simplefilter("default", DeprecationWarning)
     

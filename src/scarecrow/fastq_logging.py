@@ -2,8 +2,7 @@ import logging
 import os
 import sys
 
-def setup_logger(
-    log_file: str = 'scarecrow.log', 
+def setup_logger(log_file: str = 'scarecrow.log',
     log_level: int = logging.INFO
 ) -> logging.Logger:
     """
@@ -57,9 +56,6 @@ def setup_logger(
 
     return logger
 
-# Global logger setup
-logger = setup_logger()
-
 # Example usage and error handling decorator
 def log_errors(func):
     """
@@ -72,6 +68,10 @@ def log_errors(func):
             logger.error(f"Error in {func.__name__}: {e}", exc_info=True)
             raise
     return wrapper
+
+
+# Global
+logger = setup_logger()
 
 # Demonstration of logging usage
 @log_errors

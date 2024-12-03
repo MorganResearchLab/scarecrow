@@ -5,7 +5,7 @@
 """
 
 from seqspec.utils import load_spec
-from scarecrow.fastq_logging import logger, log_errors
+from scarecrow.fastq_logging import logger, log_errors, setup_logger
 from argparse import RawTextHelpFormatter
 from scarecrow.tools import process_paired_fastq_batches, region_indices
 
@@ -57,19 +57,28 @@ scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --bar
         help=("Number of processing threads [4]"),
         type=int,
         default=4,
-    )    
+    )
+    subparser.add_argument(
+        "-l",
+        metavar="logfile",
+        help=("File to write log to"),
+        type=str,
+        default="./scarecrow.log",
+    )
     return subparser
 
 def validate_barcodes_args(parser, args):
     run_barcodes(yaml = args.yaml, fastqs = [f for f in args.fastqs],
-                 barcodes = args.barcodes, output_file = args.o,
+                 barcodes = args.barcodes, output_file = args.o, logfile = args.l,
                  batches = args.b, threads = args.t, max_batches = args.m)
 
-def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, threads):
+def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, threads, logfile):
     """
     Search for barcodes in fastq reads, write summary to file.
     """
-    
+    # Global logger setup
+    logger = setup_logger(logfile)
+
     # import seqspec.yaml
     spec = load_spec(yaml)
 
