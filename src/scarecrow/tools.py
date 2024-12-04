@@ -99,7 +99,7 @@ def process_paired_fastq_batches(
 
 
             # Progress tracking
-            with tqdm(total=len(batches), desc="Processing Batches") as pbar:
+            with tqdm(total=len(batches), desc="Processing batches") as pbar:
                 for batch in batches:
                     # Process batch
                     for read_pair in batch:
@@ -324,7 +324,7 @@ def batch_process_paired_fastq(
                         # Optional batch limit
                         if max_batches and batch_count >= max_batches:
                             break
-                                                            
+
                 # Yield final batch
                 if batch:
                     yield batch
@@ -585,4 +585,4 @@ def write_barcodes_CSV(read_pair: List, output_handler):
             start = sub_barcode['start']
             end = sub_barcode['end']
             mm = sub_barcode['mismatches']
-            output_handler.write(f"{read_key},{read},{bc},{barcode},{start},{end},{mm}\n")
+            output_handler.write(f"{read_key}\t{read}\t{bc}\t{barcode}\t{start}\t{end}\t{mm}\n")
