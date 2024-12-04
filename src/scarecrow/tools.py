@@ -13,6 +13,7 @@ from typing import List, Dict, Optional, Generator, Set, Union
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 import pysam
+import gzip
 
 class FastqProcessingError(Exception):
     """Custom exception for FASTQ processing errors."""
@@ -27,7 +28,11 @@ def get_memory_usage() -> float:
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
-
+def count_fastq_reads(filename):
+    opener = gzip.open if filename.endswith('.gz') else open
+    with opener(filename, 'rt') as f:
+        return sum(1 for line in f) // 4
+    
 def reverse_complement(seq):
     """
     Short function to reverse complement a sequence
@@ -87,12 +92,7 @@ def process_paired_fastq_batches(
         # Parallel processing setup
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             # Prepare batches (this is outside the progress bar but takes a long time on a large fastq file)
-            batches = list(batch_process_paired_fastq(
-                fastq_info, 
-                batch_size = batch_size, 
-                max_batches = max_batches,
-                barcodes = barcodes
-            ))
+            batches = list(batch_process_paired_fastq(fastq_info, batch_size = batch_size, max_batches = max_batches, barcodes = barcodes))
             
             # Open output file for writing
             #output_handler = open(output_file, 'w') if output_file else None
@@ -261,6 +261,7 @@ def batch_process_paired_fastq(
     logger.info(f"Starting batch processing. Initial memory: {get_memory_usage():.2f} MB")
     
     try:
+
         # Unpack FASTQ file information
         r1_file_path = list(fastq_info[0].keys())[0]
         r1_regions = fastq_info[0][r1_file_path]
@@ -269,59 +270,66 @@ def batch_process_paired_fastq(
         r2_regions = fastq_info[1][r2_file_path]
         r2_strand = fastq_info[1]['strand']
         
-        with pysam.FastxFile(r1_file_path) as r1_fastq, \
-             pysam.FastxFile(r2_file_path) as r2_fastq:
-            
-            batch = []
-            batch_count = 0
-            
-            while True:
-                try:
-                    r1_entry = next(r1_fastq)
-                    r2_entry = next(r2_fastq)
-                except StopIteration:
-                    break
+        reads = count_fastq_reads(r1_file_path)
+        with tqdm(total = reads, desc = "Preparing batches") as pbar:
+
+            with pysam.FastxFile(r1_file_path) as r1_fastq, \
+                pysam.FastxFile(r2_file_path) as r2_fastq:
                 
-                # Extract region details if barcodes not provided
-                if barcodes:
-                    r1_region_details = extract_barcodes(r1_entry, rev = False, expected_barcodes = barcodes)
-                    r2_region_details = extract_barcodes(r2_entry, rev = True, expected_barcodes = barcodes)
-                else:
-                    r1_region_details = extract_region_seq(r1_entry, r1_regions, rev = False)
-                    r2_region_details = extract_region_seq(r2_entry, r2_regions, rev = True)
+                batch = []
+                batch_count = 0
                 
-                # Combine pair information
-                read_pair_info = {
-                    'read1': {
-                        'file': os.path.basename(r1_file_path),
-                        'strand': r1_strand,
-                        'header': r1_entry.name,
-                        'regions': r1_region_details
-                    },
-                    'read2': {
-                        'file': os.path.basename(r2_file_path),
-                        'strand': r2_strand,
-                        'header': r2_entry.name,
-                        'regions': r2_region_details
-                    }
-                }
-                
-                batch.append(read_pair_info)
-                
-                # Yield batch when full
-                if len(batch) >= batch_size:
-                    logger.info(f"Batch {batch_count + 1} memory: {get_memory_usage():.2f} MB")
-                    yield batch
-                    batch = []
-                    batch_count += 1
-                    
-                    # Optional batch limit
-                    if max_batches and batch_count >= max_batches:
+                while True:
+                    try:
+                        r1_entry = next(r1_fastq)
+                        r2_entry = next(r2_fastq)
+                    except StopIteration:
                         break
-            
-            # Yield final batch
-            if batch:
-                yield batch
+                    
+                    # Extract region details if barcodes not provided
+                    if barcodes:
+                        r1_region_details = extract_barcodes(r1_entry, rev = False, expected_barcodes = barcodes)
+                        r2_region_details = extract_barcodes(r2_entry, rev = True, expected_barcodes = barcodes)
+                    else:
+                        r1_region_details = extract_region_seq(r1_entry, r1_regions, rev = False)
+                        r2_region_details = extract_region_seq(r2_entry, r2_regions, rev = True)
+                    
+                    # Combine pair information
+                    read_pair_info = {
+                        'read1': {
+                            'file': os.path.basename(r1_file_path),
+                            'strand': r1_strand,
+                            'header': r1_entry.name,
+                            'regions': r1_region_details
+                        },
+                        'read2': {
+                            'file': os.path.basename(r2_file_path),
+                            'strand': r2_strand,
+                            'header': r2_entry.name,
+                            'regions': r2_region_details
+                        }
+                    }
+                    
+                    batch.append(read_pair_info)
+
+                    pbar.update(1)
+                    
+                    # Yield batch when full
+                    if len(batch) >= batch_size:
+                        logger.info(f"Batch {batch_count + 1} memory: {get_memory_usage():.2f} MB")
+                        yield batch
+                        batch = []
+                        batch_count += 1
+                        
+                        # Optional batch limit
+                        if max_batches and batch_count >= max_batches:
+                            break
+                                                            
+                # Yield final batch
+                if batch:
+                    yield batch
+                
+                
         
     except IOError as e:
         logger.error(f"File reading error: {e}")
