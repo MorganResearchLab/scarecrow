@@ -40,9 +40,9 @@ scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --bar
     subparser.add_argument(
         "-b",
         metavar="batches",
-        help=("Number of read batches to process at a time before writing to file [1000]"),
+        help=("Number of read batches to process at a time before writing to file [10000]"),
         type=int,
-        default=1000,
+        default=10000,
     )
     subparser.add_argument(
         "-m",
@@ -99,7 +99,7 @@ def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, thre
 
     # Extract elements from sequencing reads
     process_paired_fastq_batches(fastq_info = fastq_info, batch_size = batches, max_batches = max_batches,
-                                 num_workers = threads, region_ids = None, output_handler = f,
+                                 num_workers = threads, region_ids = None, target = None, output_handler = f,
                                  barcodes = expected_barcodes)
 
     return 

@@ -69,6 +69,7 @@ def process_paired_fastq_batches(
     region_ids: Optional[List[str]] = None,
     num_workers: int = 4,
     barcodes: Dict = None,
+    target: str = None
 ) -> Dict[str, int]:
     """
     Process paired-end FASTQ files with parallel and memory-efficient processing.
@@ -123,7 +124,7 @@ def process_paired_fastq_batches(
                                 barcode_key = "_".join([str(element) for element in barcode_key])
                                 barcode_counts[barcode_key] = barcode_counts.get(barcode_key, 0) + 1
                                 if output_handler:
-                                    write_cDNA_fastq(read_pair, extracted_sequences, region_ids, output_handler)
+                                    write_cDNA_fastq(read_pair, extracted_sequences, region_ids, target, output_handler)
                             
                             else:
                                 if output_handler:
@@ -538,7 +539,7 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
 
 
 @log_errors
-def write_cDNA_fastq(read_pair: Dict, extracted_sequences: Dict, region_ids: List, output_handler):
+def write_cDNA_fastq(read_pair: Dict, extracted_sequences: Dict, region_ids: List, target: str, output_handler):
     """
     Write processed read pair to output file.
     
@@ -557,8 +558,8 @@ def write_cDNA_fastq(read_pair: Dict, extracted_sequences: Dict, region_ids: Lis
     An issue here is that it is looking for 'cdna' so if the region is labeled cDNA for example it will not find it.
     Solution is to lowercase the region, probably when running region_indices in scarecrow_extract.py
     """
-    cdna_seq = {safe_extract_sequences([read_pair], ['cdna'])['cdna']['sequence']}
-    cdna_qual = {safe_extract_sequences([read_pair], ['cdna'])['cdna']['qualities']}
+    cdna_seq = {safe_extract_sequences([read_pair], [target])[target]['sequence']}
+    cdna_qual = {safe_extract_sequences([read_pair], [target])[target]['qualities']}
     # Write to file
     output_handler.write(f"@{"_".join([str(element) for element in header])}\n")
     output_handler.write(f"{cdna_seq}\n")

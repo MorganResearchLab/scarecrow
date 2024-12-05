@@ -25,55 +25,56 @@ Example identifying barcode elements using whitelists to help with debugging (re
 scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt BC2:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt BC3:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC2-3.txt
 ---
 """,
-        help="Extract cDNA from fastqs",
+        help="Extract sequence element from fastqs",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument("yaml", help="Sequencing specification yaml file")
     subparser.add_argument("fastqs", nargs="+", help="List of FASTQ files")
     subparser.add_argument(
-        "-o",
-        metavar="out",
-        help=("Path to output cDNA fastq file"),
+        "-o", "--out",
+        metavar="out.fastq",
+        help=("Path to output fastq file"),
         type=str,
         default="./cDNA.fq",
     )
     subparser.add_argument(
-        "-r",
+        "-r", "--header_regions",
         metavar="region_id",
-        help=("List of regions for cell barcode"),
+        help=("List of elements to include in sequence header"),
         nargs="*",
         type=str,
         default=[],
     )
     subparser.add_argument(
-        "-b",
-        metavar="batches",
-        help=("Number of read batches to process at a time before writing to file [1000]"),
-        type=int,
-        default=1000,
+        "-t", "--target",
+        metavar="target",
+        help=("Target element to extract sequence of [\"cdna\"]"),
+        type=str,
+        default="cdna",
     )
     subparser.add_argument(
-        "-m",
+        "-b", "--batches",
+        metavar="batches",
+        help=("Number of read batches to process at a time before writing to file [10000]"),
+        type=int,
+        default=10000,
+    )
+    subparser.add_argument(
+        "-x", "--max_batches",
         metavar="max_batches",
         help=("Maximum number of read batches to process"),
         type=int,
         default=None,
     )
     subparser.add_argument(
-        "-t",
+        "-@", "--threads",
         metavar="threads",
         help=("Number of processing threads [4]"),
         type=int,
         default=4,
     )
     subparser.add_argument(
-        "--barcodes",
-        metavar="barcodes",
-        nargs='+', 
-        help='Barcode files in format BC1:path/to/barcodes1.txt BC2:path/to/barcodes2.txt',
-    )
-    subparser.add_argument(
-        "-l",
+        "-l", "--logfile",
         metavar="logfile",
         help=("File to write log to"),
         type=str,
@@ -82,11 +83,11 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
     return subparser
 
 def validate_extract_args(parser, args):
-    run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], 
-                output_file = args.o, batches = args.b, regions = args.r, logfile = args.l,
-                threads = args.t, max_batches = args.m, barcodes = args.barcodes)
+    run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], target = args.target,
+                output_file = args.out, batches = args.batches, regions = args.header_regions, 
+                logfile = args.logfile, threads = args.threads, max_batches = args.max_batches)
 
-def run_extract(yaml, fastqs, output_file, batches, max_batches, regions, threads, barcodes):
+def run_extract(yaml, fastqs, output_file, target, batches, max_batches, regions, threads, logfile):
     """
     Employs seqspec functions to (1) output library spec and (2) identify elements contained in sequencing reads.
     The identified elements are then extracted from paired-end fastq files in batches and written to file.
@@ -112,7 +113,7 @@ def run_extract(yaml, fastqs, output_file, batches, max_batches, regions, thread
     # Extract elements from sequencing reads
     process_paired_fastq_batches(elements, batch_size = batches, max_batches = max_batches,
                                  num_workers = threads, region_ids = regions, output_handler = f,
-                                 barcodes = None)
+                                 barcodes = None, target = target)
 
     # Return kallisto bus -x string, equivalent to:
     # seqspec index -t kb -m rna -r {R1.fastq.gz},{R2.fastq.gz} {yaml}
