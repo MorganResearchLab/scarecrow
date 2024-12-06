@@ -5,7 +5,7 @@
 """
 
 from seqspec.utils import load_spec
-from scarecrow.fastq_logging import logger, log_errors, setup_logger
+from scarecrow.fastq_logging import log_errors, setup_logger, logger
 from argparse import RawTextHelpFormatter
 from scarecrow.tools import process_paired_fastq_batches, region_indices
 
@@ -25,41 +25,41 @@ scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --bar
     subparser.add_argument("yaml", help="Sequencing specification yaml file")
     subparser.add_argument("fastqs", nargs="+", help="List of FASTQ files")
     subparser.add_argument(
-        "--barcodes",
+        "-c", "--barcodes",
         metavar="barcodes",
         nargs='+', 
         help='Barcode files in format BC1:barcodes1.txt BC2:barcodes2.txt',
     )
     subparser.add_argument(
-        "-o",
+        "-o", "--out",
         metavar="out",
-        help=("File to write barcode counts to"),
+        help=("CSV file to write barcode counts to"),
         type=str,
         default="./barcode_counts.csv",
     )
     subparser.add_argument(
-        "-b",
-        metavar="batches",
-        help=("Number of read batches to process at a time before writing to file [10000]"),
+        "-b", "--batch_size",
+        metavar="batch_size",
+        help=("Number of read pairs per batch to process at a time [10000]"),
         type=int,
         default=10000,
     )
     subparser.add_argument(
-        "-m",
+        "-x", "--max_batches",
         metavar="max_batches",
         help=("Maximum number of read batches to process"),
         type=int,
         default=None,
     )
     subparser.add_argument(
-        "-t",
+        "-@", "--threads",
         metavar="threads",
         help=("Number of processing threads [4]"),
         type=int,
         default=4,
     )
     subparser.add_argument(
-        "-l",
+        "-l", "--logfile",
         metavar="logfile",
         help=("File to write log to"),
         type=str,
@@ -69,9 +69,10 @@ scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --bar
 
 def validate_barcodes_args(parser, args):
     run_barcodes(yaml = args.yaml, fastqs = [f for f in args.fastqs],
-                 barcodes = args.barcodes, output_file = args.o, logfile = args.l,
-                 batches = args.b, threads = args.t, max_batches = args.m)
+                 barcodes = args.barcodes, output_file = args.out, logfile = args.logfile,
+                 batches = args.batch_size, threads = args.threads, max_batches = args.max_batches)
 
+@log_errors
 def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, threads, logfile):
     """
     Search for barcodes in fastq reads, write summary to file.
@@ -116,6 +117,7 @@ def parse_barcode_arguments(barcode_args):
     Returns:
         Dict[str, List[str]]: Dictionary of barcodes with keys as region identifiers
     """
+
     expected_barcodes = {}
     
     for arg in barcode_args:
@@ -150,6 +152,7 @@ def read_barcode_file(file_path):
     Returns:
         List[str]: List of unique barcode sequences
     """
+
     try:
         with open(file_path, 'r') as f:
             # Read lines, strip whitespace, remove empty lines

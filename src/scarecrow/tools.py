@@ -3,21 +3,233 @@
 @author: David Wragg
 """
 
+import os
+import resource
+import multiprocessing
+import pysam
+import gzip
 from seqspec import Assay
 from seqspec.Region import RegionCoordinate
 from seqspec.seqspec_index import get_index_by_primer
-import os
-import resource
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from scarecrow.fastq_logging import logger, log_errors
 from typing import List, Dict, Optional, Generator, Set, Union
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor
-import pysam
-import gzip
 
 class FastqProcessingError(Exception):
     """Custom exception for FASTQ processing errors."""
     pass
+
+@log_errors
+def process_fastq_chunk(chunk_args):
+    """
+    Process a chunk of FASTQ files with improved parallel processing.
+    
+    Args:
+        chunk_args (tuple): Contains:
+            - r1_file_path (str): Path to Read 1 FASTQ file
+            - r2_file_path (str): Path to Read 2 FASTQ file
+            - batch_size (int): Number of read pairs per batch
+            - max_batches (Optional[int]): Limit on number of batches
+            - barcodes (Optional[Dict]): Barcode information
+            - r1_regions (List): Regions for Read 1
+            - r2_regions (List): Regions for Read 2
+            - r1_strand (str): Strand information for Read 1
+            - r2_strand (str): Strand information for Read 2
+    
+    Returns:
+        List[Dict]: Processed batches of read pair information
+    """
+    r1_file_path, r2_file_path, batch_size, max_batches, barcodes, \
+    r1_regions, r2_regions, r1_strand, r2_strand = chunk_args
+    
+    processed_batches = []
+    
+    try:
+        reads = count_fastq_reads(r1_file_path)
+        with tqdm(total = reads, desc = "Processing reads") as pbar:
+
+            with pysam.FastxFile(r1_file_path) as r1_fastq, \
+                pysam.FastxFile(r2_file_path) as r2_fastq:
+
+                batch = []
+                batch_count = 0
+                
+                while True:
+                    try:
+                        r1_entry = next(r1_fastq)
+                        r2_entry = next(r2_fastq)
+                    except StopIteration:
+                        break
+                    
+                    # Barcode or region extraction
+                    r1_region_details = (
+                        extract_barcodes(r1_entry, rev=False, expected_barcodes=barcodes)
+                        if barcodes else 
+                        extract_region_seq(r1_entry, r1_regions, rev=False)
+                    )
+                    
+                    r2_region_details = (
+                        extract_barcodes(r2_entry, rev=True, expected_barcodes=barcodes)
+                        if barcodes else 
+                        extract_region_seq(r2_entry, r2_regions, rev=True)
+                    )
+                    
+                    # Combine pair information
+                    read_pair_info = {
+                        'read1': {
+                            'file': os.path.basename(r1_file_path),
+                            'strand': r1_strand,
+                            'header': r1_entry.name,
+                            'regions': r1_region_details
+                        },
+                        'read2': {
+                            'file': os.path.basename(r2_file_path),
+                            'strand': r2_strand,
+                            'header': r2_entry.name,
+                            'regions': r2_region_details
+                        }
+                    }
+                    
+                    batch.append(read_pair_info)
+                    pbar.update(1)
+                    
+                    # Yield batch when full
+                    if len(batch) >= batch_size:
+                        processed_batches.append(batch)
+                        batch = []
+                        batch_count += 1
+                        
+                        # Optional batch limit
+                        if max_batches and batch_count >= max_batches:
+                            break
+                
+                # Yield final batch if not empty
+                if batch:
+                    processed_batches.append(batch)
+        
+        return processed_batches
+    
+    except IOError as e:
+        logger.error(f"File reading error: {e}")
+        raise FastqProcessingError(f"Unable to process FASTQ files: {e}")
+
+
+@log_errors
+def process_paired_fastq_batches(
+    fastq_info: List[Dict],
+    batch_size: int = 10000,
+    max_batches: Optional[int] = None,
+    output_handler: Optional[str] = None,
+    region_ids: Optional[List[str]] = None,
+    num_workers: int = None,
+    barcodes: Dict = None,
+    target: str = None
+) -> Dict[str, int]:
+    """
+    Process paired-end FASTQ files with improved parallel and memory-efficient processing.
+    
+    Args:
+        fastq_info (List[Dict]): FASTQ file information
+        batch_size (int): Number of read pairs per batch
+        max_batches (int, optional): Limit on number of batches
+        output_handler (str, optional): Output handling method
+        region_ids (List[str], optional): Regions to extract
+        num_workers (int, optional): Number of parallel processing workers
+        barcodes (Dict, optional): Barcode information
+        target (str, optional): Target specification
+    
+    Returns:
+        Dict[str, int]: Barcode count distribution
+    """
+    # Use all available CPU cores if not specified
+    if num_workers is None:
+        num_workers = multiprocessing.cpu_count()
+    
+    # Prepare chunk arguments
+    r1_file_path = list(fastq_info[0].keys())[0]
+    r1_regions = fastq_info[0][r1_file_path]
+    r1_strand = fastq_info[0]['strand']
+    
+    r2_file_path = list(fastq_info[1].keys())[0]
+    r2_regions = fastq_info[1][r2_file_path]
+    r2_strand = fastq_info[1]['strand']
+    
+    # Chunk arguments for parallel processing
+    chunk_args = (
+        r1_file_path, r2_file_path, 
+        batch_size, max_batches, barcodes,
+        r1_regions, r2_regions,
+        r1_strand, r2_strand
+    )
+    
+    barcode_counts = {}
+    total_read_pairs = 0
+    not_found_regions = set()
+    
+    try:
+        # Parallel processing of FASTQ chunks
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            # Submit chunk processing
+            future = executor.submit(process_fastq_chunk, chunk_args)
+            
+            # Process results
+            batches = future.result()
+            
+            # Progress tracking
+            with tqdm(total=len(batches), desc="Processing batches") as pbar:
+                for batch in batches:
+                    for read_pair in batch:
+                        try:
+                            # Sequence extraction and barcode tracking
+                            if barcodes is None:
+                                extracted_sequences = safe_extract_sequences(
+                                    [read_pair],
+                                    region_ids,
+                                    not_found_tracker=not_found_regions
+                                )
+                                
+                                # Barcode key generation
+                                barcode_key = []
+                                for region_id in region_ids:
+                                    if region_id in extracted_sequences:
+                                        barcode_key.append(
+                                            extracted_sequences[region_id]['sequence']
+                                        )
+                                barcode_key = "_".join(
+                                    [str(element) for element in barcode_key]
+                                )
+                                
+                                # Update barcode counts
+                                barcode_counts[barcode_key] = barcode_counts.get(
+                                    barcode_key, 0
+                                ) + 1
+                                
+                                # Optional output handling
+                                if output_handler:
+                                    write_cDNA_fastq(
+                                        read_pair, 
+                                        extracted_sequences, 
+                                        region_ids, 
+                                        target, 
+                                        output_handler
+                                    )
+                            else:
+                                if output_handler:
+                                    write_barcodes_CSV(read_pair, output_handler)
+                        
+                        except Exception as e:
+                            logger.error(f"Error processing read pair: {e}")
+                    
+                    total_read_pairs += len(batch)
+                    pbar.update(1)
+        
+        return barcode_counts
+    
+    except Exception as e:
+        logger.error(f"Processing failed: {e}")
+        raise
+
 
 def get_memory_usage() -> float:
     """
@@ -60,95 +272,6 @@ def region_indices(spec: Assay, fastqs):
 
     return indices
 
-@log_errors
-def process_paired_fastq_batches(
-    fastq_info: List[Dict], 
-    batch_size: int = 10000, 
-    max_batches: Optional[int] = None,
-    output_handler: Optional[str] = None,
-    region_ids: Optional[List[str]] = None,
-    num_workers: int = 4,
-    barcodes: Dict = None,
-    target: str = None
-) -> Dict[str, int]:
-    """
-    Process paired-end FASTQ files with parallel and memory-efficient processing.
-    
-    Args:
-        fastq_info (List[Dict]): FASTQ file information
-        batch_size (int): Number of read pairs per batch
-        max_batches (int, optional): Limit on number of batches
-        output_file (str, optional): Output FASTQ file path
-        region_ids (List[str], optional): Regions to extract
-        num_workers (int): Number of parallel processing workers
-    
-    Returns:
-        Dict[str, int]: Barcode count distribution
-    """
-    barcode_counts = {}
-    total_read_pairs = 0
-    not_found_regions = set()
-
-    try:
-        # Parallel processing setup
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Prepare batches (this is outside the progress bar but takes a long time on a large fastq file)
-            batches = list(batch_process_paired_fastq(fastq_info, batch_size = batch_size, max_batches = max_batches, barcodes = barcodes))
-            
-            # Open output file for writing
-            #output_handler = open(output_file, 'w') if output_file else None
-
-
-            # Progress tracking
-            with tqdm(total=len(batches), desc="Processing batches") as pbar:
-                for batch in batches:
-                    # Process batch
-                    for read_pair in batch:
-                        try:
-
-                            # Logic for processing region element sequence extraction
-                            if barcodes is None:
-
-                                # Extract sequences
-                                extracted_sequences = safe_extract_sequences(
-                                    [read_pair], 
-                                    region_ids, 
-                                    not_found_tracker=not_found_regions
-                                )
-
-                                # Barcode tracking logic for when writing cDNA file
-                                barcode_key = []
-                                for region_id in region_ids:
-                                    if region_id in extracted_sequences:
-                                        barcode_key.append(extracted_sequences[region_id]['sequence'])
-                                barcode_key = "_".join([str(element) for element in barcode_key])
-                                barcode_counts[barcode_key] = barcode_counts.get(barcode_key, 0) + 1
-                                if output_handler:
-                                    write_cDNA_fastq(read_pair, extracted_sequences, region_ids, target, output_handler)
-                            
-                            else:
-                                if output_handler:
-                                        write_barcodes_CSV(read_pair, output_handler)
-
-                        except Exception as e:
-                            logger.error(f"Error processing read pair: {e}")
-                    
-                    total_read_pairs += len(batch)
-                    pbar.update(1)
-        
-        # Report and visualization
-        #if barcodes is None:
-        #    report_processing_results(
-        #        total_read_pairs, 
-        #        not_found_regions, 
-        #        barcode_counts, 
-        #        output_file
-        #    )
-
-    except Exception as e:
-        logger.error(f"Processing failed: {e}")
-
-    return barcode_counts
 
 @log_errors
 def safe_extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=None):
@@ -238,104 +361,6 @@ def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=No
     
     return sequences
 
-@log_errors
-def batch_process_paired_fastq(
-    fastq_info: List[Dict], 
-    batch_size: int = 10000, 
-    max_batches: Optional[int] = None,
-    barcodes: Dict = None,
-) -> Generator[List[Dict], None, None]:
-    """
-    Process paired-end FASTQ files in memory-efficient batches.
-    
-    Args:
-        fastq_info (List[Dict]): FASTQ file paths and region information
-        batch_size (int): Number of read pairs per batch
-        max_batches (int, optional): Limit on number of batches
-    
-    Yields:
-        List[Dict]: Batches of read pair information
-    
-    Raises:
-        FastqProcessingError: If file reading fails
-    """
-    logger.info(f"Starting batch processing. Initial memory: {get_memory_usage():.2f} MB")
-    
-    try:
-
-        # Unpack FASTQ file information
-        r1_file_path = list(fastq_info[0].keys())[0]
-        r1_regions = fastq_info[0][r1_file_path]
-        r1_strand = fastq_info[0]['strand']        
-        r2_file_path = list(fastq_info[1].keys())[0]
-        r2_regions = fastq_info[1][r2_file_path]
-        r2_strand = fastq_info[1]['strand']
-        
-        reads = count_fastq_reads(r1_file_path)
-        with tqdm(total = reads, desc = "Preparing batches") as pbar:
-
-            with pysam.FastxFile(r1_file_path) as r1_fastq, \
-                pysam.FastxFile(r2_file_path) as r2_fastq:
-                
-                batch = []
-                batch_count = 0
-                
-                while True:
-                    try:
-                        r1_entry = next(r1_fastq)
-                        r2_entry = next(r2_fastq)
-                    except StopIteration:
-                        break
-                    
-                    # Extract region details if barcodes not provided
-                    if barcodes:
-                        r1_region_details = extract_barcodes(r1_entry, rev = False, expected_barcodes = barcodes)
-                        r2_region_details = extract_barcodes(r2_entry, rev = True, expected_barcodes = barcodes)
-                    else:
-                        r1_region_details = extract_region_seq(r1_entry, r1_regions, rev = False)
-                        r2_region_details = extract_region_seq(r2_entry, r2_regions, rev = True)
-                    
-                    # Combine pair information
-                    read_pair_info = {
-                        'read1': {
-                            'file': os.path.basename(r1_file_path),
-                            'strand': r1_strand,
-                            'header': r1_entry.name,
-                            'regions': r1_region_details
-                        },
-                        'read2': {
-                            'file': os.path.basename(r2_file_path),
-                            'strand': r2_strand,
-                            'header': r2_entry.name,
-                            'regions': r2_region_details
-                        }
-                    }
-                    
-                    batch.append(read_pair_info)
-
-                    pbar.update(1)
-                    
-                    # Yield batch when full
-                    if len(batch) >= batch_size:
-                        logger.info(f"Batch {batch_count + 1} memory: {get_memory_usage():.2f} MB")
-                        yield batch
-                        batch = []
-                        batch_count += 1
-                        
-                        # Optional batch limit
-                        if max_batches and batch_count >= max_batches:
-                            break
-
-                # Yield final batch
-                if batch:
-                    yield batch
-                
-                
-        
-    except IOError as e:
-        logger.error(f"File reading error: {e}")
-        raise FastqProcessingError(f"Unable to process FASTQ files: {e}")
-    
 
 @log_errors
 def extract_region_seq(

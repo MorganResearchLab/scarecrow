@@ -10,7 +10,7 @@ from seqspec.seqspec_print import run_seqspec_print
 from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
 from scarecrow.tools import process_paired_fastq_batches
-from scarecrow.fastq_logging import logger, log_errors, setup_logger
+from scarecrow.fastq_logging import log_errors, setup_logger, logger
 
 def parser_extract(parser):
     subparser = parser.add_parser(
@@ -53,9 +53,9 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
         default="cdna",
     )
     subparser.add_argument(
-        "-b", "--batches",
-        metavar="batches",
-        help=("Number of read batches to process at a time before writing to file [10000]"),
+        "-b", "--batch_size",
+        metavar="batch_size",
+        help=("Number of read pairs per batch to process at a time [10000]"),
         type=int,
         default=10000,
     )
@@ -84,7 +84,7 @@ scarecrow extract spec.yaml R1.fastq.gz R2.fastq.gz --barcodes  BC1:/Users/s14dw
 
 def validate_extract_args(parser, args):
     run_extract(yaml = args.yaml, fastqs = [f for f in args.fastqs], target = args.target,
-                output_file = args.out, batches = args.batches, regions = args.header_regions, 
+                output_file = args.out, batches = args.batch_size, regions = args.header_regions, 
                 logfile = args.logfile, threads = args.threads, max_batches = args.max_batches)
 
 def run_extract(yaml, fastqs, output_file, target, batches, max_batches, regions, threads, logfile):

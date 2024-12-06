@@ -1,4 +1,5 @@
 import logging
+import functools
 import os
 import sys
 
@@ -61,6 +62,7 @@ def log_errors(func):
     """
     Decorator to log any errors that occur in the decorated function.
     """
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)

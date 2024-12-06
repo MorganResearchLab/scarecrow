@@ -4,6 +4,11 @@
 
 A toolkit to parse [seqspec](https://github.com/pachterlab/seqspec) `yaml` files for processing of single cell sequencing data.
 
+### Issues
+
+* Multi-threading is not well optimised - may be limited by I/O steps
+* Logger is currently generating two instances - could do with being a single instance
+
 ## Environment
 ```bash
 mamba create --name scarecrow python=3.12
@@ -21,7 +26,7 @@ Currently, the `read_id` in `spec.yaml` must match the full path to the fastq fi
 `scarecrow extract` will extract a target sequence element (-t) annotated in `spec.yaml`, and record the barcode elements (-r) in the sequence header, returning a single fastq file (header, sequence + qualities).
 
 ```bash
-# Search for barcodes
+# Search for barcodes (also works for any sequence motif on a whitelist, e.g. i5, i7)
 scarecrow barcodes ./scarecrow/specs/evercode/evercode-v3.yaml \
     /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
     /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
@@ -37,4 +42,3 @@ scarecrow extract ./scarecrow/specs/evercode/evercode-v3.yaml \
     -o ./cDNA.fq -t cdna -r BC1 BC2 BC3
 ```
 
-It's possible that the P5 and P7 primers were added in the incorrect order. We were expecting BCs on read 2, and cDNA on read 1. Search for reverse complement of barcodes when running barcodes tool, and record whether barcode is aligned to forward or reverse strand. Generate new plot.
