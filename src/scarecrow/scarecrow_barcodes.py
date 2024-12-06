@@ -95,7 +95,7 @@ def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, thre
     # Open file for writing output
     if output_file:
         f = open(f"{output_file}", 'w')
-        f.write("read\tname\tbarcode_whitelist\tbarcode\tstart\tend\tmismatches\n")
+        f.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
 
     # Extract elements from sequencing reads
     process_paired_fastq_batches(fastq_info = fastq_info, batch_size = batches, max_batches = max_batches,

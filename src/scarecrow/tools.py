@@ -453,8 +453,8 @@ def extract_barcodes(
         # Paired-end reads are both 5' to 3', but on opposite strands (Read1 =  forward, Read2 = reverse)
         # 5' ---Read1--->         <---Read2--- 5'
         # So read 2 needs reverse complement as barcodes are on forward strand
-        if rev:
-            full_sequence = reverse_complement(full_sequence)
+        #if rev:
+        #    full_sequence = reverse_complement(full_sequence)
 
         # Find barcode positions
         barcode_matches = find_barcode_positions(full_sequence, barcodes_to_search)
@@ -467,6 +467,7 @@ def extract_barcodes(
         for match in barcode_matches:
             barcode_detail = {
                 'barcode': match['barcode'],
+                'orientation': match['orientation'],
                 'sequence': match['sequence'],
                 'start': match['start'],
                 'end': match['end'],
@@ -476,10 +477,16 @@ def extract_barcodes(
             # Add all matching dictionary keys if available
             if barcode_dict_keys and match['barcode'] in barcode_dict_keys:
                 barcode_detail['dict_keys'] = barcode_dict_keys[match['barcode']]
+            elif barcode_dict_keys and reverse_complement(match['barcode']) in barcode_dict_keys:
+                barcode_detail['dict_keys'] = barcode_dict_keys[reverse_complement(match['barcode'])]
+            else:
+                barcode_detail['dict_keys'] = []
+
             
             barcode_details.append(barcode_detail)
             
             logger.info(f"...{barcode_detail['dict_keys']} ({match['barcode']}) hit: {match['sequence']}, "
+                    f"Orientation: {match['orientation']}, "
                     f"Start: {match['start']}, "
                     f"End: {match['end']}, "
                     f"Mismatches: {match['mismatches']}")
@@ -511,26 +518,32 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
     
     # List to store all barcode matches
     barcode_matches = []
+    orientations = ['forward', 'reverse']
     
     # Iterate through all possible start positions
     for start in range(len(sequence)):
         for barcode in barcodes:
-            # Check all possible end positions for this barcode
-            for end in range(start + len(barcode), len(sequence) + 1):
-                candidate = sequence[start:end]
-                
-                # Check if candidate matches barcode within max mismatches
-                if len(candidate) == len(barcode):
-                    mismatches = hamming_distance(candidate, barcode)
-                    if mismatches <= max_mismatches:
-                        match_details = {
-                            'barcode': barcode,
-                            'sequence': candidate,
-                            'start': start,
-                            'end': end,
-                            'mismatches': mismatches
-                        }
-                        barcode_matches.append(match_details)
+            for orientation in orientations:
+                # reverse complement barcode if testing reverse strand
+                if orientation == 'reverse':
+                    barcode = reverse_complement(barcode)
+                # Check all possible end positions for this barcode
+                for end in range(start + len(barcode), len(sequence) + 1):
+                    candidate = sequence[start:end]
+                    
+                    # Check if candidate matches barcode within max mismatches
+                    if len(candidate) == len(barcode):
+                        mismatches = hamming_distance(candidate, barcode)
+                        if mismatches <= max_mismatches:
+                            match_details = {
+                                'barcode': barcode,
+                                'orientation': orientation,
+                                'sequence': candidate,
+                                'start': start,
+                                'end': end,
+                                'mismatches': mismatches
+                            }
+                            barcode_matches.append(match_details)
     
     # Sort matches by start position
     barcode_matches.sort(key=lambda x: x['start'])
@@ -583,7 +596,8 @@ def write_barcodes_CSV(read_pair: List, output_handler):
         for sub_barcode in read_barcodes:
             bc = sub_barcode['dict_keys']
             barcode = sub_barcode['barcode']
+            orientation = sub_barcode['orientation']
             start = sub_barcode['start']
             end = sub_barcode['end']
             mm = sub_barcode['mismatches']
-            output_handler.write(f"{read_key}\t{read}\t{bc}\t{barcode}\t{start}\t{end}\t{mm}\n")
+            output_handler.write(f"{read_key}\t{read}\t{bc}\t{barcode}\t{orientation}\t{start}\t{end}\t{mm}\n")

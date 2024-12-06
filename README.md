@@ -36,3 +36,5 @@ scarecrow extract ./scarecrow/specs/evercode/evercode-v3.yaml \
     /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
     -o ./cDNA.fq -t cdna -r BC1 BC2 BC3
 ```
+
+It's possible that the P5 and P7 primers were added in the incorrect order. We were expecting BCs on read 2, and cDNA on read 1. Search for reverse complement of barcodes when running barcodes tool, and record whether barcode is aligned to forward or reverse strand. Generate new plot.
