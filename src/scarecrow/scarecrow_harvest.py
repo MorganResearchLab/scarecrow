@@ -68,6 +68,10 @@ def run_harvest(barcodes, output_file, num_barcodes, logfile):
     results = get_barcode_peaks(barcodes, num_barcodes)
 
     print(f"{pd.DataFrame(results)}")
+
+    
+    print(f"{top_peak_positions(results, num_barcodes)}")
+
     return 
 
 @log_errors
@@ -81,35 +85,85 @@ def get_barcode_peaks(barcodes: list, num_barcodes: int):
     results = []
     barcode_groups = barcode_data.groupby(["read", "barcode_whitelist", "orientation"])
     for (read, barcode_whitelist, orientation), group in barcode_groups:
-        # Use the 'start' column as the distribution
-            # Create a histogram of start positions
-        hist, bin_edges = np.histogram(group["start"])    
-        # Run the peak detection
-        peaks = find_top_peaks(hist, num_barcodes)    
-        # Convert bin indices to start positions
-        peaks_with_positions = [(int(bin_edges[p]), int(count)) for p, count in peaks]    
+        # Use 'start' to find peaks
+        peaks = find_top_peaks(group["start"].values, group["end"].values, num_barcodes)
         # Store the results
         results.append({
             "read": read,
             "barcode_whitelist": barcode_whitelist,
             "orientation": orientation,
-            "peaks": peaks_with_positions
+            "peaks": peaks
         })
-        # write to logfile
-        logger.info(f"read: {read} - whitelist: {barcode_whitelist} - orientation: {orientation} - peaks: {peaks_with_positions}")
+        # Log the results
+        logger.info(f"read: {read} {barcode_whitelist} {orientation} - peaks: {peaks}")
 
-    return results
+    # Sort the results by the highest peak count
+    sorted_results = sorted(
+        results,
+        key=lambda x: max([count for _, _, count in x["peaks"]] or [0]),  # Extract the highest count from (start, count, end)
+        reverse=True
+    )
 
+    return sorted_results
 
-# Peak detection function
-def find_top_peaks(distribution, num_peaks):
+def find_top_peaks(start_positions, end_positions, num_peaks):
     """
-    Find top peaks in a distribution of counts.
+    Find top peaks based on start positions, while also returning the corresponding end positions.
     """
-    peaks, _ = find_peaks(distribution)
-    peak_counts = distribution[peaks]
-    peaks_with_counts = list(zip(peaks, peak_counts))
-    top_peaks = sorted(peaks_with_counts, key=lambda x: x[1], reverse=True)[:num_peaks]
+    # Count frequency of each start position
+    position_counts = pd.Series(start_positions).value_counts().sort_index()
+    
+    # Identify peaks in the frequency data
+    peaks, _ = find_peaks(position_counts.values)
+    
+    # Extract peak positions and their counts, including end positions
+    peaks_with_counts = []
+    for p in peaks:
+        start_pos = position_counts.index[p]
+        end_pos = end_positions[start_positions == start_pos][0]  # Get the corresponding end position
+        count = position_counts.values[p]
+        peaks_with_counts.append((start_pos, end_pos, count))
+    
+    # Sort peaks by count and select the top N
+    top_peaks = sorted(peaks_with_counts, key=lambda x: x[2], reverse=True)[:num_peaks]
     return top_peaks
 
 
+def top_peak_positions(results, num_barcodes):
+    # Flatten the results to include individual peaks
+    flattened_results = []
+    for result in results:
+        for start_position, end_position, count in result["peaks"]:
+            flattened_results.append({
+                "start_position": start_position,
+                "end_position": end_position,
+                "count": count,
+                "barcode_whitelist": result["barcode_whitelist"],
+                "read": result["read"],
+                "orientation": result["orientation"],
+            })
+
+    # Convert to a DataFrame
+    flattened_df = pd.DataFrame(flattened_results)
+
+    # Group by position and barcode_whitelist, then sum counts (if necessary)
+    grouped = flattened_df.groupby(["start_position", "barcode_whitelist"], as_index=False).sum()
+
+    # Sort by count (descending) and position (ascending)
+    sorted_grouped = grouped.sort_values(by=["count", "start_position"], ascending=[False, True])
+
+    # Select the top 3 distinct positions
+    top_positions = []
+    seen_positions = set()
+
+    for _, row in sorted_grouped.iterrows():
+        if row["start_position"] not in seen_positions:
+            top_positions.append(row)
+            seen_positions.add(row["start_position"])
+            if len(top_positions) == num_barcodes:
+                break
+
+    # Create a DataFrame of the results
+    top_positions_df = pd.DataFrame(top_positions).sort_values(by="start_position", ascending=True)
+
+    return top_positions_df
