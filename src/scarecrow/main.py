@@ -15,6 +15,8 @@ import argparse
 import warnings
 from .scarecrow_extract import parser_extract, validate_extract_args
 from .scarecrow_barcodes import parser_barcodes, validate_barcodes_args
+from .scarecrow_reap import parser_reap, validate_reap_args
+from .scarecrow_harvest import parser_harvest, validate_harvest_args
 
 def main():
     warnings.simplefilter("default", DeprecationWarning)
@@ -46,7 +48,9 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup the arguments for all subcommands
     command_to_parser = {
         "extract": parser_extract(subparsers),
-        "barcodes": parser_barcodes(subparsers)
+        "barcodes": parser_barcodes(subparsers),
+        "reap": parser_reap(subparsers),
+        "harvest": parser_harvest(subparsers)
     }
     
     # Show help when no arguments are given
@@ -67,7 +71,9 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup validator and runner for all subcommands (validate and run if valid)
     COMMAND_TO_FUNCTION = {
         "extract": validate_extract_args,
-        "barcodes": validate_barcodes_args
+        "barcodes": validate_barcodes_args,
+        "reap": validate_reap_args,
+        "harvest": validate_harvest_args
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 
