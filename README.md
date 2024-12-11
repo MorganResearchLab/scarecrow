@@ -9,6 +9,7 @@ A toolkit for preprocessing single cell sequencing data.
 * Multi-threading is not well optimised - may be limited by I/O steps.
 * Logger is currently generating two instances - could do with being a single instance.
 * Currently parsing seqspec.yaml file in `scarecrow seed`, however this can probably be modified now to run without the yaml.
+* Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
 
 ## Environment
 ```bash
@@ -23,13 +24,15 @@ mamba install numpy, scipy, pandas
 ## Workflow
 ```bash
 # Find barcode seeds
-scarecrow seed <spec.yaml> <fastqs> --barcodes BC1:<barcode_whitelist.txt> --out <BC1_counts.csv>
+scarecrow seed <spec.yaml> <paired fastqs> --barcodes BC1:<barcode_whitelist.txt> --out <BC1_counts.csv>
 
 # Harvest barcode positions 
 scarecrow harvest <BCx_counts> --barcode_count 3 --min_distance 10
 
 # Reap target sequence from fastqs (TBC)
-scarecrow reap
+scarecrow reap <paired fastqs> --barcode_positions <barcode_positions.csv> \
+    --barcodes <BC1>:<BC1_whitelist.txt> <BC2>:<BC2_whitelist.txt> <BC3>:<BC3_whitelist.txt> \
+    --read2 0-100 --out cDNA.fastq
 ```
 
 ### Example

@@ -16,7 +16,8 @@ def parser_seed(parser):
 Search fastq reads for barcodes in whitelists
 
 Example:
-scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt
+
+scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
 ---
 """,
         help="Search fastq reads for barcodes",
@@ -68,9 +69,14 @@ scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --barcode
     return subparser
 
 def validate_seed_args(parser, args):
-    run_seed(yaml = args.yaml, fastqs = [f for f in args.fastqs],
-                 barcodes = args.barcodes, output_file = args.out, logfile = args.logfile,
-                 batches = args.batch_size, threads = args.threads, max_batches = args.max_batches)
+    run_seed(yaml = args.yaml, 
+             fastqs = [f for f in args.fastqs],
+             barcodes = args.barcodes, 
+             output_file = args.out, 
+             logfile = args.logfile,
+             batches = args.batch_size, 
+             threads = args.threads, 
+             max_batches = args.max_batches)
 
 @log_errors
 def run_seed(yaml, fastqs, barcodes, output_file, batches, max_batches, threads, logfile):
