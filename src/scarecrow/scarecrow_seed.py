@@ -9,14 +9,14 @@ from scarecrow.fastq_logging import log_errors, setup_logger, logger
 from argparse import RawTextHelpFormatter
 from scarecrow.tools import process_paired_fastq_batches, region_indices
 
-def parser_barcodes(parser):
+def parser_seed(parser):
     subparser = parser.add_parser(
-        "barcodes",
+        "seed",
         description="""
 Search fastq reads for barcodes in whitelists
 
 Example:
-scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt
+scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt
 ---
 """,
         help="Search fastq reads for barcodes",
@@ -67,13 +67,13 @@ scarecrow barcodes spec.yaml R1.fastq.gz R2.fastq.gz -o barcode_counts.csv --bar
     )
     return subparser
 
-def validate_barcodes_args(parser, args):
-    run_barcodes(yaml = args.yaml, fastqs = [f for f in args.fastqs],
+def validate_seed_args(parser, args):
+    run_seed(yaml = args.yaml, fastqs = [f for f in args.fastqs],
                  barcodes = args.barcodes, output_file = args.out, logfile = args.logfile,
                  batches = args.batch_size, threads = args.threads, max_batches = args.max_batches)
 
 @log_errors
-def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, threads, logfile):
+def run_seed(yaml, fastqs, barcodes, output_file, batches, max_batches, threads, logfile):
     """
     Search for barcodes in fastq reads, write summary to file.
     """
@@ -88,7 +88,7 @@ def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, thre
     fastq_info = region_indices(spec, fastqs)
 
     # Load barcodes
-    expected_barcodes = parse_barcode_arguments(barcodes)  
+    expected_barcodes = parse_seed_arguments(barcodes)  
     logger.info(f"Expected barcodes")
     for key, barcode in expected_barcodes.items():
         logger.info(f"{key}: {barcode}")
@@ -107,9 +107,9 @@ def run_barcodes(yaml, fastqs, barcodes, output_file, batches, max_batches, thre
 
 
 @log_errors
-def parse_barcode_arguments(barcode_args):
+def parse_seed_arguments(barcode_args):
     """
-    Parse barcode arguments from command line.
+    Parse seed arguments from command line.
     
     Args:
         barcode_args (List[str]): List of barcode arguments in format 'KEY:FILE'

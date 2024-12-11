@@ -3,7 +3,7 @@
 """
 scarecrow
 
-A toolkit to parse seqspec.yaml files for downstream analysis of single-cell sequencing data.
+A toolkit for pre-processing single-cell sequencing data.
 
 """
 __author__ = "David Wragg"
@@ -14,7 +14,7 @@ import sys
 import argparse
 import warnings
 from .scarecrow_extract import parser_extract, validate_extract_args
-from .scarecrow_barcodes import parser_barcodes, validate_barcodes_args
+from .scarecrow_seed import parser_seed, validate_seed_args
 from .scarecrow_reap import parser_reap, validate_reap_args
 from .scarecrow_harvest import parser_harvest, validate_harvest_args
 
@@ -48,7 +48,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup the arguments for all subcommands
     command_to_parser = {
         "extract": parser_extract(subparsers),
-        "barcodes": parser_barcodes(subparsers),
+        "seed": parser_seed(subparsers),
         "reap": parser_reap(subparsers),
         "harvest": parser_harvest(subparsers)
     }
@@ -71,7 +71,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     # Setup validator and runner for all subcommands (validate and run if valid)
     COMMAND_TO_FUNCTION = {
         "extract": validate_extract_args,
-        "barcodes": validate_barcodes_args,
+        "seed": validate_seed_args,
         "reap": validate_reap_args,
         "harvest": validate_harvest_args
     }

@@ -27,10 +27,10 @@ scarecrow harveset BC1.csv BC2.csv BC3.csv --barcode_count 3 --min_distance 10
     subparser.add_argument("barcodes", nargs="+", help="List of scarecrow barcode CSV output files")
     subparser.add_argument(
         "-o", "--out",
-        metavar="barcodes_positions.csv",
+        metavar="barcodes_positions",
         help=("Path to output barcode positions file"),
         type=str,
-        default="./barcodes.positions",
+        default="./barcode_positions.csv",
     )
     subparser.add_argument(
         "-b", "--barcode_count",
