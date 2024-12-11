@@ -41,7 +41,7 @@ ggarrange(p1,p2,ncol=2,labels=c("forward", "reverse")) %>%
 
 
 counts <- do.call("rbind", lapply(1:100, function(i) 
-  table(data[which(data$read == "read2" & data$orientation == "reverse" & data$start == i),]$barcode_whitelist)))
+  table(data[which(data$read == "read1" & data$orientation == "forward" & data$start == i),]$barcode_whitelist)))
 
 
 # Notes
