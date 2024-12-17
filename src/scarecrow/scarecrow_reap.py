@@ -7,6 +7,11 @@
 from argparse import RawTextHelpFormatter
 import pandas as pd
 from scarecrow.fastq_logging import log_errors, setup_logger, logger
+import os
+import gzip
+import multiprocessing as mp
+from typing import List, Tuple, Generator, Dict, Any
+#from functools import partial
 
 def parser_reap(parser):
     subparser = parser.add_parser(
@@ -30,7 +35,7 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
         metavar="out.fastq",
         help=("Path to output fastq file"),
         type=str,
-        default="./cDNA.fq",
+        default='./extracted_sequences',
     )
     # To do - need to pass something here for header regions 
     # either need to directly pass barcode positions, or parse a config file (i.e. seqpsec yaml)
@@ -40,6 +45,13 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
         help=("File containing barcode positions, output by scarecrow harvest"),
         type=str,
         default=[],
+    )
+    subparser.add_argument(
+        "-j", "--jitter",
+        metavar="jitter",
+        type=int,
+        default=5,
+        help='Barcode position jitter [5]',
     )
     group = subparser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -70,13 +82,6 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
         default=10000,
     )
     subparser.add_argument(
-        "-x", "--max_batches",
-        metavar="max_batches",
-        help=("Maximum number of read batches to process"),
-        type=int,
-        default=None,
-    )
-    subparser.add_argument(
         "-@", "--threads",
         metavar="threads",
         help=("Number of processing threads [4]"),
@@ -95,33 +100,246 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
 def validate_reap_args(parser, args):
     run_reap(fastqs = [f for f in args.fastqs], 
              barcode_positions_file = args.barcode_positions,
-             output_file = args.out,
+             output_dir = args.out,
              read1_range = args.read1,
              read2_range = args.read2, 
              barcodes = args.barcodes,
+             jitter = args.jitter,
              batches = args.batch_size, 
-             max_batches = args.max_batches,
              threads = args.threads,
              logfile = args.logfile)
 
+   
 
 @log_errors
-def run_reap(fastqs, barcode_positions_file, output_file, read1_range, read2_range, batches, max_batches, threads, logfile):
+def run_reap(fastqs: List[str], 
+             barcode_positions_file: str,
+             barcodes: List[str],
+             output_dir: str = './extracted_sequences',
+             read1_range: str = None,
+             read2_range: str = None,
+             jitter: int = 5,
+             batches: int = 100000, 
+             threads: int = None,
+             logfile: str = './scarecrow.log') -> Dict[str, List[str]]:
     """
-    Search for barcodes in fastq reads, write summary to file.
+    Main function to extract sequences based on barcode positions
+    Compatible with the existing scarecrow CLI argument structure
+    
+    Args:
+        fastqs: List of FASTQ file paths
+        barcode_positions_file: Path to CSV with barcode positions
+        output_dir: Directory to write output files
+        jitter: Number of flanking bases to include
+        batches: Number of reads to process per batch
+        max_batches: Maximum number of batches to process (not implemented)
+        threads: Number of processing threads
+        logfile: Path to log file
+    
+    Returns:
+        Dictionary of extracted sequences
     """
-    # Global logger setup
-    logger = setup_logger(logfile)
 
     # Need to read barcode_position data
     barcode_data = pd.read_csv(barcode_positions_file, sep=',')
     print(f"{barcode_data}")
+    
+    # Create extractor
+    extractor = MemoryEfficientFASTQExtractor(
+        logfile = logfile,
+        fastq_files = fastqs,
+        barcode_positions_file = barcode_positions_file,
+        output_dir = output_dir,
+        jitter = jitter,
+        batch_size = batches,
+        num_threads = threads
+    )
+    
+    # Extract sequences
+    extracted_sequences = extractor.extract_sequences()
+    
+    # Write to files
+    extractor.write_sequences_to_files(extracted_sequences)
+    
+    return extracted_sequences
 
-    # Read fastq files as read pairs
-    # Extract barcode sequences for header
-    # Error correction of barcode sequences
-    # Extract target sequence
-    # Write fastq
 
-    return 
 
+class MemoryEfficientFASTQExtractor:
+    def __init__(self, 
+                 fastq_files: List[str], 
+                 barcode_positions_file: str, 
+                 output_dir: str = '.', 
+                 jitter: int = 5, 
+                 batch_size: int = 100000,
+                 num_threads: int = None,
+                 logfile: str = './scarecrow.log'):
+        """
+        Initialize FASTQ extractor with memory and IO efficiency
+        
+        Args:
+            fastq_files: List of input FASTQ files (R1, R2)
+            barcode_positions_file: Path to CSV with barcode positions
+            output_dir: Directory to write output files
+            jitter: Number of flanking bases to include
+            batch_size: Number of reads to process in each batch
+            num_threads: Number of processing threads
+            logfile: Path to log file
+        """
+        # Explicitly set up logging
+        self.logger = setup_logger(logfile)
+        
+        self.fastq_files = fastq_files
+        self.barcode_positions = self._load_barcode_positions(barcode_positions_file)
+        self.output_dir = output_dir
+        self.jitter = jitter
+        self.batch_size = batch_size
+        
+        # Prepare barcode extraction configurations
+        self.barcode_configs = self._prepare_barcode_configs()
+        
+        # Ensure output directory exists
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    @log_errors
+    def _load_barcode_positions(self, filepath: str) -> pd.DataFrame:
+        """
+        Load and validate barcode positions
+        
+        Args:
+            filepath: Path to CSV file with barcode positions
+        
+        Returns:
+            Validated DataFrame of barcode positions
+        """
+        try:
+            df = pd.read_csv(filepath)
+            # Validate required columns
+            required_cols = ['read', 'start', 'end', 'barcode_whitelist']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                raise ValueError(f"Missing columns: {missing_cols}")
+            
+            self.logger.info(f"Loaded barcode positions from {filepath}")
+            return df
+        except Exception as e:
+            self.logger.error(f"Error loading barcode positions: {e}")
+            raise
+
+    def _prepare_barcode_configs(self) -> List[Dict[str, Any]]:
+        """
+        Prepare extraction configurations for each barcode position
+        
+        Returns:
+            List of dictionaries with extraction configurations
+        """
+        configs = []
+        for idx, row in self.barcode_positions.iterrows():
+            # Determine which file to process based on 'read' column
+            file_index = 0 if row['read'] == 'read1' else 1
+            
+            # Prepare extraction configuration
+            config = {
+                'index': idx,
+                'file_index': file_index,
+                'start': row['start'],
+                'end': row['end'],
+                'jittered_start': max(0, row['start'] - self.jitter),
+                'jittered_end': row['end'] + self.jitter
+            }
+            configs.append(config)
+        
+        return configs
+
+    def _read_fastq_single_pass(self, filename: str, configs: List[Dict[str, Any]]) -> Dict[int, List[str]]:
+        """
+        Read FASTQ file in a single pass, extracting sequences for multiple positions
+        
+        Args:
+            filename: Path to FASTQ file (supports .gz)
+            configs: List of extraction configurations
+        
+        Returns:
+            Dictionary of extracted sequences by position index
+        """
+        open_func = gzip.open if filename.endswith('.gz') else open
+        extracted_sequences = {config['index']: [] for config in configs}
+        
+        try:
+            with open_func(filename, 'rt') as f:
+                while True:
+                    # Read FASTQ entry
+                    header = f.readline().strip()
+                    if not header:
+                        break
+                    
+                    sequence = f.readline().strip()
+                    f.readline()  # Skip '+' line
+                    f.readline()  # Skip quality line
+                    
+                    # Check and extract sequences for all relevant positions
+                    for config in configs:
+                        extracted_seq = sequence[
+                            config['jittered_start']:config['jittered_end']
+                        ]
+                        extracted_sequences[config['index']].append(extracted_seq)
+            
+            self.logger.info(f"Processed sequences from {filename}")
+            return extracted_sequences
+        
+        except Exception as e:
+            self.logger.error(f"Error reading FASTQ file {filename}: {e}")
+            raise
+
+    def extract_sequences(self) -> Dict[int, List[str]]:
+        """
+        Extract sequences from FASTQ files in a single pass
+        
+        Returns:
+            Dictionary of extracted sequences by position index
+        """
+        # Extracted sequences storage
+        all_extracted_sequences = {}
+        
+        # Process each FASTQ file
+        for file_index, fastq_file in enumerate(self.fastq_files):
+            # Get configs for this file
+            file_configs = [
+                config for config in self.barcode_configs 
+                if config['file_index'] == file_index
+            ]
+            
+            # Skip if no configs for this file
+            if not file_configs:
+                continue
+            
+            # Extract sequences in a single pass
+            extracted_sequences = self._read_fastq_single_pass(
+                fastq_file, 
+                file_configs
+            )
+            
+            # Merge results
+            all_extracted_sequences.update(extracted_sequences)
+        
+        self.logger.info(f"Extraction complete. Total positions processed: {len(all_extracted_sequences)}")
+        return all_extracted_sequences
+
+    @log_errors
+    def write_sequences_to_files(self, extracted_sequences: Dict[int, List[str]]):
+        """
+        Write extracted sequences to files named by position index
+        
+        Args:
+            extracted_sequences: Dictionary of sequences by position index
+        """
+        for idx, sequences in extracted_sequences.items():
+            # Use position index + 1 for filename
+            output_file = os.path.join(self.output_dir, f"barcode_{idx+1}_sequences.txt")
+            
+            with open(output_file, 'w') as f:
+                for seq in sequences:
+                    f.write(f"{seq}\n")
+            
+            self.logger.info(f"Written {len(sequences)} sequences to {output_file}")
