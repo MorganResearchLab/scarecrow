@@ -194,21 +194,12 @@ def process_read_pair_batches(
     if num_workers is None:
         num_workers = multiprocessing.cpu_count()
     
-    # Prepare chunk arguments
-    r1_file_path = list(fastq_info[0].keys())[0]
-    r1_regions = fastq_info[0][r1_file_path]
-    r1_strand = fastq_info[0]['strand']
-    
-    r2_file_path = list(fastq_info[1].keys())[0]
-    r2_regions = fastq_info[1][r2_file_path]
-    r2_strand = fastq_info[1]['strand']
-    
-    # Chunk arguments for parallel processing
-    chunk_args = (
-        r1_file_path, r2_file_path, 
-        batch_size, barcodes,
-        r1_regions, r2_regions,
-        r1_strand, r2_strand
+    # Prepare chunk arguments for parallele processing
+    chunk_args = (list(fastq_info[0].keys())[0],
+                  list(fastq_info[1].keys())[0],
+                  batch_size, barcodes,
+                  fastq_info[0]['strand'],
+                  fastq_info[1]['strand']
     )
     
     barcode_counts = {}
