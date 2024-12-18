@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+#!/usr/bin/env python3
 @author: David Wragg
 """
 
@@ -11,6 +11,8 @@ import pysam
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from scarecrow.fastq_logging import log_errors, setup_logger, logger
+from scarecrow.scarecrow_seed import parse_seed_arguments
+from scarecrow.tools import generate_random_string
 from typing import List, Tuple, Optional, Dict, Any
 import itertools
 from functools import partial
@@ -88,13 +90,6 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
         type=int,
         default=4,
     )
-    subparser.add_argument(
-        "-l", "--logfile",
-        metavar="logfile",
-        help=("File to write log to"),
-        type=str,
-        default="./scarecrow.log",
-    )
     return subparser
 
 def validate_reap_args(parser, args):
@@ -106,8 +101,7 @@ def validate_reap_args(parser, args):
              barcodes = args.barcodes,
              jitter = args.jitter,
              batches = args.batch_size, 
-             threads = args.threads,
-             logfile = args.logfile)
+             threads = args.threads)
 
 
 @log_errors
@@ -119,14 +113,21 @@ def run_reap(fastqs: List[str],
              barcodes: List[str] = None,
              jitter: int = 5,
              batches: int = 10000,
-             threads: int = 4,
-             logfile: str = './scarecrow.log') -> None:
+             threads: int = 4) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
     # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow', generate_random_string(), 'log')
     logger = setup_logger(logfile)
 
+    # Extract barcodes
+    expected_barcodes = parse_seed_arguments(barcodes)  
+    logger.info(f"Barcode whitelist:")
+    for key, barcode in expected_barcodes.items():
+        logger.info(f"{key}: {barcode}")
+
+    # Extract barcodes and target sequence
     extractor = MemoryEfficientParallelFASTQExtractor(
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
@@ -139,7 +140,7 @@ def run_reap(fastqs: List[str],
     )
     extractor.extract_sequences()
 
-   
+@log_errors   
 def process_read_batch(
     read_batch: List[Tuple[Any, Any]], 
     barcode_configs: List[Dict[str, Any]], 
@@ -166,7 +167,7 @@ def process_read_batch(
             seq = r1_entry.sequence if config['file_index'] == 0 else r2_entry.sequence
             barcode = seq[config['jittered_start']:config['jittered_end']]
             barcodes.append(barcode)
-        
+            
         # Determine which read to extract from
         if read1_range:
             extract_seq = r1_entry.sequence[read1_range[0]:read1_range[1]]
@@ -205,6 +206,7 @@ class MemoryEfficientParallelFASTQExtractor:
         self.barcode_positions = pd.read_csv(barcode_positions_file)
         print("\033[34m\nBarcode positional data:\033[0m")
         print(f"{self.barcode_positions}")
+        logger.info(f"{self.barcode_positions}")
 
         self.output = output
         self.jitter = jitter
@@ -261,9 +263,9 @@ class MemoryEfficientParallelFASTQExtractor:
             # Prepare partial function for multiprocessing
             process_batch_func = partial(
                 process_read_batch, 
-                barcode_configs=self.barcode_configs,
-                read1_range=self.read1_range,
-                read2_range=self.read2_range
+                barcode_configs = self.barcode_configs,
+                read1_range = self.read1_range,
+                read2_range = self.read2_range
             )
             
             # Process in batches with multiprocessing
@@ -281,3 +283,5 @@ class MemoryEfficientParallelFASTQExtractor:
                     # Flatten and write results
                     for entry in itertools.chain.from_iterable(processed_entries):
                         out_fastq.write(entry)
+                        logger.info(f"{entry.split("\n")[0]}")
+        
