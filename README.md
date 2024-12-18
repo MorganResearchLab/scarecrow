@@ -41,7 +41,7 @@ scarecrow reap <paired fastqs> --barcode_positions <barcode_positions.csv> \
 ### Example
 ```bash
 # seed
-scarecrow seed ./scarecrow/specs/evercode/evercode-v3.yaml \
+scarecrow seed /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/evercode-v3.yaml \
 /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
 /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
 --barcodes BC1:v1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt
@@ -53,6 +53,6 @@ scarecrow harvest ./barcode_counts.csv --barcode_count 3 --min_distance 10
 scarecrow reap ../Repos/scarecrow/specs/evercode/R1.fastq \
 ../Repos/scarecrow/specs/evercode/R2.fastq \
 -p barcode_positions.csv -j 5 \
---barcodes BC1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt \
+--barcodes BC1:v1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt \
 --read2 0-100 --out cDNA.fq
 ```

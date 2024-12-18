@@ -51,13 +51,6 @@ scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:B
         default=10000,
     )
     subparser.add_argument(
-        "-x", "--max_batches",
-        metavar="max_batches",
-        help=("Maximum number of read batches to process"),
-        type=int,
-        default=None,
-    )
-    subparser.add_argument(
         "-@", "--threads",
         metavar="threads",
         help=("Number of processing threads [4]"),
@@ -72,11 +65,10 @@ def validate_seed_args(parser, args):
              barcodes = args.barcodes, 
              output_file = args.out, 
              batches = args.batch_size, 
-             threads = args.threads, 
-             max_batches = args.max_batches)
+             threads = args.threads)
 
 @log_errors
-def run_seed(yaml, fastqs, barcodes, output_file, batches, max_batches, threads):
+def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
     """
     Search for barcodes in fastq reads, write summary to file.
     """
@@ -103,8 +95,8 @@ def run_seed(yaml, fastqs, barcodes, output_file, batches, max_batches, threads)
         f.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
 
     # Extract elements from sequencing reads
-    process_read_pair_batches(fastq_info = fastq_info, batch_size = batches, max_batches = max_batches,
-                              num_workers = threads, output_handler = f, barcodes = expected_barcodes)
+    process_read_pair_batches(fastq_info = fastq_info, batch_size = batches, output_handler = f,
+                              num_workers = threads, barcodes = expected_barcodes)
 
     return 
 
@@ -181,7 +173,6 @@ def read_barcode_file(file_path):
 def process_read_pair_batches(
     fastq_info: List[Dict],
     batch_size: int = 10000,
-    max_batches: Optional[int] = None,
     output_handler: Optional[str] = None,
     num_workers: int = None,
     barcodes: Dict = None
