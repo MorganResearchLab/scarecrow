@@ -183,12 +183,9 @@ def process_read_pair_batches(
     Args:
         fastq_info (List[Dict]): FASTQ file information
         batch_size (int): Number of read pairs per batch
-        max_batches (int, optional): Limit on number of batches
         output_handler (str, optional): Output handling method
-        region_ids (List[str], optional): Regions to extract
         num_workers (int, optional): Number of parallel processing workers
         barcodes (Dict, optional): Barcode information
-        target (str, optional): Target specification
     
     Returns:
         Dict[str, int]: Barcode count distribution
@@ -209,7 +206,7 @@ def process_read_pair_batches(
     # Chunk arguments for parallel processing
     chunk_args = (
         r1_file_path, r2_file_path, 
-        batch_size, max_batches, barcodes,
+        batch_size, barcodes,
         r1_regions, r2_regions,
         r1_strand, r2_strand
     )
@@ -255,7 +252,6 @@ def process_fastq_chunk(chunk_args):
             - r1_file_path (str): Path to Read 1 FASTQ file
             - r2_file_path (str): Path to Read 2 FASTQ file
             - batch_size (int): Number of read pairs per batch
-            - max_batches (Optional[int]): Limit on number of batches
             - barcodes (Optional[Dict]): Barcode information
             - r1_regions (List): Regions for Read 1
             - r2_regions (List): Regions for Read 2
@@ -265,7 +261,7 @@ def process_fastq_chunk(chunk_args):
     Returns:
         List[Dict]: Processed batches of read pair information
     """
-    r1_file_path, r2_file_path, batch_size, max_batches, barcodes, \
+    r1_file_path, r2_file_path, batch_size, barcodes, \
     r1_strand, r2_strand = chunk_args
     
     processed_batches = []
@@ -316,10 +312,6 @@ def process_fastq_chunk(chunk_args):
                         batch = []
                         batch_count += 1
                         
-                        # Optional batch limit
-                        if max_batches and batch_count >= max_batches:
-                            break
-                
                 # Yield final batch if not empty
                 if batch:
                     processed_batches.append(batch)
