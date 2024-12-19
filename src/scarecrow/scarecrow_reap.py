@@ -12,10 +12,11 @@ import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from scarecrow.fastq_logging import log_errors, setup_logger, logger
 from scarecrow.scarecrow_seed import parse_seed_arguments
-from scarecrow.tools import generate_random_string
-from typing import List, Tuple, Optional, Dict, Any
+from scarecrow.tools import generate_random_string, reverse_complement
+from typing import List, Tuple, Optional, Dict, Any, Union
 import itertools
 from functools import partial
+import ast
 
 def parser_reap(parser):
     subparser = parser.add_parser(
@@ -140,10 +141,12 @@ def run_reap(fastqs: List[str],
     extractor = MemoryEfficientParallelFASTQExtractor(
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
+        barcode_sequences = expected_barcodes,
         output = output,
         read1_range = read1_range,
         read2_range = read2_range,
         jitter = jitter,
+        mismatches = mismatches,
         batch_size = batches,
         threads = threads
     )
@@ -153,8 +156,10 @@ def run_reap(fastqs: List[str],
 def process_read_batch(
     read_batch: List[Tuple[Any, Any]], 
     barcode_configs: List[Dict[str, Any]], 
+    barcode_sequences: Optional[Union[Dict[str, List[str]], List[str]]],
     read1_range: Optional[Tuple[int, int]], 
-    read2_range: Optional[Tuple[int, int]]
+    read2_range: Optional[Tuple[int, int]],
+    mismatches: int = 1
 ) -> List[str]:
     """
     Process a batch of reads, extracting barcodes and sequences
@@ -176,6 +181,23 @@ def process_read_batch(
             seq = r1_entry.sequence if config['file_index'] == 0 else r2_entry.sequence
             barcode = seq[config['jittered_start']:config['jittered_end']]
             barcodes.append(barcode)
+            
+            # Identify associated whitelist barcode sequences
+            whitelist = ast.literal_eval(config['whitelist'])[0]
+            if whitelist in barcode_sequences:
+                whitelist_barcodes = barcode_sequences[whitelist]                
+                orientation = False if config['orientation'] == 'forward' else True                
+                matches = match_barcode(sequence = barcode, barcodes = whitelist_barcodes, 
+                                    orientation = orientation, max_mismatches = mismatches,
+                                    jitter = abs(config['jittered_start'] - config['start']))
+                if matches:
+                    print(f"\033[33m{r1_entry.name}\t\033[33m{seq}")                    
+                    print(f"\033[34mPeak target\n\t\033[32m{list(config.items())[2:]}")
+                    print(f"\033[34mBest matched barcode (peak distance, mismatches, start)\n\t\033[32m{matches[0]}")
+                    print(f"\033[0m")
+            
+            
+            
             
         # Determine which read to extract from
         if read1_range:
@@ -202,10 +224,12 @@ class MemoryEfficientParallelFASTQExtractor:
     def __init__(self, 
                  fastq_files: List[str], 
                  barcode_positions_file: str, 
+                 barcode_sequences: Optional[Union[Dict[str, List[str]], List[str]]] = None,
                  output: str = 'extracted.fastq', 
                  read1_range: Optional[str] = None,
                  read2_range: Optional[str] = None,
                  jitter: int = 5, 
+                 mismatches: int = 1,
                  batch_size: int = 100000,
                  threads: int = None):
         """
@@ -217,8 +241,10 @@ class MemoryEfficientParallelFASTQExtractor:
         print(f"{self.barcode_positions}")
         logger.info(f"{self.barcode_positions}")
 
+        self.barcode_sequences = barcode_sequences
         self.output = output
         self.jitter = jitter
+        self.mismatches = mismatches
         
         # Parse read ranges
         self.read1_range = self._parse_range(read1_range) if read1_range else None
@@ -248,8 +274,10 @@ class MemoryEfficientParallelFASTQExtractor:
                 'file_index': 0 if row['read'] == 'read1' else 1,
                 'start': row['start'],
                 'end': row['end'],
+                'orientation': row['orientation'],
                 'jittered_start': max(0, row['start'] - self.jitter),
-                'jittered_end': row['end'] + self.jitter
+                'jittered_end': row['end'] + self.jitter,
+                'whitelist': row['barcode_whitelist']
             }
             configs.append(config)
         return configs
@@ -273,6 +301,8 @@ class MemoryEfficientParallelFASTQExtractor:
             process_batch_func = partial(
                 process_read_batch, 
                 barcode_configs = self.barcode_configs,
+                barcode_sequences = self.barcode_sequences,
+                mismatches = self.mismatches,
                 read1_range = self.read1_range,
                 read2_range = self.read2_range
             )
@@ -293,4 +323,54 @@ class MemoryEfficientParallelFASTQExtractor:
                     for entry in itertools.chain.from_iterable(processed_entries):
                         out_fastq.write(entry)
                         logger.info(f"{entry.split("\n")[0]}")
-        
+
+@log_errors
+def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
+    """
+    Find all positions of barcodes in a sequence with tolerance for mismatches.
+    
+    Args:
+        sequence (str): The input DNA sequence to search
+        barcodes (List[str]): List of expected barcode sequences
+        max_mismatches (int): Maximum allowed mismatches when matching barcodes
+    
+    Returns:
+        List[Dict]: A list of dictionaries with details of all barcode matches
+    """
+    def hamming_distance(s1, s2):
+        """Calculate Hamming distance between two strings."""
+        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+    
+    # List to store all barcode matches
+    barcode_matches = []
+    
+    # Iterate through all possible start positions
+    for start in range(len(sequence)):
+        for barcode in barcodes:
+            # reverse complement barcode if testing reverse strand
+            if orientation == 'reverse':
+                barcode = reverse_complement(barcode)
+            # Check all possible end positions for this barcode
+            for end in range(start + len(barcode), len(sequence) + 1):
+                candidate = sequence[start:end]
+                
+                # Check if candidate matches barcode within max mismatches
+                if len(candidate) == len(barcode):
+                    mismatches = hamming_distance(candidate, barcode)
+                    if mismatches <= max_mismatches:
+                        match_details = {
+                            'barcode': barcode,
+                            'sequence': candidate,
+                            'start': start,
+                            'end': end,
+                            'mismatches': mismatches,
+                            'peak_dist': abs(jitter-start)
+                        }
+                        barcode_matches.append(match_details)
+                        # Log output
+                        logger.info(f"{match_details}")
+    
+    # Sort matches by peak distance, mismatches, start position
+    barcode_matches.sort(key=lambda x: (x['peak_dist'], x['mismatches'], x['start']))
+
+    return barcode_matches
