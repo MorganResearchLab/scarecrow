@@ -55,6 +55,13 @@ scarecrow reap R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.
         default=5,
         help='Barcode position jitter [5]',
     )
+    subparser.add_argument(
+        "-m", "--mismatches",
+        metavar="mismatches",
+        type=int,
+        default=1,
+        help='Number of allowed mismatches in barcode [1]',
+    )
     group = subparser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "-1", "--read1",
@@ -100,6 +107,7 @@ def validate_reap_args(parser, args):
              read2_range = args.read2, 
              barcodes = args.barcodes,
              jitter = args.jitter,
+             mismatches = args.mismatches,
              batches = args.batch_size, 
              threads = args.threads)
 
@@ -112,13 +120,14 @@ def run_reap(fastqs: List[str],
              read2_range: Optional[str] = None,
              barcodes: List[str] = None,
              jitter: int = 5,
+             mismatches: int = 1,
              batches: int = 10000,
              threads: int = 4) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
     # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow', generate_random_string(), 'log')
+    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
     logger = setup_logger(logfile)
 
     # Extract barcodes

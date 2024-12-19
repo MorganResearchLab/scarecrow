@@ -4,12 +4,18 @@
 @author: David Wragg
 """
 
+
 from argparse import RawTextHelpFormatter
 from scarecrow.fastq_logging import log_errors, setup_logger, logger
 from scarecrow.tools import generate_random_string
+import os
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
+from tqdm import tqdm
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 def parser_harvest(parser):
     subparser = parser.add_parser(
@@ -63,14 +69,24 @@ def run_harvest(barcodes, output_file, num_barcodes, min_distance):
     """
     
     # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow', generate_random_string(), 'log')
+    rndstring = generate_random_string()
+    logfile = '{}_{}.{}'.format('./scarecrow_harvest', rndstring, 'log')
     logger = setup_logger(logfile)
 
     # Read barcode CSV files into a dataframe using pandas
-    results = get_barcode_peaks(barcodes)
+    print(f"\033[34m\nImporting barcode data\033[0m")
+    barcode_data = pd.concat([pd.read_csv(file, sep='\t') for file in barcodes], ignore_index=True)
+    
+    # Identify peaks
+    results = get_barcode_peaks(barcode_data)
     top_peaks = top_peak_positions(results, num_barcodes, min_distance)
     print("\033[34m\nTop peaks\033[0m")
     print(f"{top_peaks}\n")
+
+    # Plot
+    pngfile = '{}_{}.{}'.format('./scarecrow_harvest', rndstring, 'png')
+    print(f"\033[34m\nOutputting histogram to: \033[32m{pngfile}\033[0m")
+    plot_peaks_faceted(barcode_data, outfile = pngfile)
 
     # Open file for writing output
     if output_file:
@@ -125,46 +141,46 @@ def find_peaks_with_details(start_positions, end_positions, names):
 
 
 
-def get_barcode_peaks(barcodes: list):
+def get_barcode_peaks(barcode_data):
     """
     Read barcode CSV data in and identify peaks
     
     Args:
     - barcodes: List of CSV file paths
     """
-    # Read and concatenate all barcode data
-    barcode_data = pd.concat([pd.read_csv(file, sep='\t') for file in barcodes], ignore_index=True)
 
     # Identify barcode alignment peaks
     results = []
     barcode_groups = barcode_data.groupby(["read", "barcode_whitelist", "orientation"])
-    for (read, barcode_whitelist, orientation), group in barcode_groups:
-        # Find peaks with detailed information
-        peaks = find_peaks_with_details(
-            group["start"].values, 
-            group["end"].values, 
-            group["name"].values
-        )
-        
-        # Add some debug logging
-        logger.info(f"Peaks for {read} {barcode_whitelist} {orientation}:")
-        for peak in peaks:
-            logger.info(f"  Peak: start={peak[0]}, end={peak[1]}, read_count={peak[2]}, read_fraction={peak[3]}")
-        
-        # Store the results
-        results.append({
-            "read": read,
-            "barcode_whitelist": barcode_whitelist,
-            "orientation": orientation,
-            "peaks": [
-                {
-                    "start": peak[0], 
-                    "end": peak[1], 
-                    "read_count": peak[2],
-                    "read_fraction": peak[3]
-                } for peak in peaks
-            ]
-        })
+    with tqdm(total = len(barcode_groups), desc = "Processing peaks") as pbar:
+        for (read, barcode_whitelist, orientation), group in barcode_groups:
+            # Find peaks with detailed information
+            peaks = find_peaks_with_details(
+                group["start"].values, 
+                group["end"].values, 
+                group["name"].values
+            )
+            
+            # Add some debug logging
+            logger.info(f"Peaks for {read} {barcode_whitelist} {orientation}:")
+            for peak in peaks:
+                logger.info(f"  Peak: start={peak[0]}, end={peak[1]}, read_count={peak[2]}, read_fraction={peak[3]}")
+            
+            # Store the results
+            results.append({
+                "read": read,
+                "barcode_whitelist": barcode_whitelist,
+                "orientation": orientation,
+                "peaks": [
+                    {
+                        "start": peak[0], 
+                        "end": peak[1], 
+                        "read_count": peak[2],
+                        "read_fraction": peak[3]
+                    } for peak in peaks
+                ]
+            })
+            pbar.update(1)
 
     # Sort the results by the highest unique read count
     sorted_results = sorted(
@@ -232,3 +248,56 @@ def top_peak_positions(results, num_barcodes, min_distance):
     top_positions_df = pd.DataFrame(top_positions).sort_values(by="start", ascending=True)
 
     return top_positions_df
+
+def plot_peaks_faceted(barcode_data, save_fig=True, outfile='plot_faceted.png', dpi:int = 300):
+    """
+    Function to generate histogram of barcode start positions along each read in each barcode orientation
+    """
+   
+    def plot_facet(data):
+        g = sns.FacetGrid(data, col="read", row="barcode_whitelist", hue="read", margin_titles=True, height=3, aspect=3)
+        g.map(sns.histplot, "start", binwidth=1, kde=False)
+        g.set_axis_labels("Barcode start position", "Count", fontsize = 20)
+        g.set_titles(col_template = "{col_name}", row_template = "{row_name}", size = 20)
+        g.set(xlim=(barcode_data['start'].min(), barcode_data['start'].max()))
+        for ax in g.axes.flat:
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=10))
+            if ax.texts:
+                txt = ax.texts[0]
+                ax.text(txt.get_unitless_position()[0], txt.get_unitless_position()[1],
+                        txt.get_text(), transform=ax.transAxes, va='center',
+                        fontsize = 20)
+                ax.texts[0].remove()
+        return g
+    
+    # Create the 'forward' plot
+    g1 = plot_facet(barcode_data[barcode_data['orientation'] == 'forward'])
+    # Save the 'forward' plot temporarily
+    g1.savefig('{}.{}'.format(outfile, 'f.png'), dpi = dpi)
+
+    # Create the 'reverse' plot
+    g2 = plot_facet(barcode_data[barcode_data['orientation'] == 'reverse']) 
+    # Save the 'reverse' plot temporarily
+    g2.savefig('{}.{}'.format(outfile, 'r.png'), dpi = dpi)
+
+    # Combine the two plots side by side using matplotlib
+    fig, axes = plt.subplots(1, 2, figsize=(11, 7))
+
+    # Load the saved plots and display them
+    forward_img = plt.imread('{}.{}'.format(outfile, 'f.png'))
+    os.remove('{}.{}'.format(outfile, 'f.png'))
+    reverse_img = plt.imread('{}.{}'.format(outfile, 'r.png'))
+    os.remove('{}.{}'.format(outfile, 'r.png'))
+    
+    axes[0].imshow(forward_img)
+    axes[0].axis('off')
+    axes[0].set_title("Forward", fontsize = 6)
+
+    axes[1].imshow(reverse_img)
+    axes[1].axis('off')
+    axes[1].set_title("Reverse", fontsize = 6)
+
+    # Finalize and save the combined plot
+    plt.savefig(outfile, dpi = dpi)
+        
+    return None

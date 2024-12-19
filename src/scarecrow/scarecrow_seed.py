@@ -6,6 +6,7 @@
 
 import os
 import pysam
+import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from seqspec.utils import load_spec
@@ -73,7 +74,7 @@ def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
     Search for barcodes in fastq reads, write summary to file.
     """
     # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow', generate_random_string(), 'log')
+    logfile = '{}_{}.{}'.format('./scarecrow_seed', generate_random_string(), 'log')
     logger = setup_logger(logfile)
 
     # import seqspec.yaml
@@ -192,7 +193,7 @@ def process_read_pair_batches(
     """
     # Use all available CPU cores if not specified
     if num_workers is None:
-        num_workers = multiprocessing.cpu_count()
+        num_workers = mp.cpu_count()
     
     # Prepare chunk arguments for parallele processing
     chunk_args = (list(fastq_info[0].keys())[0],
@@ -244,8 +245,6 @@ def process_fastq_chunk(chunk_args):
             - r2_file_path (str): Path to Read 2 FASTQ file
             - batch_size (int): Number of read pairs per batch
             - barcodes (Optional[Dict]): Barcode information
-            - r1_regions (List): Regions for Read 1
-            - r2_regions (List): Regions for Read 2
             - r1_strand (str): Strand information for Read 1
             - r2_strand (str): Strand information for Read 2
     
