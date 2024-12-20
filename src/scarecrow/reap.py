@@ -18,6 +18,8 @@ from typing import List, Tuple, Optional, Dict, Any, Union
 import itertools
 from functools import partial
 import ast
+from collections import defaultdict
+
 
 def parser_reap(parser):
     subparser = parser.add_parser(
@@ -151,6 +153,15 @@ def run_reap(fastqs: List[str],
         threads = threads
     )
     
+    # Process fastq header
+    barcode_counts = process_fastq_headers(output)
+    # Print the barcode counts for each position
+    for i, counts in enumerate(barcode_counts):
+        print(f"Position {i + 1}:")
+        for barcode, count in counts.items():
+            print(f"  {barcode}: {count}")
+
+
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """Parse string range like '0-100' into start and end integers"""
@@ -283,9 +294,8 @@ def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
                             'peak_dist': abs(jitter-start)
                         }
                         barcode_matches.append(match_details)
-                        logger.info(f"{match_details}")
     
-    barcode_matches.sort(key=lambda x: (x['peak_dist'], x['mismatches'], x['start']))
+    barcode_matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
     return barcode_matches
 
 @log_errors   
@@ -319,10 +329,10 @@ def process_read_batch(
     for r1_entry, r2_entry in read_batch:
         # Extract barcodes
         barcodes = []
+
         for config in barcode_configs:
             seq = r1_entry.sequence if config['file_index'] == 0 else r2_entry.sequence
-            barcode = seq[config['jittered_start']:config['jittered_end']]
-            barcodes.append(barcode)
+            barcode = seq[config['jittered_start']:config['jittered_end']]           
             
             # Identify associated whitelist barcode sequences
             whitelist = ast.literal_eval(config['whitelist'])[0]
@@ -336,11 +346,12 @@ def process_read_batch(
                     logger.info(f"{r1_entry.name}")
                     logger.info(f"{seq}")
                     logger.info(f"Peak target:\n{list(config.items())[2:]}")
-                    logger.info(f"Best matched barcode (peak distance, mismatches, start):\n{matches[0]}")
-            
-            
-            
-            
+                    logger.info(f"Best matched barcode (peak distance, mismatches, start):\t{matches[0]['barcode']}")
+                    # Record the best matching barcode for use in the sequence header
+                    barcodes.append(matches[0]['barcode'])
+                else:
+                    barcodes.append('null')
+
         # Determine which read to extract from
         if read1_range:
             extract_seq = r1_entry.sequence[read1_range[0]:read1_range[1]]
@@ -352,9 +363,38 @@ def process_read_batch(
             source_entry = r2_entry
         
         # Modify header with barcodes
-        new_header = f"{source_entry.name}_{('_').join(barcodes)}"
+        new_header = f"{source_entry.name} barcodes={('_').join(barcodes)}"
         
         # Create FASTQ entry
         output_entries.append(f"@{new_header}\n{extract_seq}\n+\n{extract_qual}\n")
     
     return output_entries
+
+
+def process_fastq_headers(file_path):
+    # Create a list of dictionaries, one for each barcode position
+    barcode_counts = []
+
+    # Open the FASTQ file using pysam
+    with pysam.FastxFile(file_path) as fastq_file:
+        for entry in fastq_file:
+            # Extract the header line
+            header = entry.comment
+            
+            # Check if the header contains 'barcodes='
+            if 'barcodes=' in header:
+                # Extract the barcodes string (everything after 'barcodes=')
+                barcodes_str = header.split('barcodes=')[1]
+                
+                # Split the barcodes string by underscore
+                barcodes = barcodes_str.split('_')
+                
+                # Ensure barcode_counts has enough dictionaries for all barcode positions
+                while len(barcode_counts) < len(barcodes):
+                    barcode_counts.append(defaultdict(int))
+                
+                # Update counts in the corresponding dictionaries
+                for i, barcode in enumerate(barcodes):
+                    barcode_counts[i][barcode] += 1
+
+    return barcode_counts

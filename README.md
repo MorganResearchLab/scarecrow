@@ -9,8 +9,8 @@ A toolkit for preprocessing single cell sequencing data.
 * Multi-threading is not well optimised - may be limited by I/O steps.
 * Currently parsing seqspec.yaml file in `scarecrow seed`, however this can probably be modified now to run without the yaml.
 * Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
-* Barcode correction (`error_correct.py`) needs applying in `scarecrow harvest`.
-* Summary table of barcode hits per read needs reporting in `scarecrow harvest`.
+* `scarecrow harvest` barcode counting needs implementing - need to count number of sequences with n barcodes, frequency of each barcode per barcode position, frequency of each comination of barcodes
+
 
 ## Environment
 ```bash
