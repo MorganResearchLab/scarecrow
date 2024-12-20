@@ -12,7 +12,8 @@ from seqspec.seqspec_print import run_seqspec_print
 from seqspec.seqspec_index import get_index_by_primer, format_kallisto_bus
 from argparse import RawTextHelpFormatter
 from typing import List, Dict, Set, Optional
-from scarecrow.fastq_logging import log_errors, setup_logger, logger
+import logging
+from scarecrow.logger import log_errors, setup_logger
 
 def parser_extract(parser):
     subparser = parser.add_parser(
@@ -171,6 +172,8 @@ def process_paired_fastq_batches(
     Returns:
         Dict[str, int]: Barcode count distribution
     """
+    logger = logging.getLogger('scarecrow')
+
     # Use all available CPU cores if not specified
     if num_workers is None:
         num_workers = multiprocessing.cpu_count()
@@ -264,6 +267,7 @@ def safe_extract_sequences(data, region_ids=None, verbose=False, not_found_track
     """
     Safely extract sequences with additional error handling
     """
+    logger = logging.getLogger('scarecrow')
     try:
         return extract_sequences(data, region_ids, verbose, not_found_tracker)
     except Exception as e:
@@ -285,6 +289,8 @@ def extract_sequences(data, region_ids=None, verbose=False, not_found_tracker=No
     Returns:
     dict: Extracted sequences
     """
+    logger = logging.getLogger('scarecrow')
+
     # Input validation
     if data is None:
         if verbose:
@@ -369,6 +375,8 @@ def extract_region_seq(
     Raises:
         ValueError: If neither regions nor barcodes are provided
     """
+    logger = logging.getLogger('scarecrow')
+
     try:
         # Validate input
         if regions is None:
@@ -422,6 +430,8 @@ def write_cDNA_fastq(read_pair: Dict, extracted_sequences: Dict, region_ids: Lis
         extracted_sequences (Dict): Extracted sequences
         output_file (str): Output file path
     """
+    logger = logging.getLogger('scarecrow')
+
     # Implementation depends on specific output requirements
     header = [read_pair['read1']['header']]
     for region_id in region_ids:

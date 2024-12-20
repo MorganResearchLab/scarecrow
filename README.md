@@ -7,7 +7,6 @@ A toolkit for preprocessing single cell sequencing data.
 ### Todo
 
 * Multi-threading is not well optimised - may be limited by I/O steps.
-* Logger is currently generating two instances - could do with being a single instance.
 * Currently parsing seqspec.yaml file in `scarecrow seed`, however this can probably be modified now to run without the yaml.
 * Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
 * Barcode correction (`error_correct.py`) needs applying in `scarecrow harvest`.

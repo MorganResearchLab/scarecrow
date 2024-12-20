@@ -6,13 +6,14 @@
 
 
 from argparse import RawTextHelpFormatter
-from scarecrow.fastq_logging import log_errors, setup_logger, logger
+import logging
+from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 import os
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
-from tqdm import tqdm
+from rich.progress import track
 import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -140,7 +141,7 @@ def find_peaks_with_details(start_positions, end_positions, names):
     return peaks_with_details
 
 
-
+@log_errors
 def get_barcode_peaks(barcode_data):
     """
     Read barcode CSV data in and identify peaks
@@ -148,39 +149,40 @@ def get_barcode_peaks(barcode_data):
     Args:
     - barcodes: List of CSV file paths
     """
-
+    logger = logging.getLogger('scarecrow')
+    
     # Identify barcode alignment peaks
     results = []
     barcode_groups = barcode_data.groupby(["read", "barcode_whitelist", "orientation"])
-    with tqdm(total = len(barcode_groups), desc = "Processing peaks") as pbar:
-        for (read, barcode_whitelist, orientation), group in barcode_groups:
-            # Find peaks with detailed information
-            peaks = find_peaks_with_details(
-                group["start"].values, 
-                group["end"].values, 
-                group["name"].values
-            )
-            
-            # Add some debug logging
-            logger.info(f"Peaks for {read} {barcode_whitelist} {orientation}:")
-            for peak in peaks:
-                logger.info(f"  Peak: start={peak[0]}, end={peak[1]}, read_count={peak[2]}, read_fraction={peak[3]}")
-            
-            # Store the results
-            results.append({
-                "read": read,
-                "barcode_whitelist": barcode_whitelist,
-                "orientation": orientation,
-                "peaks": [
-                    {
-                        "start": peak[0], 
-                        "end": peak[1], 
-                        "read_count": peak[2],
-                        "read_fraction": peak[3]
-                    } for peak in peaks
-                ]
-            })
-            pbar.update(1)
+    #with tqdm(total = len(barcode_groups), desc = "Processing peaks") as pbar:
+    for (read, barcode_whitelist, orientation), group in track(barcode_groups, total = len(barcode_groups)):
+        # Find peaks with detailed information
+        peaks = find_peaks_with_details(
+            group["start"].values, 
+            group["end"].values, 
+            group["name"].values
+        )
+        
+        # Add some debug logging
+        logger.info(f"Peaks for {read} {barcode_whitelist} {orientation}:")
+        for peak in peaks:
+            logger.info(f"  Peak: start={peak[0]}, end={peak[1]}, read_count={peak[2]}, read_fraction={peak[3]}")
+        
+        # Store the results
+        results.append({
+            "read": read,
+            "barcode_whitelist": barcode_whitelist,
+            "orientation": orientation,
+            "peaks": [
+                {
+                    "start": peak[0], 
+                    "end": peak[1], 
+                    "read_count": peak[2],
+                    "read_fraction": peak[3]
+                } for peak in peaks
+            ]
+        })
+#        pbar.update(1)
 
     # Sort the results by the highest unique read count
     sorted_results = sorted(

@@ -10,10 +10,11 @@ import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from seqspec.utils import load_spec
-from scarecrow.fastq_logging import log_errors, setup_logger, logger
+import logging
+from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import FastqProcessingError, reverse_complement, count_fastq_reads, region_indices, generate_random_string
 from typing import List, Dict, Optional, Set, Union
-from tqdm import tqdm
+from rich.progress import track
 
 def parser_seed(parser):
     subparser = parser.add_parser(
@@ -113,6 +114,7 @@ def parse_seed_arguments(barcode_args):
     Returns:
         Dict[str, List[str]]: Dictionary of barcodes with keys as region identifiers
     """
+    logger = logging.getLogger('scarecrow')
 
     expected_barcodes = {}
     
@@ -148,6 +150,7 @@ def read_barcode_file(file_path):
     Returns:
         List[str]: List of unique barcode sequences
     """
+    logger = logging.getLogger('scarecrow')
 
     try:
         with open(file_path, 'r') as f:
@@ -191,6 +194,8 @@ def process_read_pair_batches(
     Returns:
         Dict[str, int]: Barcode count distribution
     """
+    logger = logging.getLogger('scarecrow')
+
     # Use all available CPU cores if not specified
     if num_workers is None:
         num_workers = mp.cpu_count()
@@ -216,18 +221,16 @@ def process_read_pair_batches(
             batches = future.result()
             
             # Progress tracking
-            with tqdm(total=len(batches), desc="Processing batches") as pbar:
-                for batch in batches:
-                    for read_pair in batch:
-                        try:
-                            write_barcodes_CSV(read_pair, output_handler)
-                        
-                        except Exception as e:
-                            logger.error(f"Error processing read pair: {e}")
+            for batch in track(batches, total = len(batches)):
+                for read_pair in batch:
+                    try:
+                        write_barcodes_CSV(read_pair, output_handler)
                     
-                    total_read_pairs += len(batch)
-                    pbar.update(1)
-        
+                    except Exception as e:
+                        logger.error(f"Error processing read pair: {e}")
+                
+                total_read_pairs += len(batch)
+
         return barcode_counts
     
     except Exception as e:
@@ -251,6 +254,10 @@ def process_fastq_chunk(chunk_args):
     Returns:
         List[Dict]: Processed batches of read pair information
     """
+    logfile = '{}_{}.{}'.format('./scarecrow_seed_barcodes', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+
+
     r1_file_path, r2_file_path, batch_size, barcodes, \
     r1_strand, r2_strand = chunk_args
     
@@ -258,21 +265,20 @@ def process_fastq_chunk(chunk_args):
     
     try:
         reads = count_fastq_reads(r1_file_path)
-        with tqdm(total = reads, desc = "Processing reads") as pbar:
+        with pysam.FastxFile(r1_file_path) as r1_fastq, pysam.FastxFile(r2_file_path) as r2_fastq:
 
-            with pysam.FastxFile(r1_file_path) as r1_fastq, \
-                pysam.FastxFile(r2_file_path) as r2_fastq:
+            batch = []
+            batch_count = 0
 
-                batch = []
-                batch_count = 0
-                
-                while True:
-                    try:
-                        r1_entry = next(r1_fastq)
-                        r2_entry = next(r2_fastq)
-                    except StopIteration:
-                        break
-                    
+            while True:
+                try:
+                    r1_entry = next(r1_fastq)
+                    r2_entry = next(r2_fastq)
+                except StopIteration:
+                    break
+
+                for r1_entry, r2_entry in track(zip(r1_fastq, r2_fastq), description="Processing FastQ files", total=reads):
+                                   
                     # Barcode or region extraction
                     r1_region_details = extract_barcodes(r1_entry, rev = False, expected_barcodes = barcodes)                    
                     r2_region_details = extract_barcodes(r2_entry, rev = True, expected_barcodes = barcodes)
@@ -293,8 +299,7 @@ def process_fastq_chunk(chunk_args):
                         }
                     }
                     
-                    batch.append(read_pair_info)
-                    pbar.update(1)
+                    batch.append(read_pair_info)          
                     
                     # Yield batch when full
                     if len(batch) >= batch_size:
@@ -335,6 +340,8 @@ def extract_barcodes(
     Raises:
         ValueError: If neither regions nor barcodes are provided
     """
+    logger = logging.getLogger('scarecrow')
+
     try:
         # Validate input
         if expected_barcodes is None:
@@ -417,6 +424,8 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
     Returns:
         List[Dict]: A list of dictionaries with details of all barcode matches
     """
+    logger = logging.getLogger('scarecrow')
+
     def hamming_distance(s1, s2):
         """Calculate Hamming distance between two strings."""
         return sum(c1 != c2 for c1, c2 in zip(s1, s2))
@@ -464,6 +473,8 @@ def write_barcodes_CSV(read_pair: List, output_handler):
         read_key (List): List of barcodes found in read pairs
         output_file (str): Output file path
     """
+    logger = logging.getLogger('scarecrow')
+
     for read_key in ['read1', 'read2']:
     # Get barcodes for current read
         read_barcodes = read_pair.get(read_key, {}).get('regions', [])

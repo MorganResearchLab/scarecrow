@@ -7,7 +7,8 @@ import resource
 import gzip
 from seqspec import Assay
 from seqspec.seqspec_index import get_index_by_primer
-from scarecrow.fastq_logging import logger, log_errors
+import logging
+from scarecrow.logger import log_errors
 from typing import List, Dict, Set
 import string, random
 
@@ -47,6 +48,8 @@ def region_indices(spec: Assay, fastqs):
     """
     Identify library elements contained in sequencing reads
     """
+    logger = logging.getLogger('scarecrow')
+
     logger.info(f"Library elements identified by seqspec.get_index_by_primer")
     indices = []
     for fastq in fastqs:

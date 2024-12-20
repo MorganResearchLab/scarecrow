@@ -1,4 +1,6 @@
 import logging
+from rich.logging import RichHandler
+from logging.handlers import WatchedFileHandler  # Add this import
 import functools
 import os
 import sys
@@ -22,34 +24,35 @@ def setup_logger(log_file: str = 'scarecrow.log',
 
     # Create logger
     logger = logging.getLogger('scarecrow')
-    logger.setLevel(log_level)
 
-    # Clear any existing handlers to prevent duplicate logging
-    logger.handlers.clear()
+    # If logger already has handlers, remove them
+    if logger.hasHandlers():
+        logger.handlers.clear()
 
-    # File Handler
     try:
-        file_handler = logging.FileHandler(log_file, mode='w')
+        shell_handler = RichHandler()
+        # Use WatchedFileHandler instead of FileHandler for better multiprocess support
+        file_handler = WatchedFileHandler(log_file, mode='a')
+        logger.setLevel(log_level)
+        shell_handler.setLevel(log_level)
         file_handler.setLevel(log_level)
+
+        # Clear any existing handlers to prevent duplicate logging
+        logger.handlers.clear()
         
         # Create formatter
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        file_handler.setFormatter(formatter)
-        
-        # Add file handler to logger
+        fmt_shell = '%(message)s'
+        fmt_file = '%(levelname)s %(asctime)s [%(filename)s:%(funcName)s:%(lineno)d] %(message)s'
+        shell_formatter = logging.Formatter(fmt_shell)
+        file_formatter = logging.Formatter(fmt_file)
+        shell_handler.setFormatter(shell_formatter)
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(shell_handler)
         logger.addHandler(file_handler)
-        
-        # Add a stream handler to capture any potential logging errors
-        stream_handler = logging.StreamHandler(sys.stderr)
-        stream_handler.setLevel(logging.ERROR)
-        stream_handler.setFormatter(formatter)
-        logger.addHandler(stream_handler)
-        
+ 
         # Test logging
         logger.info("Logger successfully initialized")
+
     except Exception as e:
         # Fallback error handling
         print(f"CRITICAL: Unable to set up logger: {e}", file=sys.stderr)
@@ -73,20 +76,4 @@ def log_errors(func):
 
 
 # Global
-logger = setup_logger()
-
-# Demonstration of logging usage
-@log_errors
-def example_function():
-    logger.info("This is an informational message")
-    logger.warning("This is a warning message")
-    logger.error("This is an error message")
-    
-    # Simulate an error
-    x = 1 / 0
-
-if __name__ == "__main__":
-    try:
-        example_function()
-    except Exception:
-        print("Function execution failed. Check log file.")
+#logger = setup_logger()
