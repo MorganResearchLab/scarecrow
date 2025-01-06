@@ -154,13 +154,23 @@ def run_reap(fastqs: List[str],
     )
     
     # Process fastq header
-    barcode_counts = process_fastq_headers(output)
-    # Print the barcode counts for each position
+    barcode_counts, cell_barcodes = process_fastq_headers(output)
+    # Log the barcode counts for each position
     for i, counts in enumerate(barcode_counts):
-        print(f"Position {i + 1}:")
         for barcode, count in counts.items():
-            print(f"  {barcode}: {count}")
+            logger.info(f"Barcode index: {i + 1}\tBarcode: {barcode}\tCount: {count}")
+        barcodes = pd.DataFrame(list(barcode_counts[i].items()), columns=["Barcode", "Count"]).sort_values(by="Count")
+        barcodes.insert(0, "Index", i + 1)
+        if i == 0:
+            barcodes.to_csv('{}.{}'.format(output, 'barcode.counts.csv'), index = False)
+        else:
+            barcodes.to_csv('{}.{}'.format(output, 'barcode.counts.csv'), index = False, mode = "a", header = False)
 
+    # Log the combined barcode counts (i.e. cell sequence counts)
+    for cell, count in cell_barcodes.items():
+        logger.info(f"Cell barcode: {cell}\tCount: {count}")
+    barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["CellBarcode", "Count"]).sort_values(by="Count")
+    barcodes.to_csv('{}.{}'.format(output, 'cell.counts.csv'), index = False)
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:
@@ -374,6 +384,7 @@ def process_read_batch(
 def process_fastq_headers(file_path):
     # Create a list of dictionaries, one for each barcode position
     barcode_counts = []
+    cell_barcodes = defaultdict(int)
 
     # Open the FASTQ file using pysam
     with pysam.FastxFile(file_path) as fastq_file:
@@ -385,6 +396,7 @@ def process_fastq_headers(file_path):
             if 'barcodes=' in header:
                 # Extract the barcodes string (everything after 'barcodes=')
                 barcodes_str = header.split('barcodes=')[1]
+                cell_barcodes[barcodes_str] += 1
                 
                 # Split the barcodes string by underscore
                 barcodes = barcodes_str.split('_')
@@ -397,4 +409,4 @@ def process_fastq_headers(file_path):
                 for i, barcode in enumerate(barcodes):
                     barcode_counts[i][barcode] += 1
 
-    return barcode_counts
+    return barcode_counts, cell_barcodes

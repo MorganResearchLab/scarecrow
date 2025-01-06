@@ -8,7 +8,7 @@ library(ggpubr)
 #outfile <- args[2]
 
 args <- NULL
-indir <- "~/Documents/scarecrow_test"
+indir <- "~/Documents/scarecrow_test/results"
 
 # Read barcode results files
 data <- lapply(
