@@ -257,6 +257,7 @@ def process_fastq_chunk(chunk_args):
     """
     logfile = '{}_{}.{}'.format('./scarecrow_seed_barcodes', generate_random_string(), 'log')
     logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
 
 
     r1_file_path, r2_file_path, batch_size, barcodes, \
