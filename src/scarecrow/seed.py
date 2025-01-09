@@ -446,7 +446,7 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
                 # currently the end position for barcodes of ERR12167395 are 1 higher than expected 
                 # (ie 10-18 instead of 10-17 for an 8 bp barcode)
                 # Same logic is in scarecrow reap match_barcode
-                for end in range(start + len(barcode), len(sequence)):
+                for end in range(start + len(barcode)-1, len(sequence)):
                     candidate = sequence[start:end]
                     
                     # Check if candidate matches barcode within max mismatches
