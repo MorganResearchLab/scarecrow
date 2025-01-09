@@ -9,7 +9,6 @@ import pysam
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from seqspec.utils import load_spec
 import logging
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import FastqProcessingError, reverse_complement, count_fastq_reads, region_indices, generate_random_string
@@ -24,14 +23,14 @@ Search fastq reads for barcodes in whitelists
 
 Example:
 
-scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
+scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
 ---
 """,
         help="Search fastq reads for barcodes",
         formatter_class=RawTextHelpFormatter,
     )
-    subparser.add_argument("yaml", help="Sequencing specification yaml file")
-    subparser.add_argument("fastqs", nargs="+", help="List of FASTQ files")
+    subparser.add_argument("--fastqs", nargs="+", help="List of FASTQ files")
+    subparser.add_argument("--strands", nargs="+", help="Orientations of FASTQ files (e.g. pos neg)")
     subparser.add_argument(
         "-c", "--barcodes",
         metavar="barcodes",
@@ -62,15 +61,15 @@ scarecrow seed spec.yaml R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:B
     return subparser
 
 def validate_seed_args(parser, args):
-    run_seed(yaml = args.yaml, 
-             fastqs = [f for f in args.fastqs],
+    run_seed(fastqs = [f for f in args.fastqs],
+             strands = [s for s in args.strands],
              barcodes = args.barcodes, 
              output_file = args.out, 
              batches = args.batch_size, 
              threads = args.threads)
 
 @log_errors
-def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
+def run_seed(fastqs, strands, barcodes, output_file, batches, threads):
     """
     Search for barcodes in fastq reads, write summary to file.
     """
@@ -79,12 +78,35 @@ def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
     logger = setup_logger(logfile)
     logger.info(f"logfile: ${logfile}")
 
-    # import seqspec.yaml
-    spec = load_spec(yaml)
+    # Originally we imported a seqspec yaml and called region_indices (scarecrow tools)
+    # which would return the following structure:
+    #[
+    #{
+    #    "R1.fastq": [  # fastq filename as key
+    #        # List of RegionCoordinate objects for each region
+    #        # From the YAML, these would include regions like I5, R1, cdna, BC1, etc.
+    #        RegionCoordinate(
+    #            region_id: str,  # e.g. "BC1", "cdna", etc.
+    #            start: int,      # 0-indexed start position
+    #            stop: int        # 0-indexed stop position
+    #        ),
+    #        # ... more regions
+    #    ],
+    #    "strand": "pos"  # or "neg" depending on the read
+    #},
+    ## ... one dict per fastq file
+    #]
 
-    # Run seqspec get_index_by_primer
-    # This structures fastq_info in an appropriate format for different tools
-    fastq_info = region_indices(spec, fastqs)
+    # This was achieved as follows:
+    
+    # spec = load_spec(yaml)
+    # fastq_info = region_indices(spec, fastqs)
+
+    # However, we only use the fastq and strand information, so don't need
+    # the level of complexity of the YAML file. However, for possible
+    # future-compataibility, have retained the same structure when reading
+    # in the fastqs and strands information:
+    fastq_info = create_fastq_info(fastqs, strands)
 
     # Load barcodes
     expected_barcodes = parse_seed_arguments(barcodes)  
@@ -103,6 +125,11 @@ def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
 
     return 
 
+def create_fastq_info(fastqs, strands):
+    return [
+        {fastq: [], "strand": strand}
+        for fastq, strand in zip(fastqs, strands)
+    ]
 
 @log_errors
 def parse_seed_arguments(barcode_args):
@@ -201,7 +228,7 @@ def process_read_pair_batches(
     if num_workers is None:
         num_workers = mp.cpu_count()
     
-    # Prepare chunk arguments for parallele processing
+    # Prepare chunk arguments for parallel processing
     chunk_args = (list(fastq_info[0].keys())[0],
                   list(fastq_info[1].keys())[0],
                   batch_size, barcodes,
@@ -444,10 +471,10 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
                 if orientation == 'reverse':
                     barcode = reverse_complement(barcode)
                 # Check all possible end positions for this barcode
-                # Can't recall why I have + 1 in the end range, to remove and check it behaves as expected
-                # currently the end position for barcodes of ERR12167395 are 1 higher than expected 
-                # (ie 10-18 instead of 10-17 for an 8 bp barcode)
-                # Same logic is in scarecrow reap match_barcode
+                # Deduct 1 from barcode length when adding to start position so that
+                # the extracted sequence is correct length, also need to deduct 1
+                # from the end position when reporting the match details for the same
+                # reason (i.e. a barcode of len 8, starting at pos 10 should end at pos 17)
                 for end in range(start + len(barcode)-1, len(sequence)):
                     candidate = sequence[start:end]
                     
@@ -460,7 +487,7 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
                                 'orientation': orientation,
                                 'sequence': candidate,
                                 'start': start,
-                                'end': end,
+                                'end': end-1,
                                 'mismatches': mismatches
                             }
                             barcode_matches.append(match_details)
