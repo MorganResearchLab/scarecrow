@@ -132,6 +132,7 @@ def run_reap(fastqs: List[str],
     # Global logger setup
     logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
     logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
 
     # Extract barcodes
     expected_barcodes = parse_seed_arguments(barcodes)  
@@ -214,6 +215,7 @@ def extract_sequences_parallel(
     # Setup logging
     logfile = '{}_{}.{}'.format('./scarecrow_reap_barcodes', generate_random_string(), 'log')
     logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
 
 
     # Read and parse barcode positions

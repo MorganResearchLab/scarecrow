@@ -77,6 +77,7 @@ def run_seed(yaml, fastqs, barcodes, output_file, batches, threads):
     # Global logger setup
     logfile = '{}_{}.{}'.format('./scarecrow_seed', generate_random_string(), 'log')
     logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
 
     # import seqspec.yaml
     spec = load_spec(yaml)

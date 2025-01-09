@@ -73,6 +73,7 @@ def run_harvest(barcodes, output_file, num_barcodes, min_distance):
     rndstring = generate_random_string()
     logfile = '{}_{}.{}'.format('./scarecrow_harvest', rndstring, 'log')
     logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
 
     # Read barcode CSV files into a dataframe using pandas
     print(f"\033[34m\nImporting barcode data\033[0m")
