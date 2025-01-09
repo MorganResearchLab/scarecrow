@@ -276,6 +276,16 @@ def extract_sequences_parallel(
 def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
     """
     Find all positions of barcodes in a sequence with tolerance for mismatches.
+
+    Args:
+        sequence: query sequence to search for barcodes in
+        barcodes: whitelist of barcode sequences
+        orientation: orientation of barcode sequence to check
+        max_mismatches: max number of mismatches allowed between query and barcode sequences
+        jitter: jitter distance
+    
+    Returns:
+        List of barcode matches
     """
     logger = logging.getLogger('scarecrow')
 
@@ -289,7 +299,10 @@ def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
         for barcode in barcodes:
             if orientation == 'reverse':
                 barcode = reverse_complement(barcode)
-            for end in range(start + len(barcode), len(sequence) + 1):
+            # Can't recall why I have + 1 in the end range, to remove and check it behaves as expected
+            # currently the end position for barcodes of ERR12167395 are 1 higher than expected 
+            # (ie 10-18 instead of 10-17 for an 8 bp barcode)
+            for end in range(start + len(barcode), len(sequence)):
                 candidate = sequence[start:end]
                 
                 if len(candidate) == len(barcode):
@@ -324,8 +337,11 @@ def process_read_batch(
     Args:
         read_batch: List of tuples containing (read1, read2) entries
         barcode_configs: Configurations for barcode extraction
+        barcode_sequences: Barcode whitelist dictionary of sequences
         read1_range: Range to extract from read1 if applicable
         read2_range: Range to extract from read2 if applicable
+        mismatches: Integer for max number of mismatches between query and barcode sequences
+        logfile: Filename for logger to write to
     
     Returns:
         List of formatted FASTQ entries
@@ -382,6 +398,15 @@ def process_read_batch(
 
 
 def process_fastq_headers(file_path):
+    """
+    Process fastq header to report on barcode counts
+
+    Args:
+        file_path: fastq file to operate on
+    
+    Returns:
+        List of barcode counts and list of barcode combination counts
+    """
     # Create a list of dictionaries, one for each barcode position
     barcode_counts = []
     cell_barcodes = defaultdict(int)

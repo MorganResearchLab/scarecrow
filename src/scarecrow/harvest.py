@@ -254,6 +254,9 @@ def top_peak_positions(results, num_barcodes, min_distance):
 def plot_peaks_faceted(barcode_data, save_fig=True, outfile='plot_faceted.png', dpi:int = 300):
     """
     Function to generate histogram of barcode start positions along each read in each barcode orientation
+
+    Issues:
+        Facets are not always consistent (i.e. Forward could be [read1,read2] while Reverse could be [read2,read1])
     """
    
     def plot_facet(data):
