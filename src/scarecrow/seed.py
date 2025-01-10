@@ -29,8 +29,16 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
         help="Search fastq reads for barcodes",
         formatter_class=RawTextHelpFormatter,
     )
-    subparser.add_argument("--fastqs", nargs="+", help="List of FASTQ files")
-    subparser.add_argument("--strands", nargs="+", help="Orientations of FASTQ files (e.g. pos neg)")
+    subparser.add_argument(
+        "--fastqs", 
+        nargs="+", 
+        help="Pair of FASTQ files")
+    subparser.add_argument(
+        "--strands", 
+        metavar="strands",
+        nargs="+", 
+        default=['pos', 'neg'],
+        help="Orientations of FASTQ files (e.g. pos neg)")
     subparser.add_argument(
         "-c", "--barcodes",
         metavar="barcodes",
@@ -107,6 +115,7 @@ def run_seed(fastqs, strands, barcodes, output_file, batches, threads):
     # future-compataibility, have retained the same structure when reading
     # in the fastqs and strands information:
     fastq_info = create_fastq_info(fastqs, strands)
+    logger.info(f"{fastq_info}")
 
     # Load barcodes
     expected_barcodes = parse_seed_arguments(barcodes)  
@@ -152,8 +161,12 @@ def parse_seed_arguments(barcode_args):
             key, label, file_path = arg.split(':')
             
             # Read barcodes from the file
-            barcodes = read_barcode_file(file_path)
-            
+            if os.path.exists(file_path):
+                barcodes = read_barcode_file(file_path)
+            else:
+                logger.warning(f"File not found: {file_path}")
+                raise RuntimeError(f"File not found: {file_path}")
+                        
             # Store barcodes in the dictionary
             if barcodes:
                 expected_barcodes[key,label] = barcodes                
@@ -286,12 +299,18 @@ def process_fastq_chunk(chunk_args):
     logger = setup_logger(logfile)
     logger.info(f"logfile: ${logfile}")
 
-
-    r1_file_path, r2_file_path, batch_size, barcodes, \
-    r1_strand, r2_strand = chunk_args
+    # Chunk arguments
+    r1_file_path, r2_file_path, batch_size, barcodes, r1_strand, r2_strand = chunk_args
     
-    processed_batches = []
+    # Test if fastq files exist
+    if os.path.exists(r1_file_path) is False:
+        logger.warning(f"File not found: {r1_file_path}")        
+        raise RuntimeError(f"File not found: {r1_file_path}")
+    if os.path.exists(r2_file_path) is False:
+        logger.warning(f"File not found: {r2_file_path}")
+        raise RuntimeError(f"File not found: {r2_file_path}")
     
+    processed_batches = []   
     try:
         reads = count_fastq_reads(r1_file_path)
         logger.info(f"Number of read pairs: {reads}")
