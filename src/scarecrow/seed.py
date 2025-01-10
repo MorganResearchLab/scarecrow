@@ -294,17 +294,13 @@ def process_fastq_chunk(chunk_args):
     
     try:
         reads = count_fastq_reads(r1_file_path)
+        logger.info(f"Number of read pairs: {reads}")
         with pysam.FastxFile(r1_file_path) as r1_fastq, pysam.FastxFile(r2_file_path) as r2_fastq:
 
             batch = []
             batch_count = 0
 
             while True:
-                try:
-                    r1_entry = next(r1_fastq)
-                    r2_entry = next(r2_fastq)
-                except StopIteration:
-                    break
 
                 for r1_entry, r2_entry in track(zip(r1_fastq, r2_fastq), description="Processing FastQ files", total=reads):
                                    
@@ -339,6 +335,13 @@ def process_fastq_chunk(chunk_args):
                 # Yield final batch if not empty
                 if batch:
                     processed_batches.append(batch)
+
+                # Move onto next read
+                try:
+                    r1_entry = next(r1_fastq)
+                    r2_entry = next(r2_fastq)
+                except StopIteration:
+                    break
         
         return processed_batches
     
@@ -472,22 +475,20 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
                     barcode = reverse_complement(barcode)
                 # Check all possible end positions for this barcode
                 # Deduct 1 from barcode length when adding to start position so that
-                # the extracted sequence is correct length, also need to deduct 1
-                # from the end position when reporting the match details for the same
-                # reason (i.e. a barcode of len 8, starting at pos 10 should end at pos 17)
-                for end in range(start + len(barcode)-1, len(sequence)):
+                # the extracted sequence is correct length
+                for end in range(start + len(barcode)-1, len(sequence)+1):
                     candidate = sequence[start:end]
-                    
                     # Check if candidate matches barcode within max mismatches
                     if len(candidate) == len(barcode):
+                        logger.info(f"query range:{start}:{end}\tcandidate:{candidate}\tbarcode:{barcode}")
                         mismatches = hamming_distance(candidate, barcode)
                         if mismatches <= max_mismatches:
                             match_details = {
                                 'barcode': barcode,
                                 'orientation': orientation,
                                 'sequence': candidate,
-                                'start': start,
-                                'end': end-1,
+                                'start': start + 1, # for 1-based start
+                                'end': end,
                                 'mismatches': mismatches
                             }
                             barcode_matches.append(match_details)

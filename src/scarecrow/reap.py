@@ -301,10 +301,8 @@ def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
         for barcode in barcodes:
             if orientation == 'reverse':
                 barcode = reverse_complement(barcode)
-            # Can't recall why I have + 1 in the end range, to remove and check it behaves as expected
-            # currently the end position for barcodes of ERR12167395 are 1 higher than expected 
-            # (ie 10-18 instead of 10-17 for an 8 bp barcode)
-            for end in range(start + len(barcode)-1, len(sequence)):
+            # Check barcode positions
+            for end in range(start + len(barcode)-1, len(sequence)+1):
                 candidate = sequence[start:end]
                 
                 if len(candidate) == len(barcode):
@@ -313,7 +311,7 @@ def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
                         match_details = {
                             'barcode': barcode,
                             'sequence': candidate,
-                            'start': start,
+                            'start': start + 1, # for 1-based start
                             'end': end,
                             'mismatches': mismatches,
                             'peak_dist': abs(jitter-start)
