@@ -40,8 +40,11 @@ ggarrange(p1,p2,ncol=2,labels=c("forward", "reverse")) %>%
 
 
 
-counts <- do.call("rbind", lapply(1:100, function(i) 
-  table(data[which(data$read == "read1" & data$orientation == "forward" & data$start == i),]$barcode_whitelist)))
+counts <- data.frame(do.call("rbind", lapply(1:100, function(i) 
+  table(data[which(data$read == "read2" & data$orientation == "forward" & data$start == i),]$barcode_whitelist))))
+counts$max <- apply(counts,1,max)
+
+  
 
 
 # Notes

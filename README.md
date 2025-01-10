@@ -61,11 +61,19 @@ scarecrow reap <paired_fastq_R1> <paired_fastq_R2> --barcode_positions <barcode_
 ### Example
 ```bash
 # seed
-scarecrow seed /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/evercode-v3.yaml \
-    /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
-    /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
+scarecrow seed --fastqs /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
+                        /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
+    --strands pos neg \
     --barcodes BC1:v1:/Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/BC1.txt \
     --out ./results/barcodes_BC1.csv
+
+
+scarecrow seed --fastqs /Users/s14dw4/Documents/scarecrow_test/test_1b.fastq \
+                        /Users/s14dw4/Documents/scarecrow_test/test_2b.fastq \
+    --barcodes BC1:v1:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_R3_v3.barcodes \
+    --out ./results/test.csv
+
+
 
 # harvest
 FILES=(./results/barcodes*csv)
@@ -73,12 +81,13 @@ scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 10 \
     --out ./barcode_positions.csv
 
 # reap
-scarecrow reap /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R1.fastq \
-    /Users/s14dw4/Documents/Repos/scarecrow/specs/evercode/R2.fastq \
+scarecrow reap \
+    --fastqs /Users/s14dw4/Documents/scarecrow_test/10K_1.fastq \
+             /Users/s14dw4/Documents/scarecrow_test/10K_2.fastq \
     -p ./barcode_positions.csv -j 5 -m 1 \
     --barcodes \
-        BC1:v1:/Users/s14dw4/Documents/Repos/scarecrow/barcodes/bc_data_v1.barcodes \
+        BC1:R1_v3:/Users/s14dw4/Documents/Repos/scarecrow/barcodes/bc_data_n123_R1_v3_5.barcodes \
         BC2:v1:/Users/s14dw4/Documents/Repos/scarecrow/barcodes/bc_data_v1.barcodes \
-        BC3:n198:/Users/s14dw4/Documents/Repos/scarecrow/barcodes/bc_data_n198_v5.barcodes \
-    --read2 0-100 --out ./cDNA.fq
+        BC3:R3_v3:/Users/s14dw4/Documents/Repos/scarecrow/barcodes/bc_data_R3_v3.barcodes \
+    --read1 0-64 --out ./cDNA.fq    
 ```
