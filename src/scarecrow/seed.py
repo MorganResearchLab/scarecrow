@@ -480,7 +480,7 @@ def find_barcode_positions(sequence, barcodes, max_mismatches=1):
                     candidate = sequence[start:end]
                     # Check if candidate matches barcode within max mismatches
                     if len(candidate) == len(barcode):
-                        logger.info(f"query range:{start}:{end}\tcandidate:{candidate}\tbarcode:{barcode}")
+                        #logger.info(f"query range:{start}:{end}\tcandidate:{candidate}\tbarcode:{barcode}")
                         mismatches = hamming_distance(candidate, barcode)
                         if mismatches <= max_mismatches:
                             match_details = {
