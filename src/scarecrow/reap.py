@@ -137,10 +137,11 @@ def run_reap(fastqs: List[str],
     logger = setup_logger(logfile)
     logger.info(f"logfile: ${logfile}")
 
-    # Extract barcodes
+    # Extract barcodes and convert whitelist to set
     expected_barcodes = parse_seed_arguments(barcodes)  
     logger.info(f"Barcode whitelist:")
     for key, barcode in expected_barcodes.items():
+        expected_barcodes[key] = set(barcode)
         logger.info(f"{key}: {barcode}")
 
     # Extract barcodes and target sequence
@@ -312,27 +313,56 @@ def match_barcode(sequence, barcodes, orientation, max_mismatches, jitter):
         return sum(c1 != c2 for c1, c2 in zip(s1, s2))
     
     barcode_matches = []
-    
-    for start in range(len(sequence)):
-        for barcode in barcodes:
-            if orientation == 'reverse':
-                barcode = reverse_complement(barcode)
-            # Check barcode positions
-            for end in range(start + len(barcode)-1, len(sequence)+1):
+    matchfound = False
+                    
+    # Check barcode positions within fastq subsequence
+    for start in range(len(sequence)):             
+            # Assumption here is that all barcodes on a whitelist are of same length       
+            for end in range(start + len(list(barcodes)[0])-1, len(sequence)+1):
+
+                # Get fastq sequence
                 candidate = sequence[start:end]
+
+                # First perform set intersection to check if perfect match
+                candidate_set = set([candidate])
+                if orientation == 'reverse':
+                    candidate_set = set([reverse_complement(candidate)]) # Easier to reverse complement query than whitelist
+                candidate_intersection = candidate_set.intersection(barcodes)
                 
-                if len(candidate) == len(barcode):
-                    mismatches = hamming_distance(candidate, barcode)
-                    if mismatches <= max_mismatches:
-                        match_details = {
-                            'barcode': barcode,
-                            'sequence': candidate,
-                            'start': start + 1, # for 1-based start
-                            'end': end,
-                            'mismatches': mismatches,
-                            'peak_dist': abs(jitter-start)
-                        }
-                        barcode_matches.append(match_details)
+                # If no perfect match then run Hamming distance check
+                if len(candidate_intersection) == 0:
+
+                    for barcode in barcodes:
+                        if orientation == 'reverse':
+                            barcode = reverse_complement(barcode)
+        
+                        if len(candidate) == len(barcode):
+                            mismatches = hamming_distance(candidate, barcode)
+                            if mismatches <= max_mismatches:
+                                match_details = {
+                                    'barcode': barcode,
+                                    'sequence': candidate,
+                                    'start': start + 1, # for 1-based start
+                                    'end': end,
+                                    'mismatches': mismatches,
+                                    'peak_dist': abs(jitter-start)
+                                }
+                                barcode_matches.append(match_details)
+                else:
+                    match_details = {
+                        'barcode': list(candidate_intersection)[0],
+                        'sequence': candidate,
+                        'start': start + 1, # for 1-based start
+                        'end': end,
+                        'mismatches': 0,
+                        'peak_dist': abs(jitter-start)
+                    }
+                    barcode_matches.append(match_details)
+                    matchfound = True
+                    break
+            if matchfound == True:
+                break
+
     
     barcode_matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
     return barcode_matches
@@ -372,6 +402,13 @@ def process_read_batch(
         # Extract barcodes
         barcodes = []
 
+        '''
+        Need to try implementing a set check before running the hamming distance check
+        s1_set <- set([s1])
+        s1_set.intersection(white_set)
+        If there is a perfect barcode then the s1_set.intersection will be > 0 and will (hopefully) reveal the barcode
+        If there is not a perfect match, then we do the hamming distance check
+        '''
         for config in barcode_configs:
             seq = r1_entry.sequence if config['file_index'] == 0 else r2_entry.sequence
             barcode = seq[config['jittered_start']:config['jittered_end']]           
