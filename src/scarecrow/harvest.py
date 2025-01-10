@@ -97,7 +97,7 @@ def run_harvest(barcodes, output_file, num_barcodes, min_distance):
     return 
 
 
-
+@log_errors
 def find_peaks_with_details(start_positions, end_positions, names):
     """
     Find peaks with detailed information about unique reads and names
@@ -110,12 +110,23 @@ def find_peaks_with_details(start_positions, end_positions, names):
     Returns:
     - List of peak details: (start_position, end_position, unique_read_count, unique_name_fraction)
     """
+    logger = logging.getLogger('scarecrow')
+
     # Count frequency of each start position
     position_counts = pd.Series(start_positions).value_counts().sort_index()
-    
+
+    # Extend series so that peaks at the extremes can be identified
+    extended_series = pd.concat([pd.Series([0]), pd.Series(position_counts.values), pd.Series([0])], ignore_index=True)
+   
     # Identify peaks in the frequency data
-    scipy_peaks, _ = find_peaks(position_counts.values)
-    
+    scipy_peaks, _ = find_peaks(extended_series)
+
+    # Need to subtract one from index due to having extended the series
+    scipy_peaks -= 1
+
+    # Adding one when logging to give correct 1-based position
+    #logger.info(f"Peaks:{scipy_peaks + 1}")
+
     # Extract peak positions with detailed information
     peaks_with_details = []
     for p in scipy_peaks:
@@ -248,7 +259,7 @@ def top_peak_positions(results, num_barcodes, min_distance):
                 break
 
     # Create a DataFrame of the results
-    top_positions_df = pd.DataFrame(top_positions).sort_values(by="start", ascending=True)
+    top_positions_df = pd.DataFrame(top_positions).sort_values(by="read_count", ascending=False)
 
     return top_positions_df
 
