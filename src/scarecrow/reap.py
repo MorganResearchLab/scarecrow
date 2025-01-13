@@ -567,16 +567,15 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
         #    } for b, d in zip(barcodes, distances) if d <= max_mismatches])
         
         seq_len = len(candidate)
-        mid_point = seq_len // 2
-        max_steps = max(mid_point, seq_len - mid_point - barcode_len + 1)
-        
+        max_steps = max(jitter, seq_len - jitter - barcode_len + 1)
+
         # Search bidirectionally
         for step in range(max_steps):
             left_matches = []
             right_matches = []
             
-            # Position before middle
-            left_pos = mid_point - step
+            # Position before jitter point
+            left_pos = jitter - step
             if left_pos >= 0:
                 # Fix broadcasting issue by reshaping substr_array
                 substr = candidate[left_pos:left_pos + barcode_len]
@@ -602,8 +601,8 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                                 return [match]
                             left_matches.append(match)
                 
-            # Position after middle
-            right_pos = mid_point + step
+            # Position after jitter point
+            right_pos = jitter + step
             if right_pos <= seq_len - barcode_len and right_pos != left_pos:
                 # Fix broadcasting issue by reshaping substr_array
                 substr = candidate[right_pos:right_pos + barcode_len]
