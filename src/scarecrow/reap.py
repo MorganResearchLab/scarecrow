@@ -23,6 +23,7 @@ import os
 import gzip
 import pandas as pd
 import pysam
+import random
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 import logging
@@ -121,6 +122,11 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         type=int,
         default=4,
     )
+    subparser.add_argument(
+        "-v", "--verbose",
+        action='store_true',
+        help='Enable verbose output [false]'
+    )
     return subparser
 
 def validate_reap_args(parser, args):
@@ -133,7 +139,8 @@ def validate_reap_args(parser, args):
              jitter = args.jitter,
              mismatches = args.mismatches,
              batches = args.batch_size, 
-             threads = args.threads)
+             threads = args.threads,
+             verbose = args.verbose)
 
 @log_errors
 def run_reap(fastqs: List[str], 
@@ -145,7 +152,8 @@ def run_reap(fastqs: List[str],
              jitter: int = 5,
              mismatches: int = 1,
              batches: int = 10000,
-             threads: int = 4) -> None:
+             threads: int = 4,
+             verbose: bool = False) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
@@ -159,7 +167,8 @@ def run_reap(fastqs: List[str],
     logger.info(f"Barcode whitelist:")
     for key, barcode in expected_barcodes.items():
         expected_barcodes[key] = set(barcode)
-        logger.info(f"{key}: {barcode}")
+        if verbose:
+            logger.info(f"{key}: {barcode}")
 
     # Extract barcodes and target sequence
     extract_sequences_parallel_optimized(
@@ -172,15 +181,17 @@ def run_reap(fastqs: List[str],
         jitter = jitter,
         mismatches = mismatches,
         batch_size = batches,
-        threads = threads
+        threads = threads,
+        verbose = verbose
     )
     
     # Process fastq header
     barcode_counts, cell_barcodes = process_fastq_headers(output)
     # Log the barcode counts for each position
     for i, counts in enumerate(barcode_counts):
-        for barcode, count in counts.items():
-            logger.info(f"Barcode index: {i + 1}\tBarcode: {barcode}\tCount: {count}")
+        if verbose:
+            for barcode, count in counts.items():
+                logger.info(f"Barcode index: {i + 1}\tBarcode: {barcode}\tCount: {count}")
         barcodes = pd.DataFrame(list(barcode_counts[i].items()), columns=["Barcode", "Count"]).sort_values(by="Count")
         barcodes.insert(0, "Index", i + 1)
         if i == 0:
@@ -189,8 +200,9 @@ def run_reap(fastqs: List[str],
             barcodes.to_csv('{}.{}'.format(output, 'barcode.counts.csv'), index = False, mode = "a", header = False)
 
     # Log the combined barcode counts (i.e. cell sequence counts)
-    for cell, count in cell_barcodes.items():
-        logger.info(f"Cell barcode: {cell}\tCount: {count}")
+    if verbose:
+        for cell, count in cell_barcodes.items():
+            logger.info(f"Cell barcode: {cell}\tCount: {count}")
     barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["CellBarcode", "Count"]).sort_values(by="Count")
     barcodes.to_csv('{}.{}'.format(output, 'cell.counts.csv'), index = False)
 
@@ -211,7 +223,7 @@ def prepare_barcode_configs(barcode_positions: pd.DataFrame, jitter: int) -> Lis
             'end': row['end'],
             'orientation': row['orientation'],
             'jittered_start': max(0, row['start'] - jitter),
-            'jittered_end': row['end'] + jitter,
+            'jittered_end': row['end'] + jitter + 1,
             'whitelist': row['barcode_whitelist']
         }
         configs.append(config)
@@ -511,45 +523,137 @@ def process_fastq_headers(file_path):
 
 
 
-def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_mismatches: int, jitter: int) -> List[Dict]:
+def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_mismatches: int, 
+                            jitter: int) -> List[Dict]:
     """
     Optimized barcode matching function using vectorized operations and early exits.
     """
+    logger = logging.getLogger('scarecrow')
+
     barcode_len = len(next(iter(barcodes)))  # Get length of first barcode
     candidate = sequence if orientation != 'reverse' else str(Seq(sequence).reverse_complement())
-    
+
     # Quick exact match check using set operations
     matches = []
     for i in range(len(candidate) - barcode_len + 1):
         substring = candidate[i:i + barcode_len]
         if substring in barcodes:
-            return [{
+            match = [{
                 'barcode': substring,
                 'sequence': candidate,
                 'start': i + 1,
                 'end': i + barcode_len,
                 'mismatches': 0,
-                'peak_dist': abs(jitter-i)
+                'peak_dist': 0
             }]
+            print(f"Perfect match: {match}")
+            return match
 
     # If no exact match, use numpy for efficient Hamming distance calculation
     if max_mismatches > 0:
         barcode_array = np.array([list(b) for b in barcodes])
-        for i in range(len(candidate) - barcode_len + 1):
-            substr_array = np.array(list(candidate[i:i + barcode_len]))
-            # Vectorized Hamming distance calculation
-            distances = np.sum(barcode_array != substr_array, axis=1)
-            matches.extend([{
-                'barcode': b,
-                'sequence': candidate,
-                'start': i + 1,
-                'end': i + barcode_len,
-                'mismatches': int(d),
-                'peak_dist': abs(jitter-i)
-            } for b, d in zip(barcodes, distances) if d <= max_mismatches])
+        
+        #for i in range(len(candidate) - barcode_len + 1):
+        #    substr_array = np.array(list(candidate[i:i + barcode_len]))
+        #    # Vectorized Hamming distance calculation
+        #    distances = np.sum(barcode_array != substr_array, axis=1)
+        #    matches.extend([{
+        #        'barcode': b,
+        #        'sequence': candidate,
+        #        'start': i + 1,
+        #        'end': i + barcode_len,
+        #        'mismatches': int(d),
+        #        'peak_dist': abs(jitter-i)
+        #    } for b, d in zip(barcodes, distances) if d <= max_mismatches])
+        
+        seq_len = len(candidate)
+        mid_point = seq_len // 2
+        max_steps = max(mid_point, seq_len - mid_point - barcode_len + 1)
+        
+        # Search bidirectionally
+        for step in range(max_steps):
+            left_matches = []
+            right_matches = []
+            
+            # Position before middle
+            left_pos = mid_point - step
+            if left_pos >= 0:
+                # Fix broadcasting issue by reshaping substr_array
+                substr = candidate[left_pos:left_pos + barcode_len]
+                if len(substr) == barcode_len:  # Ensure we have a full barcode length
+                    substr_array = np.array(list(substr))[np.newaxis, :]
+                    distances = np.sum(barcode_array != substr_array, axis=1)
+                    
+                    # Check for matches at left position
+                    for b, d in zip(barcodes, distances):
+                        if d <= max_mismatches:
+                            match = {
+                                'barcode': b,
+                                'sequence': candidate,
+                                'start': left_pos + 1,  # 1-based indexing
+                                'end': left_pos + barcode_len,
+                                'mismatches': int(d),
+                                'peak_dist': abs(jitter - left_pos) if jitter is not None else None,
+                                'position': 'left'
+                            }
+                            # Return immediately if perfect match
+                            if d == 0:
+                                print(f"Perfect match: {match}")
+                                return [match]
+                            left_matches.append(match)
+                
+            # Position after middle
+            right_pos = mid_point + step
+            if right_pos <= seq_len - barcode_len and right_pos != left_pos:
+                # Fix broadcasting issue by reshaping substr_array
+                substr = candidate[right_pos:right_pos + barcode_len]
+                if len(substr) == barcode_len:  # Ensure we have a full barcode length
+                    substr_array = np.array(list(substr))[np.newaxis, :]
+                    distances = np.sum(barcode_array != substr_array, axis=1)
+                    
+                    # Check for matches at right position
+                    for b, d in zip(barcodes, distances):
+                        if d <= max_mismatches:
+                            match = {
+                                'barcode': b,
+                                'sequence': candidate,
+                                'start': right_pos + 1,  # 1-based indexing
+                                'end': right_pos + barcode_len,
+                                'mismatches': int(d),
+                                'peak_dist': abs(jitter - right_pos) if jitter is not None else None,
+                                'position': 'right'
+                            }
+                            # Return immediately if perfect match
+                            if d == 0:
+                                print(f"Perfect match: {match}")
+                                return [match]
+                            right_matches.append(match)
+            
+            # If we have matches, handle according to priority rules
+            if left_matches or right_matches:
+                # Get best matches from each side (lowest number of mismatches)
+                left_best = min(left_matches, key=lambda x: x['mismatches']) if left_matches else None
+                right_best = min(right_matches, key=lambda x: x['mismatches']) if right_matches else None
+                
+                # If we have matches on both sides with same number of mismatches
+                if (left_best and right_best and 
+                    left_best['mismatches'] == right_best['mismatches']):
+                    chosen_match = random.choice([left_best, right_best])
+                    print(f"Equal matches found, random choice: {chosen_match}")
+                    return [chosen_match]
+                
+                # Return the best match (the one with fewer mismatches)
+                elif left_best and (not right_best or 
+                                left_best['mismatches'] < right_best['mismatches']):
+                    print(f"Best match to left: {left_best}")
+                    return [left_best]
+                elif right_best:
+                    print(f"Best match to right: {right_best}")
+                    return [right_best]  
 
-    matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
+    #matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
     return matches
+
 
 def process_read_batch_optimized(read_batch: List[Tuple], 
                                barcode_configs: List[Dict], 
@@ -557,7 +661,8 @@ def process_read_batch_optimized(read_batch: List[Tuple],
                                read1_range: Optional[Tuple], 
                                read2_range: Optional[Tuple],
                                mismatches: int = 1,
-                               logfile: str = None) -> List[str]:
+                               logfile: str = None,
+                               verbose: bool = False) -> List[str]:
     """
     Optimized batch processing with minimal logging and efficient string operations.
     """
@@ -584,11 +689,11 @@ def process_read_batch_optimized(read_batch: List[Tuple],
             whitelist = ast.literal_eval(config['whitelist'])[0]
             if whitelist in barcode_sequences:
                 matches = match_barcode_optimized(
-                    barcode,
-                    barcode_sequences[whitelist],
-                    orientation == 'reverse',
-                    mismatches,
-                    jitter_dist
+                    sequence = barcode,
+                    barcodes = barcode_sequences[whitelist],
+                    orientation = orientation,
+                    max_mismatches = mismatches,
+                    jitter = jitter_dist
                 )
                 barcodes.append(matches[0]['barcode'] if matches else 'null')
             else:
@@ -615,7 +720,8 @@ def extract_sequences_parallel_optimized(
     jitter: int = 5,
     mismatches: int = 1,
     batch_size: int = 100000,
-    threads: Optional[int] = None
+    threads: Optional[int] = None,
+    verbose: bool = False
 ) -> None:
     """
     Optimized parallel sequence extraction with improved I/O handling and memory management.
@@ -646,11 +752,12 @@ def extract_sequences_parallel_optimized(
         # Create efficient process_batch function
         process_batch_func = partial(
             process_read_batch_optimized,
-            barcode_configs=barcode_configs,
-            barcode_sequences=barcode_sequences,
-            mismatches=mismatches,
-            read1_range=parsed_read1_range,
-            read2_range=parsed_read2_range
+            barcode_configs = barcode_configs,
+            barcode_sequences = barcode_sequences,
+            mismatches = mismatches,
+            read1_range = parsed_read1_range,
+            read2_range = parsed_read2_range,
+            verbose = verbose
         )
 
         # Efficient parallel processing with proper chunking
