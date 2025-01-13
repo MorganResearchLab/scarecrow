@@ -266,6 +266,15 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
     """
     logger = logging.getLogger('scarecrow')
 
+    logger.debug(f"""
+        Matching parameters:
+        Sequence length: {len(sequence)}
+        Number of barcodes: {len(barcodes)}
+        Orientation: {orientation}
+        Max mismatches: {max_mismatches}
+        Jitter: {jitter}
+        """)
+
     barcode_len = len(next(iter(barcodes)))  # Get length of first barcode
     candidate = sequence if orientation != 'reverse' else str(Seq(sequence).reverse_complement())
 
@@ -282,8 +291,8 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 'mismatches': 0,
                 'peak_dist': 0
             }]
-            #print(f"Perfect match: {match}")
-            return match
+            print(f"Match found: {matches}")
+            return match       
 
     # If no exact match, use numpy for efficient Hamming distance calculation
     if max_mismatches > 0:
@@ -323,7 +332,7 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                             }
                             # Return immediately if perfect match
                             if d == 0:
-                                #print(f"Perfect match: {match}")
+                                print(f"Match found: {matches}")
                                 return [match]
                             left_matches.append(match)
                 
@@ -350,7 +359,7 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                             }
                             # Return immediately if perfect match
                             if d == 0:
-                                #print(f"Perfect match: {match}")
+                                print(f"Match found: {matches}")
                                 return [match]
                             right_matches.append(match)
             
@@ -364,16 +373,16 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 if (left_best and right_best and 
                     left_best['mismatches'] == right_best['mismatches']):
                     chosen_match = random.choice([left_best, right_best])
-                    #print(f"Equal matches found, random choice: {chosen_match}")
+                    print(f"Match found: {matches}")
                     return [chosen_match]
                 
                 # Return the best match (the one with fewer mismatches)
                 elif left_best and (not right_best or 
                                 left_best['mismatches'] < right_best['mismatches']):
-                    #print(f"Best match to left: {left_best}")
+                    print(f"Match found: {matches}")
                     return [left_best]
                 elif right_best:
-                    #print(f"Best match to right: {right_best}")
+                    print(f"Match found: {matches}")
                     return [right_best]  
 
     #matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
@@ -407,12 +416,16 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     for reads in read_batch:
         barcodes = []
         for config in barcode_configs:
+            print(f"Read: {reads[config['file_index']].name}\t{reads[config['file_index']].sequence}")
             seq = reads[config['file_index']].sequence
             start, end, orientation, jitter_dist = config_map[(config['file_index'], config['whitelist'])]
             barcode = seq[start:end]
             
             whitelist = ast.literal_eval(config['whitelist'])[0]
             if whitelist in barcode_sequences:
+                print(f"Whitelist: {whitelist}")
+                print(f"Available sequences: {list(barcode_sequences.keys())}")
+                print(f"Number of barcodes: {len(barcode_sequences[whitelist])}")
                 matches = match_barcode_optimized(
                     sequence = barcode,
                     barcodes = barcode_sequences[whitelist],
