@@ -278,10 +278,22 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
     barcode_len = len(next(iter(barcodes)))  # Get length of first barcode
     candidate = sequence if orientation != 'reverse' else str(Seq(sequence).reverse_complement())
 
+    print(f"First few barcodes: {list(barcodes)[:3]}")
+    print(f"Candidate sequence: {candidate}")
+    print(f"Candidate type: {type(candidate)}")
+    print(f"First barcode type: {type(next(iter(barcodes)))}")
+    
+    # Check for hidden characters or whitespace
+    print(f"Candidate bytes: {candidate.encode()}")
+    print(f"First barcode bytes: {next(iter(barcodes)).encode()}")
+
+
     # Quick exact match check using set operations
     matches = []
     for i in range(len(candidate) - barcode_len + 1):
         substring = candidate[i:i + barcode_len]
+        print(f"Checking substring: '{substring}' at position {i}")
+        print(f"Is in barcodes: {substring in barcodes}")
         if substring in barcodes:
             match = [{
                 'barcode': substring,
@@ -291,8 +303,14 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 'mismatches': 0,
                 'peak_dist': 0
             }]
-            print(f"Match found: {matches}")
+            print(f"Match found: {match}")
             return match       
+        # Test explicit set membership (debugging chunk)
+        test_set = set()
+        for barcode in barcodes:
+            test_set.add(barcode.strip())  # Remove any hidden whitespace
+            if substring.strip() == barcode.strip():
+                print(f"Found match through explicit comparison: {barcode}")
 
     # If no exact match, use numpy for efficient Hamming distance calculation
     if max_mismatches > 0:
