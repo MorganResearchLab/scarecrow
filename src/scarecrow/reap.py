@@ -426,6 +426,7 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     read_index = 0 if read1_range else 1
     
     # Pre-process barcode configurations
+    print(f"Barcode configs: {barcode_configs}")
     config_map = {(config['file_index'], config['whitelist']): 
                  (config['jittered_start'], config['jittered_end'], 
                   config['orientation'], abs(config['jittered_start'] - config['start']))
