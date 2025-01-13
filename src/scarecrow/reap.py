@@ -546,7 +546,7 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 'mismatches': 0,
                 'peak_dist': 0
             }]
-            print(f"Perfect match: {match}")
+            #print(f"Perfect match: {match}")
             return match
 
     # If no exact match, use numpy for efficient Hamming distance calculation
@@ -598,7 +598,7 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                             }
                             # Return immediately if perfect match
                             if d == 0:
-                                print(f"Perfect match: {match}")
+                                #print(f"Perfect match: {match}")
                                 return [match]
                             left_matches.append(match)
                 
@@ -625,7 +625,7 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                             }
                             # Return immediately if perfect match
                             if d == 0:
-                                print(f"Perfect match: {match}")
+                                #print(f"Perfect match: {match}")
                                 return [match]
                             right_matches.append(match)
             
@@ -639,16 +639,16 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 if (left_best and right_best and 
                     left_best['mismatches'] == right_best['mismatches']):
                     chosen_match = random.choice([left_best, right_best])
-                    print(f"Equal matches found, random choice: {chosen_match}")
+                    #print(f"Equal matches found, random choice: {chosen_match}")
                     return [chosen_match]
                 
                 # Return the best match (the one with fewer mismatches)
                 elif left_best and (not right_best or 
                                 left_best['mismatches'] < right_best['mismatches']):
-                    print(f"Best match to left: {left_best}")
+                    #print(f"Best match to left: {left_best}")
                     return [left_best]
                 elif right_best:
-                    print(f"Best match to right: {right_best}")
+                    #print(f"Best match to right: {right_best}")
                     return [right_best]  
 
     #matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
