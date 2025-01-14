@@ -436,6 +436,9 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     for reads in read_batch:
         barcodes = []
         for config in barcode_configs:
+            print(f"Config file index: {config['file_index']}")
+            print(f"Seq file index 0: {reads[0].sequence}")
+            print(f"Seq file index 1: {reads[1].sequence}")
             print(f"Read: {reads[config['file_index']].name}\t{reads[config['file_index']].sequence}")
             seq = reads[config['file_index']].sequence
             start, end, orientation, jitter_dist = config_map[(config['file_index'], config['whitelist'])]
