@@ -151,7 +151,7 @@ def run_reap(fastqs: List[str],
     expected_barcodes = parse_seed_arguments(barcodes)  
     logger.info(f"Barcode whitelist:")
     for key, barcode in expected_barcodes.items():
-        expected_barcodes[key] = set(barcode)
+        expected_barcodes[key] = sorted(set(barcode))
         if verbose:
             logger.info(f"{key}: {barcode}")
 
