@@ -169,7 +169,7 @@ def parse_seed_arguments(barcode_args):
                         
             # Store barcodes in the dictionary
             if barcodes:
-                expected_barcodes[key,label] = sorted(barcodes)              
+                expected_barcodes[key,label] = barcodes
                 logger.info(f"Loaded {len(barcodes)} barcodes for {key} from {label} at {file_path}")
             else:
                 logger.warning(f"No barcodes loaded for {key} from {label} at {file_path}")

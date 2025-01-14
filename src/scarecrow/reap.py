@@ -15,20 +15,14 @@ import logging
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.seed import parse_seed_arguments
 from scarecrow.tools import generate_random_string
-from typing import List, Tuple, Optional, Dict, Any, NamedTuple
+from typing import List, Tuple, Optional, Dict, Any, Set
 import itertools
-from functools import partial
+from functools import partial, lru_cache
 import ast
 from collections import defaultdict
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
 from Bio.Seq import Seq
 
-class FastqEntry(NamedTuple):
-    name: str
-    sequence: str
-    comment: str
-    quality: str
 
 
 def parser_reap(parser):
@@ -156,7 +150,6 @@ def run_reap(fastqs: List[str],
 
     # Extract barcodes and convert whitelist to set
     expected_barcodes = parse_seed_arguments(barcodes)  
-    logger.info(f"Barcode whitelist:")
     for key, barcode in expected_barcodes.items():
         expected_barcodes[key] = sorted(set(barcode))
         if verbose:
@@ -210,32 +203,6 @@ def run_reap(fastqs: List[str],
     barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["CellBarcode", "Count"]).sort_values(by="Count")
     barcodes.to_csv('{}.{}'.format(output, 'cell.counts.csv'), index = False)
 
-
-def parse_range(range_str: str) -> Tuple[int, int]:
-    """Parse string range like '0-100' into start and end integers"""
-    start, end = map(int, range_str.split('-'))
-    return (start, end)
-
-def prepare_barcode_configs(barcode_positions: pd.DataFrame, jitter: int) -> List[Dict[str, Any]]:
-    """Prepare barcode extraction configurations"""
-    configs = []
-    for idx, row in barcode_positions.iterrows():
-        config = {
-            'index': idx,
-            'file_index': 0 if row['read'] == 'read1' else 1,
-            'start': row['start'],
-            'end': row['end'],
-            'orientation': row['orientation'],
-            'jittered_start': max(0, row['start'] - jitter),
-            'jittered_end': row['end'] + jitter + 1,
-            'whitelist': row['barcode_whitelist']
-        }
-        configs.append(config)
-    return configs
-
-
-
-
 def process_fastq_headers(file_path):
     """
     Process fastq header to report on barcode counts
@@ -278,223 +245,107 @@ def process_fastq_headers(file_path):
 
 
 
-def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_mismatches: int, 
-                            jitter: int, verbose: bool) -> List[Dict]:
-    """
-    Optimized barcode matching function using vectorized operations and early exits.
-    """
-    logger = logging.getLogger('scarecrow')
-
-    logger.debug(f"""
-        Matching parameters:
-        Sequence length: {len(sequence)}
-        Number of barcodes: {len(barcodes)}
-        Orientation: {orientation}
-        Max mismatches: {max_mismatches}
-        Jitter: {jitter}
-        """)
-
-    barcode_len = len(next(iter(barcodes)))  # Get length of first barcode
-    candidate = sequence if orientation != 'reverse' else str(Seq(sequence).reverse_complement())
-
-    if verbose:
-        print(f"First few barcodes: {list(barcodes)[:3]}")
-        print(f"Candidate sequence: {candidate}")
-        print(f"Candidate type: {type(candidate)}")
-        print(f"First barcode type: {type(next(iter(barcodes)))}")
-        print(f"Candidate bytes: {candidate.encode()}")
-        print(f"First barcode bytes: {next(iter(barcodes)).encode()}")
 
 
-    # Quick exact match check using set operations
-    matches = []
-    for i in range(len(candidate) - barcode_len + 1):
-        substring = candidate[i:i + barcode_len]
-        if verbose:
-            print(f"Checking substring: '{substring}' at position {i}")
-            print(f"Is in barcodes: {substring in barcodes}")
-        if substring in barcodes:
-            match = [{
-                'barcode': substring,
-                'sequence': candidate,
-                'start': i + 1,
-                'end': i + barcode_len,
-                'mismatches': 0,
-                'peak_dist': 0
-            }]
-            if verbose:
-                print(f"Match found: {match}")
-            return match       
-
-    # If no exact match, use numpy for efficient Hamming distance calculation
-    if max_mismatches > 0:
-        barcode_array = np.array([list(b) for b in barcodes])       
-        seq_len = len(candidate)
-        max_steps = max(jitter, seq_len - jitter - barcode_len + 1)
-
-        # Search bidirectionally
-        for step in range(max_steps):
-            left_matches = []
-            right_matches = []
-            
-            # Position before jitter point
-            left_pos = jitter - step
-            if left_pos >= 0:
-                # Fix broadcasting issue by reshaping substr_array
-                substr = candidate[left_pos:left_pos + barcode_len]
-                if len(substr) == barcode_len:  # Ensure we have a full barcode length
-                    substr_array = np.array(list(substr))[np.newaxis, :]
-                    distances = np.sum(barcode_array != substr_array, axis=1)
-                    if verbose:
-                        print(f"Candidate length: {len(candidate)}")
-                        print(f"Left pos: {left_pos}, Barcode len: {barcode_len}")
-                        print(f"Substr: {substr}, Length: {len(substr)}")
-                    
-                    # Check for matches at left position
-                    for b, d in zip(barcodes, distances):
-                        if d <= max_mismatches:
-                            match = {
-                                'barcode': b,
-                                'sequence': candidate,
-                                'start': left_pos + 1,  # 1-based indexing
-                                'end': left_pos + barcode_len,
-                                'mismatches': int(d),
-                                'peak_dist': abs(jitter - left_pos) if jitter is not None else None,
-                                'position': 'left'
-                            }
-                            # Return immediately if perfect match (should be picked up by set match above)
-                            if d == 0:
-                                if verbose:
-                                    print(f"Match found: {matches}")
-                                return [match]
-                            left_matches.append(match)
-                
-            # Position after jitter point
-            right_pos = jitter + step
-            if right_pos <= seq_len - barcode_len and right_pos != left_pos:
-                # Fix broadcasting issue by reshaping substr_array
-                substr = candidate[right_pos:right_pos + barcode_len]
-                if len(substr) == barcode_len:  # Ensure we have a full barcode length
-                    substr_array = np.array(list(substr))[np.newaxis, :]
-                    distances = np.sum(barcode_array != substr_array, axis=1)
-                    
-                    # Check for matches at right position
-                    for b, d in zip(barcodes, distances):
-                        if d <= max_mismatches:
-                            match = {
-                                'barcode': b,
-                                'sequence': candidate,
-                                'start': right_pos + 1,  # 1-based indexing
-                                'end': right_pos + barcode_len,
-                                'mismatches': int(d),
-                                'peak_dist': abs(jitter - right_pos) if jitter is not None else None,
-                                'position': 'right'
-                            }
-                            # Return immediately if perfect match (should be picked up by set match above)
-                            if d == 0:
-                                if verbose:
-                                    print(f"Match found: {matches}")
-                                return [match]
-                            right_matches.append(match)
-            
-            # If we have matches, handle according to priority rules
-            if left_matches or right_matches:
-                # Get best matches from each side (lowest number of mismatches)
-                left_best = min(left_matches, key=lambda x: x['mismatches']) if left_matches else None
-                right_best = min(right_matches, key=lambda x: x['mismatches']) if right_matches else None
-                
-                # If we have matches on both sides with same number of mismatches
-                if (left_best and right_best and 
-                    left_best['mismatches'] == right_best['mismatches']):
-                    chosen_match = random.choice([left_best, right_best])
-                    if verbose:
-                        print(f"Match found: {matches}")
-                    return [chosen_match]
-                
-                # Return the best match (the one with fewer mismatches)
-                elif left_best and (not right_best or 
-                                left_best['mismatches'] < right_best['mismatches']):
-                    if verbose:
-                        print(f"Match found: {matches}")
-                    return [left_best]
-                elif right_best:
-                    if verbose:
-                        print(f"Match found: {matches}")
-                    return [right_best]  
-
-    #matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
-    return matches
 
 
-def process_read_batch_optimized(read_batch: List[Tuple], 
-                               barcode_configs: List[Dict], 
-                               barcode_sequences: Dict,
-                               read1_range: Optional[Tuple], 
-                               read2_range: Optional[Tuple],
-                               mismatches: int = 1,
-                               logfile: str = None,
-                               verbose: bool = False) -> List[str]:
-    """
-    Optimized batch processing with minimal logging and efficient string operations.
-    """
-    logger = setup_logger(logfile) if logfile else logging.getLogger('scarecrow')
+class BarcodeMatcherOptimized:
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
+        self.mismatches = mismatches
+        self.matchers = {}
+        
+        # Create optimized lookup structures for each whitelist
+        for whitelist, sequences in barcode_sequences.items():
+            exact_matches = set(sequences)
+            # Create lookup tables for 1-mismatch sequences if needed
+            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
+            self.matchers[whitelist] = {
+                'exact': exact_matches,
+                'mismatch': mismatch_lookup,
+                'length': len(next(iter(sequences)))
+            }
+
+    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
+        """Create a lookup table for sequences with 1 mismatch"""
+        lookup = {}
+        for seq in sequences:
+            # Store the original sequence
+            lookup[seq] = seq
+            # Generate all 1-mismatch variants
+            for i in range(len(seq)):
+                for base in 'ACGTN':
+                    if base != seq[i]:
+                        variant = seq[:i] + base + seq[i+1:]
+                        # Only store if this variant hasn't been seen or is closer to current sequence
+                        if variant not in lookup:
+                            lookup[variant] = seq
+        return lookup
+
+    @lru_cache(maxsize=1024)
+    def _reverse_complement(self, sequence: str) -> str:
+        """Cached reverse complement computation"""
+        return str(Seq(sequence).reverse_complement())
+
+    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
+        """Find best matching barcode sequence"""
+        matcher = self.matchers[whitelist]
+        barcode_len = matcher['length']
+        
+        if len(sequence) < barcode_len:
+            return 'null'
+
+        # Handle reverse orientation
+        if orientation == 'reverse':
+            sequence = self._reverse_complement(sequence)
+
+        # Try exact match first
+        if sequence in matcher['exact']:
+            return sequence
+
+        # If mismatches allowed, check mismatch lookup
+        if self.mismatches > 0 and matcher['mismatch'] is not None:
+            if sequence in matcher['mismatch']:
+                return matcher['mismatch'][sequence]
+
+        return 'null'
+
+def process_read_batch(read_batch: List[Tuple], 
+                      barcode_configs: List[Dict],
+                      matcher: BarcodeMatcherOptimized,
+                      read_range: Tuple[int, int],
+                      read_index: int,
+                      verbose: bool) -> List[str]:
+    """Process a batch of reads with optimized matching"""
     output_entries = []
     
-    # Pre-compute ranges and configurations
-    extract_range = read1_range if read1_range else read2_range
-    read_index = 0 if read1_range else 1
-    
-    # Pre-process barcode configurations
-    if verbose:
-        print(f"Barcode configs: {barcode_configs}")
-
-    config_map = {(config['file_index'], config['whitelist']): 
-                 (config['jittered_start'], config['jittered_end'], 
-                  config['orientation'], abs(config['jittered_start'] - config['start']))
-                 for config in barcode_configs}
-
     for reads in read_batch:
         barcodes = []
         for config in barcode_configs:
-            if verbose:
-                print(f"Read: {reads[config['file_index']].name}")
-                print(f"Config file index: {config['file_index']}")
-                print(f"Seq file index 0: {reads[0].sequence}")
-                print(f"Seq file index 1: {reads[1].sequence}")            
             seq = reads[config['file_index']].sequence
-            start, end, orientation, jitter_dist = config_map[(config['file_index'], config['whitelist'])]
-            barcode = seq[start:end]
-            
+            start, end = config['start'], config['end']
+            barcode_seq = seq[start-1:end]
+
             whitelist = ast.literal_eval(config['whitelist'])[0]
-            if whitelist in barcode_sequences:
-                if verbose:
-                    print(f"Whitelist: {whitelist}")
-                    print(f"Available sequences: {list(barcode_sequences.values())}")
-                    print(f"Number of barcodes: {len(barcode_sequences[whitelist])}")
-                matches = match_barcode_optimized(
-                    sequence = barcode,
-                    barcodes = barcode_sequences[whitelist],
-                    orientation = orientation,
-                    max_mismatches = mismatches,
-                    jitter = jitter_dist,
-                    verbose = verbose
-                )
-                barcodes.append(matches[0]['barcode'] if matches else 'null')
+
+            if whitelist in matcher.matchers:
+                matched_barcode = matcher.find_match(
+                    barcode_seq, whitelist, config['orientation'])
+
+                barcodes.append(matched_barcode)
             else:
                 barcodes.append('null')
 
         # Extract sequence and create output
         source_entry = reads[read_index]
-        extract_seq = source_entry.sequence[extract_range[0]:extract_range[1]]
-        extract_qual = source_entry.quality[extract_range[0]:extract_range[1]]
+        extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
+        extract_qual = source_entry.quality[read_range[0]:read_range[1]]
         
-        # Use join for efficient string concatenation
-        header_parts = [source_entry.name, source_entry.comment, f"barcodes={('_').join(barcodes)}"]
-        output_entries.append(f"@{' '.join(header_parts)}\n{extract_seq}\n+\n{extract_qual}\n")
+        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}\n"
+        output_entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
 
     return output_entries
 
-def extract_sequences_parallel_optimized(
+def extract_sequences_parallel(
     fastq_files: List[str],
     barcode_positions_file: str,
     barcode_sequences: Dict[str, List[str]],
@@ -507,240 +358,62 @@ def extract_sequences_parallel_optimized(
     threads: Optional[int] = None,
     verbose: bool = False
 ) -> None:
-    """
-    Optimized parallel sequence extraction with improved I/O handling and memory management.
-    """
-    logger = setup_logger(f'./scarecrow_reap_{generate_random_string()}.log')
-    
-    # Load and parse configurations once
-    barcode_positions = pd.read_csv(barcode_positions_file)
-    barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
-    
-    # Parse ranges once
-    parsed_read1_range = parse_range(read1_range) if read1_range else None
-    parsed_read2_range = parse_range(read2_range) if read2_range else None
-    
-    # Optimize thread count
-    threads = min(threads or mp.cpu_count(), batch_size // 1000 or 1)
-    
-    # Set up output handling
-    out_mode = 'wt' if not output.endswith('.gz') else 'wt'
-    open_func = gzip.open if output.endswith('.gz') else open
-    os.makedirs(os.path.dirname(output) or '.', exist_ok=True)
-
-    # Process files with optimized batching
-    with pysam.FastqFile(fastq_files[0]) as r1, \
-         pysam.FastqFile(fastq_files[1]) as r2, \
-         open_func(output, out_mode) as out_fastq:
-        
-        # Create efficient process_batch function
-        process_batch_func = partial(
-            process_read_batch_optimized,
-            barcode_configs = barcode_configs,
-            barcode_sequences = barcode_sequences,
-            mismatches = mismatches,
-            read1_range = parsed_read1_range,
-            read2_range = parsed_read2_range,
-            verbose = verbose
-        )
-
-        # Efficient parallel processing with proper chunking
-        with mp.Pool(processes=threads) as pool:
-            read_pairs = zip(r1, r2)
-            while True:
-                batch = list(itertools.islice(read_pairs, batch_size))
-                if not batch:
-                    break
-                    
-                # Process batch and write results immediately
-                for processed_entries in pool.imap_unordered(process_batch_func, [batch]):
-                    out_fastq.writelines(processed_entries)
-
-
-
-class FastqBatchProcessor:
-    def __init__(self, barcode_configs, barcode_sequences, mismatches, read1_range, read2_range):
-        self.barcode_configs = barcode_configs
-        self.barcode_sequences = barcode_sequences
-        self.mismatches = mismatches
-        self.read1_range = read1_range
-        self.read2_range = read2_range
-        self.config_map = self._precompute_config_map()
-        
-        # Pre-compute barcode lengths and numpy arrays for each whitelist
-        self.barcode_arrays = {}
-        self.barcode_lengths = {}
-        for whitelist, sequences in barcode_sequences.items():
-            barcode_array = np.array([list(b) for b in sequences], dtype='U1')
-            self.barcode_arrays[whitelist] = barcode_array
-            self.barcode_lengths[whitelist] = len(next(iter(sequences)))
-
-    def _precompute_config_map(self):
-        return {(config['file_index'], config['whitelist']): 
-                (config['jittered_start'], config['jittered_end'], 
-                 config['orientation'], abs(config['jittered_start'] - config['start']))
-                for config in self.barcode_configs}
-
-    def match_barcode_vectorized(self, sequence: str, whitelist: str, orientation: str, jitter: int) -> str:
-        """Vectorized barcode matching using numpy operations"""
-        if len(sequence) < self.barcode_lengths[whitelist]:
-            return 'null'
-            
-        # Get pre-computed arrays
-        barcode_array = self.barcode_arrays[whitelist]
-        barcode_len = self.barcode_lengths[whitelist]
-        
-        # Handle reverse orientation
-        if orientation == 'reverse':
-            sequence = str(Seq(sequence).reverse_complement())
-            
-        # Convert sequence to array once
-        seq_array = np.array(list(sequence))
-        
-        # Vectorized exact match check
-        for i in range(len(sequence) - barcode_len + 1):
-            window = seq_array[i:i + barcode_len]
-            # Reshape for broadcasting
-            window = window.reshape(1, -1)
-            
-            # Compute all distances at once
-            distances = np.sum(barcode_array != window, axis=1)
-            
-            # Find matches within mismatch threshold
-            match_indices = np.where(distances <= self.mismatches)[0]
-            
-            if len(match_indices) > 0:
-                # Get the index of the best match
-                best_idx = match_indices[distances[match_indices].argmin()]
-                return ''.join(barcode_array[best_idx])
-                
-        return 'null'
-
-    def parse_fastq_entry(self, lines: List[str]) -> FastqEntry:
-        """Parse raw FASTQ lines into a FastqEntry"""
-        header = lines[0].strip()[1:]  # Remove @ symbol
-        name_parts = header.split(' ', 1)
-        name = name_parts[0]
-        comment = name_parts[1] if len(name_parts) > 1 else ''
-        sequence = lines[1].strip()
-        quality = lines[3].strip()
-        return FastqEntry(name, sequence, comment, quality)
-
-    def process_batch(self, read_batch: List[Tuple[List[str], List[str]]]) -> List[str]:
-        """Process a batch of reads using vectorized operations"""
-        output_entries = []
-        read_index = 0 if self.read1_range else 1
-        extract_range = self.read1_range if self.read1_range else self.read2_range
-        
-        for read1_lines, read2_lines in read_batch:
-            # Parse raw FASTQ entries
-            reads = [
-                self.parse_fastq_entry(read1_lines),
-                self.parse_fastq_entry(read2_lines)
-            ]
-            
-            barcodes = []
-            for config in self.barcode_configs:
-                seq = reads[config['file_index']].sequence
-                start, end, orientation, jitter_dist = self.config_map[(config['file_index'], config['whitelist'])]
-                barcode_seq = seq[start:end]
-                
-                whitelist = ast.literal_eval(config['whitelist'])[0]
-                if whitelist in self.barcode_sequences:
-                    matched_barcode = self.match_barcode_vectorized(
-                        barcode_seq, whitelist, orientation, jitter_dist)
-                    barcodes.append(matched_barcode)
-                else:
-                    barcodes.append('null')
-
-            # Extract sequence and create output
-            source_entry = reads[read_index]
-            extract_seq = source_entry.sequence[extract_range[0]:extract_range[1]]
-            extract_qual = source_entry.quality[extract_range[0]:extract_range[1]]
-            
-            # Efficient string joining
-            header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}\n"
-            output_entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
-
-        return output_entries
-
-def chunked_fastq_reader(file_path: str, chunk_size: int):
-    """Memory-efficient FASTQ reader"""
-    fastq_lines = []
-    with pysam.FastxFile(file_path) as f:
-        for entry in f:
-            header = f"@{entry.name}"
-            if entry.comment:
-                header += f" {entry.comment}"
-            fastq_lines.extend([
-                header + "\n",
-                entry.sequence + "\n",
-                "+\n",
-                entry.quality + "\n"
-            ])
-            if len(fastq_lines) >= chunk_size * 4:
-                yield [fastq_lines[i:i+4] for i in range(0, len(fastq_lines), 4)]
-                fastq_lines = []
-    if fastq_lines:
-        yield [fastq_lines[i:i+4] for i in range(0, len(fastq_lines), 4)]
-
-def extract_sequences_parallel(
-    fastq_files: List[str],
-    barcode_positions_file: str,
-    barcode_sequences: Dict[str, List[str]],
-    output: str = 'extracted.fastq',
-    read1_range: Optional[str] = None,
-    read2_range: Optional[str] = None,
-    jitter: int = 5,
-    mismatches: int = 1,
-    batch_size: int = 100000,
-    threads: Optional[int] = None
-) -> None:
-    """Optimized parallel sequence extraction with improved memory management"""
+    """Optimized sequence extraction focused on matching performance"""
     
     # Initialize configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
     barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
-    parsed_read1_range = parse_range(read1_range) if read1_range else None
-    parsed_read2_range = parse_range(read2_range) if read2_range else None
-    
-    # Create processor instance
-    processor = FastqBatchProcessor(
-        barcode_configs=barcode_configs,
-        barcode_sequences=barcode_sequences,
-        mismatches=mismatches,
-        read1_range=parsed_read1_range,
-        read2_range=parsed_read2_range
+    parsed_range = parse_range(read1_range) if read1_range else parse_range(read2_range)
+    read_index = 0 if read1_range else 1
+
+    # Create optimized matcher
+    matcher = BarcodeMatcherOptimized(
+        barcode_sequences={k: set(v) for k, v in barcode_sequences.items()},
+        mismatches=mismatches
     )
     
-    # Optimize thread count and chunk size
-    threads = min(threads or mp.cpu_count(), batch_size // 1000 or 1)
-    chunk_size = max(batch_size // threads, 10000)
+    # Use minimal threading for I/O
+    threads = min(4, threads or mp.cpu_count())
     
-    # Set up output handling
-    out_mode = 'wt' if not output.endswith('.gz') else 'wt'
-    open_func = gzip.open if output.endswith('.gz') else open
-    
-    with ThreadPoolExecutor(max_workers=threads) as executor, \
-         open_func(output, out_mode) as out_fastq:
+    # Process files with minimal overhead
+    with pysam.FastqFile(fastq_files[0]) as r1, \
+         pysam.FastqFile(fastq_files[1]) as r2, \
+         open(output, 'w') as out_fastq:
         
-        # Process files in chunks
-        for chunk1, chunk2 in zip(
-            chunked_fastq_reader(fastq_files[0], chunk_size),
-            chunked_fastq_reader(fastq_files[1], chunk_size)):
-            
-            # Create read pairs from chunks
-            read_pairs = list(zip(chunk1, chunk2))
-            
-            # Process chunks in parallel
-            futures = []
-            chunk_size = max(len(read_pairs) // threads, 1)
-            for i in range(0, len(read_pairs), chunk_size):
-                batch = read_pairs[i:i + chunk_size]
-                futures.append(executor.submit(processor.process_batch, batch))
-            
-            # Write results as they complete
-            for future in futures:
-                processed_entries = future.result()
-                out_fastq.writelines(processed_entries)
+        # Create batches efficiently
+        read_pairs = zip(r1, r2)
+        current_batch = []
+        
+        for reads in read_pairs:            
+            current_batch.append(reads)            
+            if len(current_batch) >= batch_size:
+                entries = process_read_batch(
+                    current_batch, barcode_configs, matcher, 
+                    parsed_range, read_index, verbose
+                )
+                out_fastq.writelines(entries)
+                current_batch = []
+        
+        # Process remaining reads
+        if current_batch:
+            entries = process_read_batch(
+                current_batch, barcode_configs, matcher, 
+                parsed_range, read_index, verbose
+            )
+            out_fastq.writelines(entries)
 
+def parse_range(range_str: str) -> Tuple[int, int]:
+    """Parse range string"""
+    start, end = map(int, range_str.split('-'))
+    return (start, end)
+
+def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
+    """Prepare barcode configurations"""
+    return [{
+        'index': idx,
+        'file_index': 0 if row['read'] == 'read1' else 1,
+        'start': row['start'],
+        'end': row['end'],
+        'orientation': row['orientation'],
+        'whitelist': row['barcode_whitelist']
+    } for idx, row in positions.iterrows()]
