@@ -14,21 +14,14 @@ from argparse import RawTextHelpFormatter
 import logging
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.seed import parse_seed_arguments
-from scarecrow.tools import generate_random_string
-from typing import List, Tuple, Optional, Dict, Any, NamedTuple
+from scarecrow.tools import generate_random_string, reverse_complement
+from typing import List, Tuple, Optional, Dict, Any, Union
 import itertools
 from functools import partial
 import ast
 from collections import defaultdict
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor
-from Bio.Seq import Seq
-
-class FastqEntry(NamedTuple):
-    name: str
-    sequence: str
-    comment: str
-    quality: str
+from Bio.Seq import Seq  # For faster reverse complement
+import numpy as np  # For faster Hamming distance calculation
 
 
 def parser_reap(parser):
@@ -163,20 +156,7 @@ def run_reap(fastqs: List[str],
             logger.info(f"{key}: {barcode}")
 
     # Extract barcodes and target sequence
-    ###    barcode_positions_file = barcode_positions,
-    #extract_sequences_parallel_optimized(
-    #    fastq_files = [f for f in fastqs],
-    #    barcode_sequences = expected_barcodes,
-    #    output = output,
-    #    read1_range = read1_range,
-    #    read2_range = read2_range,
-    #    jitter = jitter,
-    #    mismatches = mismatches,
-    #    batch_size = batches,
-    #    threads = threads,
-    #    verbose = verbose
-    #)
-    extract_sequences_parallel(
+    extract_sequences_parallel_optimized(
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
         barcode_sequences = expected_barcodes,
@@ -186,7 +166,8 @@ def run_reap(fastqs: List[str],
         jitter = jitter,
         mismatches = mismatches,
         batch_size = batches,
-        threads = threads
+        threads = threads,
+        verbose = verbose
     )
     
     # Process fastq header
@@ -555,192 +536,3 @@ def extract_sequences_parallel_optimized(
                 # Process batch and write results immediately
                 for processed_entries in pool.imap_unordered(process_batch_func, [batch]):
                     out_fastq.writelines(processed_entries)
-
-
-
-class FastqBatchProcessor:
-    def __init__(self, barcode_configs, barcode_sequences, mismatches, read1_range, read2_range):
-        self.barcode_configs = barcode_configs
-        self.barcode_sequences = barcode_sequences
-        self.mismatches = mismatches
-        self.read1_range = read1_range
-        self.read2_range = read2_range
-        self.config_map = self._precompute_config_map()
-        
-        # Pre-compute barcode lengths and numpy arrays for each whitelist
-        self.barcode_arrays = {}
-        self.barcode_lengths = {}
-        for whitelist, sequences in barcode_sequences.items():
-            barcode_array = np.array([list(b) for b in sequences], dtype='U1')
-            self.barcode_arrays[whitelist] = barcode_array
-            self.barcode_lengths[whitelist] = len(next(iter(sequences)))
-
-    def _precompute_config_map(self):
-        return {(config['file_index'], config['whitelist']): 
-                (config['jittered_start'], config['jittered_end'], 
-                 config['orientation'], abs(config['jittered_start'] - config['start']))
-                for config in self.barcode_configs}
-
-    def match_barcode_vectorized(self, sequence: str, whitelist: str, orientation: str, jitter: int) -> str:
-        """Vectorized barcode matching using numpy operations"""
-        if len(sequence) < self.barcode_lengths[whitelist]:
-            return 'null'
-            
-        # Get pre-computed arrays
-        barcode_array = self.barcode_arrays[whitelist]
-        barcode_len = self.barcode_lengths[whitelist]
-        
-        # Handle reverse orientation
-        if orientation == 'reverse':
-            sequence = str(Seq(sequence).reverse_complement())
-            
-        # Convert sequence to array once
-        seq_array = np.array(list(sequence))
-        
-        # Vectorized exact match check
-        for i in range(len(sequence) - barcode_len + 1):
-            window = seq_array[i:i + barcode_len]
-            # Reshape for broadcasting
-            window = window.reshape(1, -1)
-            
-            # Compute all distances at once
-            distances = np.sum(barcode_array != window, axis=1)
-            
-            # Find matches within mismatch threshold
-            match_indices = np.where(distances <= self.mismatches)[0]
-            
-            if len(match_indices) > 0:
-                # Get the index of the best match
-                best_idx = match_indices[distances[match_indices].argmin()]
-                return ''.join(barcode_array[best_idx])
-                
-        return 'null'
-
-    def parse_fastq_entry(self, lines: List[str]) -> FastqEntry:
-        """Parse raw FASTQ lines into a FastqEntry"""
-        header = lines[0].strip()[1:]  # Remove @ symbol
-        name_parts = header.split(' ', 1)
-        name = name_parts[0]
-        comment = name_parts[1] if len(name_parts) > 1 else ''
-        sequence = lines[1].strip()
-        quality = lines[3].strip()
-        return FastqEntry(name, sequence, comment, quality)
-
-    def process_batch(self, read_batch: List[Tuple[List[str], List[str]]]) -> List[str]:
-        """Process a batch of reads using vectorized operations"""
-        output_entries = []
-        read_index = 0 if self.read1_range else 1
-        extract_range = self.read1_range if self.read1_range else self.read2_range
-        
-        for read1_lines, read2_lines in read_batch:
-            # Parse raw FASTQ entries
-            reads = [
-                self.parse_fastq_entry(read1_lines),
-                self.parse_fastq_entry(read2_lines)
-            ]
-            
-            barcodes = []
-            for config in self.barcode_configs:
-                seq = reads[config['file_index']].sequence
-                start, end, orientation, jitter_dist = self.config_map[(config['file_index'], config['whitelist'])]
-                barcode_seq = seq[start:end]
-                
-                whitelist = ast.literal_eval(config['whitelist'])[0]
-                if whitelist in self.barcode_sequences:
-                    matched_barcode = self.match_barcode_vectorized(
-                        barcode_seq, whitelist, orientation, jitter_dist)
-                    barcodes.append(matched_barcode)
-                else:
-                    barcodes.append('null')
-
-            # Extract sequence and create output
-            source_entry = reads[read_index]
-            extract_seq = source_entry.sequence[extract_range[0]:extract_range[1]]
-            extract_qual = source_entry.quality[extract_range[0]:extract_range[1]]
-            
-            # Efficient string joining
-            header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}\n"
-            output_entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
-
-        return output_entries
-
-def chunked_fastq_reader(file_path: str, chunk_size: int):
-    """Memory-efficient FASTQ reader"""
-    fastq_lines = []
-    with pysam.FastxFile(file_path) as f:
-        for entry in f:
-            header = f"@{entry.name}"
-            if entry.comment:
-                header += f" {entry.comment}"
-            fastq_lines.extend([
-                header + "\n",
-                entry.sequence + "\n",
-                "+\n",
-                entry.quality + "\n"
-            ])
-            if len(fastq_lines) >= chunk_size * 4:
-                yield [fastq_lines[i:i+4] for i in range(0, len(fastq_lines), 4)]
-                fastq_lines = []
-    if fastq_lines:
-        yield [fastq_lines[i:i+4] for i in range(0, len(fastq_lines), 4)]
-
-def extract_sequences_parallel(
-    fastq_files: List[str],
-    barcode_positions_file: str,
-    barcode_sequences: Dict[str, List[str]],
-    output: str = 'extracted.fastq',
-    read1_range: Optional[str] = None,
-    read2_range: Optional[str] = None,
-    jitter: int = 5,
-    mismatches: int = 1,
-    batch_size: int = 100000,
-    threads: Optional[int] = None
-) -> None:
-    """Optimized parallel sequence extraction with improved memory management"""
-    
-    # Initialize configurations
-    barcode_positions = pd.read_csv(barcode_positions_file)
-    barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
-    parsed_read1_range = parse_range(read1_range) if read1_range else None
-    parsed_read2_range = parse_range(read2_range) if read2_range else None
-    
-    # Create processor instance
-    processor = FastqBatchProcessor(
-        barcode_configs=barcode_configs,
-        barcode_sequences=barcode_sequences,
-        mismatches=mismatches,
-        read1_range=parsed_read1_range,
-        read2_range=parsed_read2_range
-    )
-    
-    # Optimize thread count and chunk size
-    threads = min(threads or mp.cpu_count(), batch_size // 1000 or 1)
-    chunk_size = max(batch_size // threads, 10000)
-    
-    # Set up output handling
-    out_mode = 'wt' if not output.endswith('.gz') else 'wt'
-    open_func = gzip.open if output.endswith('.gz') else open
-    
-    with ThreadPoolExecutor(max_workers=threads) as executor, \
-         open_func(output, out_mode) as out_fastq:
-        
-        # Process files in chunks
-        for chunk1, chunk2 in zip(
-            chunked_fastq_reader(fastq_files[0], chunk_size),
-            chunked_fastq_reader(fastq_files[1], chunk_size)):
-            
-            # Create read pairs from chunks
-            read_pairs = list(zip(chunk1, chunk2))
-            
-            # Process chunks in parallel
-            futures = []
-            chunk_size = max(len(read_pairs) // threads, 1)
-            for i in range(0, len(read_pairs), chunk_size):
-                batch = read_pairs[i:i + chunk_size]
-                futures.append(executor.submit(processor.process_batch, batch))
-            
-            # Write results as they complete
-            for future in futures:
-                processed_entries = future.result()
-                out_fastq.writelines(processed_entries)
-
