@@ -156,19 +156,6 @@ def run_reap(fastqs: List[str],
             logger.info(f"{key}: {barcode}")
 
     # Extract barcodes and target sequence
-    ###    barcode_positions_file = barcode_positions,
-    #extract_sequences_parallel_optimized(
-    #    fastq_files = [f for f in fastqs],
-    #    barcode_sequences = expected_barcodes,
-    #    output = output,
-    #    read1_range = read1_range,
-    #    read2_range = read2_range,
-    #    jitter = jitter,
-    #    mismatches = mismatches,
-    #    batch_size = batches,
-    #    threads = threads,
-    #    verbose = verbose
-    #)
     extract_sequences_parallel(
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
@@ -179,7 +166,8 @@ def run_reap(fastqs: List[str],
         jitter = jitter,
         mismatches = mismatches,
         batch_size = batches,
-        threads = threads
+        threads = threads,
+        verbose = verbose
     )
     
     # Process fastq header
@@ -316,6 +304,8 @@ def process_read_batch(read_batch: List[Tuple],
                       read_index: int,
                       verbose: bool) -> List[str]:
     """Process a batch of reads with optimized matching"""
+    logger = logging.getLogger('scarecrow')
+
     output_entries = []
     
     for reads in read_batch:
@@ -325,11 +315,17 @@ def process_read_batch(read_batch: List[Tuple],
             start, end = config['start'], config['end']
             barcode_seq = seq[start-1:end]
 
+            if verbose:
+                logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
+                logger.info(f"Sequence: {reads[config['file_index']].sequence}")
+
             whitelist = ast.literal_eval(config['whitelist'])[0]
 
             if whitelist in matcher.matchers:
                 matched_barcode = matcher.find_match(
                     barcode_seq, whitelist, config['orientation'])
+                if verbose:
+                    logger.info(f"Matched barcode: {matched_barcode} for {barcode_seq} @ range {start}-{end}")
 
                 barcodes.append(matched_barcode)
             else:
