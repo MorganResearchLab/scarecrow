@@ -260,7 +260,7 @@ def process_fastq_headers(file_path):
 
 
 def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_mismatches: int, 
-                            jitter: int) -> List[Dict]:
+                            jitter: int, verbose: bool) -> List[Dict]:
     """
     Optimized barcode matching function using vectorized operations and early exits.
     """
@@ -278,22 +278,22 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
     barcode_len = len(next(iter(barcodes)))  # Get length of first barcode
     candidate = sequence if orientation != 'reverse' else str(Seq(sequence).reverse_complement())
 
-    print(f"First few barcodes: {list(barcodes)[:3]}")
-    print(f"Candidate sequence: {candidate}")
-    print(f"Candidate type: {type(candidate)}")
-    print(f"First barcode type: {type(next(iter(barcodes)))}")
-    
-    # Check for hidden characters or whitespace
-    print(f"Candidate bytes: {candidate.encode()}")
-    print(f"First barcode bytes: {next(iter(barcodes)).encode()}")
+    if verbose:
+        print(f"First few barcodes: {list(barcodes)[:3]}")
+        print(f"Candidate sequence: {candidate}")
+        print(f"Candidate type: {type(candidate)}")
+        print(f"First barcode type: {type(next(iter(barcodes)))}")
+        print(f"Candidate bytes: {candidate.encode()}")
+        print(f"First barcode bytes: {next(iter(barcodes)).encode()}")
 
 
     # Quick exact match check using set operations
     matches = []
     for i in range(len(candidate) - barcode_len + 1):
         substring = candidate[i:i + barcode_len]
-        print(f"Checking substring: '{substring}' at position {i}")
-        print(f"Is in barcodes: {substring in barcodes}")
+        if verbose:
+            print(f"Checking substring: '{substring}' at position {i}")
+            print(f"Is in barcodes: {substring in barcodes}")
         if substring in barcodes:
             match = [{
                 'barcode': substring,
@@ -303,14 +303,9 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 'mismatches': 0,
                 'peak_dist': 0
             }]
-            print(f"Match found: {match}")
+            if verbose:
+                print(f"Match found: {match}")
             return match       
-        # Test explicit set membership (debugging chunk)
-        test_set = set()
-        for barcode in barcodes:
-            test_set.add(barcode.strip())  # Remove any hidden whitespace
-            if substring.strip() == barcode.strip():
-                print(f"Found match through explicit comparison: {barcode}")
 
     # If no exact match, use numpy for efficient Hamming distance calculation
     if max_mismatches > 0:
@@ -331,10 +326,10 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 if len(substr) == barcode_len:  # Ensure we have a full barcode length
                     substr_array = np.array(list(substr))[np.newaxis, :]
                     distances = np.sum(barcode_array != substr_array, axis=1)
-
-                    print(f"Candidate length: {len(candidate)}")
-                    print(f"Left pos: {left_pos}, Barcode len: {barcode_len}")
-                    print(f"Substr: {substr}, Length: {len(substr)}")
+                    if verbose:
+                        print(f"Candidate length: {len(candidate)}")
+                        print(f"Left pos: {left_pos}, Barcode len: {barcode_len}")
+                        print(f"Substr: {substr}, Length: {len(substr)}")
                     
                     # Check for matches at left position
                     for b, d in zip(barcodes, distances):
@@ -348,9 +343,10 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                                 'peak_dist': abs(jitter - left_pos) if jitter is not None else None,
                                 'position': 'left'
                             }
-                            # Return immediately if perfect match
+                            # Return immediately if perfect match (should be picked up by set match above)
                             if d == 0:
-                                print(f"Match found: {matches}")
+                                if verbose:
+                                    print(f"Match found: {matches}")
                                 return [match]
                             left_matches.append(match)
                 
@@ -375,9 +371,10 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                                 'peak_dist': abs(jitter - right_pos) if jitter is not None else None,
                                 'position': 'right'
                             }
-                            # Return immediately if perfect match
+                            # Return immediately if perfect match (should be picked up by set match above)
                             if d == 0:
-                                print(f"Match found: {matches}")
+                                if verbose:
+                                    print(f"Match found: {matches}")
                                 return [match]
                             right_matches.append(match)
             
@@ -391,16 +388,19 @@ def match_barcode_optimized(sequence: str, barcodes: set, orientation: str, max_
                 if (left_best and right_best and 
                     left_best['mismatches'] == right_best['mismatches']):
                     chosen_match = random.choice([left_best, right_best])
-                    print(f"Match found: {matches}")
+                    if verbose:
+                        print(f"Match found: {matches}")
                     return [chosen_match]
                 
                 # Return the best match (the one with fewer mismatches)
                 elif left_best and (not right_best or 
                                 left_best['mismatches'] < right_best['mismatches']):
-                    print(f"Match found: {matches}")
+                    if verbose:
+                        print(f"Match found: {matches}")
                     return [left_best]
                 elif right_best:
-                    print(f"Match found: {matches}")
+                    if verbose:
+                        print(f"Match found: {matches}")
                     return [right_best]  
 
     #matches.sort(key=lambda x: (x['mismatches'], x['peak_dist'], x['start']))
@@ -426,7 +426,8 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     read_index = 0 if read1_range else 1
     
     # Pre-process barcode configurations
-    print(f"Barcode configs: {barcode_configs}")
+    if verbose:
+        print(f"Barcode configs: {barcode_configs}")
 
     config_map = {(config['file_index'], config['whitelist']): 
                  (config['jittered_start'], config['jittered_end'], 
@@ -436,25 +437,28 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     for reads in read_batch:
         barcodes = []
         for config in barcode_configs:
-            print(f"Config file index: {config['file_index']}")
-            print(f"Seq file index 0: {reads[0].sequence}")
-            print(f"Seq file index 1: {reads[1].sequence}")
-            print(f"Read: {reads[config['file_index']].name}\t{reads[config['file_index']].sequence}")
+            if verbose:
+                print(f"Read: {reads[config['file_index']].name}")
+                print(f"Config file index: {config['file_index']}")
+                print(f"Seq file index 0: {reads[0].sequence}")
+                print(f"Seq file index 1: {reads[1].sequence}")            
             seq = reads[config['file_index']].sequence
             start, end, orientation, jitter_dist = config_map[(config['file_index'], config['whitelist'])]
             barcode = seq[start:end]
             
             whitelist = ast.literal_eval(config['whitelist'])[0]
             if whitelist in barcode_sequences:
-                print(f"Whitelist: {whitelist}")
-                print(f"Available sequences: {list(barcode_sequences.values())}")
-                print(f"Number of barcodes: {len(barcode_sequences[whitelist])}")
+                if verbose:
+                    print(f"Whitelist: {whitelist}")
+                    print(f"Available sequences: {list(barcode_sequences.values())}")
+                    print(f"Number of barcodes: {len(barcode_sequences[whitelist])}")
                 matches = match_barcode_optimized(
                     sequence = barcode,
                     barcodes = barcode_sequences[whitelist],
                     orientation = orientation,
                     max_mismatches = mismatches,
-                    jitter = jitter_dist
+                    jitter = jitter_dist,
+                    verbose = verbose
                 )
                 barcodes.append(matches[0]['barcode'] if matches else 'null')
             else:
