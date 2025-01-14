@@ -427,6 +427,7 @@ def process_read_batch_optimized(read_batch: List[Tuple],
     
     # Pre-process barcode configurations
     print(f"Barcode configs: {barcode_configs}")
+
     config_map = {(config['file_index'], config['whitelist']): 
                  (config['jittered_start'], config['jittered_end'], 
                   config['orientation'], abs(config['jittered_start'] - config['start']))
@@ -443,7 +444,7 @@ def process_read_batch_optimized(read_batch: List[Tuple],
             whitelist = ast.literal_eval(config['whitelist'])[0]
             if whitelist in barcode_sequences:
                 print(f"Whitelist: {whitelist}")
-                print(f"Available sequences: {list(barcode_sequences.keys())}")
+                print(f"Available sequences: {list(barcode_sequences.values())}")
                 print(f"Number of barcodes: {len(barcode_sequences[whitelist])}")
                 matches = match_barcode_optimized(
                     sequence = barcode,
