@@ -8,6 +8,10 @@ A toolkit for preprocessing single cell sequencing data.
 
 * Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
 * `scarecrow reap` needs checking after optimizing for efficiency
+* Replace --read1 --read2 flags in reap with --extract <read>:<range>
+* Consider adding --udi <read>:<range> to reap
+* Refactor harvest for efficiency
+* Increase font size on harvest plot
 
 
 ## Environment
@@ -92,4 +96,23 @@ scarecrow reap --fastqs ${R1} ${R2} -p ${OUTDIR}/barcode_positions.csv \
     -j 5 -m 1 --barcodes ${BARCODES[@]} --read1 0-64 --out ./cDNA.fq.gz  
 ```
 
-To process 150M read pairs with `scarecrow reap` takes around 90 mins, require 1 core and ~ 200 MB RAM.
+To process 150M read pairs with `scarecrow reap` takes around 90 mins, requires 1 core and ~ 200 MB RAM.
+
+
+
+# Testing on laptop
+```bash
+R1=100K_1.fastq
+R2=100K_2.fastq
+BARCODES=("BC1:R1_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_n123_R1_v3_5.barcodes"
+    "BC2:v1:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_v1.barcodes"
+    "BC3:R3_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_R3_v3.barcodes")
+for BARCODE in ${BARCODES[@]}
+do
+    scarecrow seed --fastqs ${R1} ${R2} --strands pos neg \
+      -o ./results/barcodes_${BARCODE%:*:*}.csv --barcodes ${BARCODE}
+done
+
+FILES=(./results/barcodes_BC*csv)
+scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 --out barcode_positions.csv
+```
