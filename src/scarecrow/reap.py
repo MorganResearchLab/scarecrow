@@ -334,7 +334,7 @@ def process_read_batch(read_batch: List[Tuple],
             whitelist = ast.literal_eval(config['whitelist'])
 
             if verbose:
-                logger.info(f"whitelist: {whitelist}")
+                logger.info(f"whitelist: {tuple(whitelist)}")
                 logger.info(f"matcher.matchers: {matcher.matchers}")
 
             if tuple(whitelist) in matcher.matchers:
