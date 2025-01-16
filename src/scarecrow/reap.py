@@ -14,15 +14,75 @@ import re
 import shutil
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
+from queue import Empty
+from itertools import islice
+from typing import List, Tuple, Optional, Dict, Set
 from collections import defaultdict
 from functools import lru_cache
-from typing import List, Tuple, Optional, Dict, Set
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.seed import parse_seed_arguments
 from scarecrow.tools import generate_random_string
 
+class BarcodeMatcherOptimized:
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
+        self.mismatches = mismatches
+        self.matchers = {}
+        
+        # Create optimized lookup structures for each whitelist
+        for whitelist, sequences in barcode_sequences.items():
+            exact_matches = set(sequences)
+            # Create lookup tables for 1-mismatch sequences if needed
+            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
+            self.matchers[whitelist] = {
+                'exact': exact_matches,
+                'mismatch': mismatch_lookup,
+                'length': len(next(iter(sequences)))
+            }
 
+    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
+        """Create a lookup table for sequences with 1 mismatch"""
+        lookup = {}
+        for seq in sequences:
+            # Store the original sequence
+            lookup[seq] = seq
+            # Generate all 1-mismatch variants
+            for i in range(len(seq)):
+                for base in 'ACGTN':
+                    if base != seq[i]:
+                        variant = seq[:i] + base + seq[i+1:]
+                        # Only store if this variant hasn't been seen or is closer to current sequence
+                        if variant not in lookup:
+                            lookup[variant] = seq
+        return lookup
 
+    @lru_cache(maxsize=1024)
+    def _reverse_complement(self, sequence: str) -> str:
+        """Cached reverse complement computation"""
+        return str(Seq(sequence).reverse_complement())
+
+    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
+        """Find best matching barcode sequence"""
+        matcher = self.matchers[whitelist]
+        barcode_len = matcher['length']
+        
+        if len(sequence) < barcode_len:
+            return 'null'
+
+        # Handle reverse orientation
+        if orientation == 'reverse':
+            sequence = self._reverse_complement(sequence)
+
+        # Try exact match first
+        if sequence in matcher['exact']:
+            return sequence
+
+        # If mismatches allowed, check mismatch lookup
+        if self.mismatches > 0 and matcher['mismatch'] is not None:
+            if sequence in matcher['mismatch']:
+                return matcher['mismatch'][sequence]
+
+        return 'null'
+    
 def parser_reap(parser):
     subparser = parser.add_parser(
         "reap",
@@ -134,182 +194,13 @@ def validate_reap_args(parser, args) -> None:
              threads = args.threads,
              verbose = args.verbose)
 
-@log_errors
-def run_reap(fastqs: List[str], 
-             barcode_positions: str = None,
-             barcode_reverse_order: bool = False,
-             output: str = 'extracted.fastq',
-             extract: str = None,
-             umi: Optional[str] = None,
-             barcodes: List[str] = None,
-             jitter: int = 5,
-             mismatches: int = 1,
-             batches: int = 10000,
-             threads: int = 4,
-             verbose: bool = False) -> None:
+def parse_range(range_str: str) -> Tuple[int, int]:
     """
-    Main function to extract sequences with barcode headers
-    """    
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: ${logfile}")
-
-    # Extract barcodes and convert whitelist to set
-    expected_barcodes = parse_seed_arguments(barcodes)  
-    for key, barcode in expected_barcodes.items():
-        expected_barcodes[key] = sorted(set(barcode))
-        if verbose:
-            logger.info(f"{key}: {barcode}")
-
-    # Check if the output filename string ends with .gz
-    if output.endswith(".gz"):
-        output = output[:-3]
-
-    # Extract sequences
-    extract_sequences(
-        fastq_files = [f for f in fastqs],
-        barcode_positions_file = barcode_positions,
-        barcode_reverse_order = barcode_reverse_order,
-        barcode_sequences = expected_barcodes,
-        output = output,
-        extract = extract,
-        umi = umi,
-        jitter = jitter,
-        mismatches = mismatches,
-        batch_size = batches,
-        threads = threads,
-        verbose = verbose
-    )
-    
-    # Process fastq header
-    barcode_counts, cell_barcodes = process_fastq_headers(output)
-
-    # Log the barcode counts for each position
-    for i, counts in enumerate(barcode_counts):
-        if verbose:
-            for barcode, count in counts.items():
-                logger.info(f"Barcode index: {i + 1}\tBarcode: {barcode}\tCount: {count}")
-        barcodes = pd.DataFrame(list(barcode_counts[i].items()), columns=["Barcode", "Count"]).sort_values(by="Count")
-        barcodes.insert(0, "Index", i + 1)
-        if i == 0:
-            barcodes.to_csv('{}.{}'.format(output, 'barcodes.csv'), index = False)
-        else:
-            barcodes.to_csv('{}.{}'.format(output, 'barcodes.csv'), index = False, mode = "a", header = False)
-
-    # Log the combined barcode counts (i.e. cell sequence counts)
-    if verbose:
-        for cell, count in cell_barcodes.items():
-            logger.info(f"Barcode combination: {cell}\tCount: {count}")
-    barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
-    barcodes.to_csv('{}.{}'.format(output, 'barcode.combinations.csv'), index = False)
-
-    # Check if the output filename string ends with .gz
-    logger.info(f"Compressing {output}")
-    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb') as f_out:
-        shutil.copyfileobj(f_in, f_out)
-    os.remove(output)
-
-def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
+    Parse range string
     """
-    Process fastq header to report on barcode counts
-
-    Args:
-        file_path: fastq file to operate on
-    
-    Returns:
-        (1) list of dictionary of barcode counts, and (2) dictionary of barcode combination counts
-    """
-
-    # Create a list of dictionaries, one for each barcode position
-    barcode_counts = []
-    cell_barcodes = defaultdict(int)
-
-    # Open the FASTQ file using pysam
-    with pysam.FastxFile(file_path) as fastq_file:
-        for entry in fastq_file:
-            # Extract the header line
-            header = entry.comment
-
-            # Check if the header contains 'barcodes='
-            if 'barcodes=' in header:
-                # Extract the barcodes substring
-                barcodes_str = re.search(r'barcodes=([\w_]+)', header).group(1)
-                cell_barcodes[barcodes_str] += 1
-                
-                # Split the barcodes string by underscore
-                barcodes = barcodes_str.split('_')
-                
-                # Ensure barcode_counts has enough dictionaries for all barcode positions
-                while len(barcode_counts) < len(barcodes):
-                    barcode_counts.append(defaultdict(int))
-                
-                # Update counts in the corresponding dictionaries
-                for i, barcode in enumerate(barcodes):
-                    barcode_counts[i][barcode] += 1
-
-    return barcode_counts, cell_barcodes
-
-
-class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
-        self.mismatches = mismatches
-        self.matchers = {}
-        
-        # Create optimized lookup structures for each whitelist
-        for whitelist, sequences in barcode_sequences.items():
-            exact_matches = set(sequences)
-            # Create lookup tables for 1-mismatch sequences if needed
-            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
-            self.matchers[whitelist] = {
-                'exact': exact_matches,
-                'mismatch': mismatch_lookup,
-                'length': len(next(iter(sequences)))
-            }
-
-    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
-        """Create a lookup table for sequences with 1 mismatch"""
-        lookup = {}
-        for seq in sequences:
-            # Store the original sequence
-            lookup[seq] = seq
-            # Generate all 1-mismatch variants
-            for i in range(len(seq)):
-                for base in 'ACGTN':
-                    if base != seq[i]:
-                        variant = seq[:i] + base + seq[i+1:]
-                        # Only store if this variant hasn't been seen or is closer to current sequence
-                        if variant not in lookup:
-                            lookup[variant] = seq
-        return lookup
-
-    @lru_cache(maxsize=1024)
-    def _reverse_complement(self, sequence: str) -> str:
-        """Cached reverse complement computation"""
-        return str(Seq(sequence).reverse_complement())
-
-    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
-        """Find best matching barcode sequence"""
-        matcher = self.matchers[whitelist]
-        barcode_len = matcher['length']
-        
-        if len(sequence) < barcode_len:
-            return 'null'
-
-        # Handle reverse orientation
-        if orientation == 'reverse':
-            sequence = self._reverse_complement(sequence)
-
-        # Try exact match first
-        if sequence in matcher['exact']:
-            return sequence
-
-        # If mismatches allowed, check mismatch lookup
-        if self.mismatches > 0 and matcher['mismatch'] is not None:
-            if sequence in matcher['mismatch']:
-                return matcher['mismatch'][sequence]
-
-        return 'null'
+    start, end = map(int, range_str.split('-'))
+    start = max(0, start -1)
+    return (start, end)
 
 @log_errors
 def process_read_batch(read_batch: List[Tuple], 
@@ -369,87 +260,6 @@ def process_read_batch(read_batch: List[Tuple],
 
     return output_entries
 
-def extract_sequences(
-    fastq_files: List[str] = None,
-    barcode_positions_file: str = None,
-    barcode_reverse_order: bool = False,
-    barcode_sequences: Dict[str, List[str]] = None,
-    output: str = 'extracted.fastq.gz',
-    extract: str = None,
-    umi: Optional[str] = None,
-    jitter: int = 5,
-    mismatches: int = 1,
-    batch_size: int = 100000,
-    threads: Optional[int] = None,
-    verbose: bool = False
-) -> None:
-    """
-    Optimized sequence extraction focused on matching performance
-    """
-    
-    # Initialize configurations
-    barcode_positions = pd.read_csv(barcode_positions_file)
-    if barcode_reverse_order:
-        barcode_positions = barcode_positions[::-1].reset_index(drop=True)
-    barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
-
-    # Extract range
-    extract_index, extract_range = extract.split(':')
-    extract_index = int(extract_index)-1
-    extract_range = parse_range(extract_range)
-
-    # UMI range
-    umi_index, umi_range = umi.split(':')
-    umi_index = int(umi_index)-1
-    umi_range = parse_range(umi_range)
-
-    # Create optimized matcher
-    matcher = BarcodeMatcherOptimized(
-        barcode_sequences={k: set(v) for k, v in barcode_sequences.items()},
-        mismatches=mismatches
-    )
-    
-    # Use minimal threading for I/O
-    threads = min(4, threads or mp.cpu_count())
-    
-    # Process files with minimal overhead
-    with pysam.FastqFile(fastq_files[0]) as r1, \
-         pysam.FastqFile(fastq_files[1]) as r2, \
-         open(output, 'w') as out_fastq:
-        
-        # Create batches efficiently
-        read_pairs = zip(r1, r2)
-        current_batch = []
-        
-        for reads in read_pairs:            
-            current_batch.append(reads)            
-            if len(current_batch) >= batch_size:
-                entries = process_read_batch(
-                    current_batch, barcode_configs, matcher, 
-                    extract_range, extract_index, umi_index, umi_range,
-                    verbose
-                )
-                out_fastq.writelines(entries)
-                current_batch = []
-        
-        # Process remaining reads
-        if current_batch:
-            entries = process_read_batch(
-                current_batch, barcode_configs, matcher, 
-                extract_range, extract_index,  umi_index, umi_range,
-                verbose
-            )
-            out_fastq.writelines(entries)
-            
-
-def parse_range(range_str: str) -> Tuple[int, int]:
-    """
-    Parse range string
-    """
-    start, end = map(int, range_str.split('-'))
-    start = max(0, start -1)
-    return (start, end)
-
 def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
     """
     Prepare barcode configurations
@@ -462,3 +272,295 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
         'orientation': row['orientation'],
         'whitelist': row['barcode_whitelist']
     } for idx, row in positions.iterrows()]
+
+
+
+import ast
+import gzip
+import logging
+import os
+import pandas as pd
+import pysam
+import re
+import shutil
+import multiprocessing as mp
+from itertools import islice
+from typing import List, Tuple, Optional, Dict, Set
+from collections import defaultdict
+from functools import lru_cache
+import numpy as np
+
+class FastqChunkReader:
+    """Efficient chunk reader for FASTQ files"""
+    def __init__(self, fastq_files: List[str], chunk_size: int):
+        self.fastq_files = fastq_files
+        self.chunk_size = chunk_size
+        self._file_handles = None
+        
+    def __enter__(self):
+        self._file_handles = [pysam.FastxFile(f) for f in self.fastq_files]
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for handle in self._file_handles:
+            handle.close()
+            
+    def read_chunk(self, start_position: int) -> List[Tuple]:
+        """Read a chunk of reads from the starting position"""
+        # Skip to position
+        for handle in self._file_handles:
+            for _ in range(start_position):
+                try:
+                    next(handle)
+                except StopIteration:
+                    return []
+        
+        # Read chunk
+        chunk = []
+        for reads in zip(*[islice(h, self.chunk_size) for h in self._file_handles]):
+            chunk.append(reads)
+            
+        return chunk
+
+def efficient_process_chunk(args: Tuple) -> Tuple[List[str], List[Dict], Dict]:
+    """
+    Process a chunk of reads with optimized memory usage
+    """
+    (chunk_idx, fastq_files, chunk_size, barcode_configs, 
+     matcher, extract_range, extract_index, umi_index, 
+     umi_range, verbose) = args
+    
+    # Calculate start position
+    start_position = chunk_idx * chunk_size
+    
+    # Read chunk using context manager
+    with FastqChunkReader(fastq_files, chunk_size) as reader:
+        chunk = reader.read_chunk(start_position)
+        if not chunk:
+            return [], [], defaultdict(int)
+    
+    # Process reads with minimal memory allocation
+    entries = []
+    local_barcode_counts = [defaultdict(int)]
+    local_cell_barcodes = defaultdict(int)
+    
+    for reads in chunk:
+        barcodes = []
+        for config in barcode_configs:
+            seq = reads[config['file_index']].sequence
+            barcode_seq = seq[config['start']-1:config['end']]
+            
+            whitelist = ast.literal_eval(config['whitelist'])
+            if isinstance(whitelist, list) and len(whitelist) == 1:
+                whitelist = whitelist[0]
+                
+            if whitelist in matcher.matchers:
+                matched_barcode = matcher.find_match(
+                    barcode_seq, whitelist, config['orientation'])
+                barcodes.append(matched_barcode)
+            else:
+                barcodes.append('null')
+        
+        # Extract sequence and create output
+        source_entry = reads[extract_index]
+        extract_seq = source_entry.sequence[extract_range[0]:extract_range[1]]
+        extract_qual = source_entry.quality[extract_range[0]:extract_range[1]]
+        
+        umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
+        barcodes_str = '_'.join(barcodes)
+        
+        # Update counts
+        for i, barcode in enumerate(barcodes):
+            while i >= len(local_barcode_counts):
+                local_barcode_counts.append(defaultdict(int))
+            local_barcode_counts[i][barcode] += 1
+        local_cell_barcodes[barcodes_str] += 1
+        
+        # Create entry
+        header = f"@{source_entry.name} {source_entry.comment} barcodes={barcodes_str} UMI={umi_seq}\n"
+        entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
+    
+    return entries, local_barcode_counts, local_cell_barcodes
+
+@log_errors
+def optimized_parallel_extract(
+    fastq_files: List[str],
+    barcode_positions_file: str,
+    barcode_reverse_order: bool,
+    barcode_sequences: Dict[str, List[str]],
+    output: str,
+    extract: str,
+    umi: str,
+    jitter: int = 5,
+    mismatches: int = 1,
+    batch_size: int = 100000,
+    threads: Optional[int] = None,
+    verbose: bool = False
+) -> None:
+    """
+    Optimized parallel sequence extraction
+    """
+    logger = logging.getLogger('scarecrow')
+
+    # Optimize number of threads based on CPU count and I/O capacity
+    if threads is None:
+        threads = min(mp.cpu_count() - 1, 8)  # Cap at 8 by default to avoid I/O bottleneck
+    else:
+        threads = min(threads, mp.cpu_count())
+    
+    # Calculate optimal chunk size based on total reads and threads
+    total_reads = sum(1 for _ in pysam.FastxFile(fastq_files[0]))
+    optimal_chunks = max(threads * 4, 20)  # Ensure enough chunks for good distribution
+    chunk_size = max(batch_size, total_reads // optimal_chunks)
+    
+    # Initialize matcher once and share across processes
+    matcher = BarcodeMatcherOptimized(
+        barcode_sequences={k: set(v) for k, v in barcode_sequences.items()},
+        mismatches=mismatches
+    )
+    
+    # Setup configurations
+    barcode_positions = pd.read_csv(barcode_positions_file)
+    if barcode_reverse_order:
+        barcode_positions = barcode_positions[::-1].reset_index(drop=True)
+    barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
+    
+    # Parse ranges once
+    extract_index, extract_range = extract.split(':')
+    extract_index = int(extract_index)-1
+    extract_range = parse_range(extract_range)
+    
+    umi_index, umi_range = umi.split(':')
+    umi_index = int(umi_index)-1
+    umi_range = parse_range(umi_range)
+    
+    # Calculate number of chunks
+    num_chunks = (total_reads + chunk_size - 1) // chunk_size
+    
+    # Prepare process arguments
+    process_args = [
+        (chunk_idx, fastq_files, chunk_size, barcode_configs,
+         matcher, extract_range, extract_index, umi_index,
+         umi_range, verbose)
+        for chunk_idx in range(num_chunks)
+    ]
+    
+    # Process chunks with optimized pool
+    with mp.Pool(processes=threads) as pool:
+        results = []
+        # Use imap_unordered for better load balancing
+        for result in pool.imap_unordered(efficient_process_chunk, process_args):
+            results.append(result)
+    
+    # Efficient merge of results
+    entries = []
+    merged_position_counts = []
+    merged_combination_counts = defaultdict(int)
+    
+    for chunk_entries, pos_counts, comb_counts in results:
+        entries.extend(chunk_entries)
+        
+        # Extend position counts list if needed
+        while len(merged_position_counts) < len(pos_counts):
+            merged_position_counts.append(defaultdict(int))
+        
+        # Merge counts
+        for i, pos_dict in enumerate(pos_counts):
+            for barcode, count in pos_dict.items():
+                merged_position_counts[i][barcode] += count
+        
+        for comb, count in comb_counts.items():
+            merged_combination_counts[comb] += count
+    
+    # Write results efficiently
+    with open(output, 'w', buffering=1024*1024) as out_fastq:  # 1MB buffer
+        for entry in entries:
+            out_fastq.write(entry)
+    
+    # Write count files
+    write_count_files(output, merged_position_counts, merged_combination_counts)
+    
+    # Compress output efficiently
+    logger.info(f"Compressing {output}")
+    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb', compresslevel=4) as f_out:
+        shutil.copyfileobj(f_in, f_out, length=1024*1024)  # 1MB buffer
+    os.remove(output)
+
+def write_count_files(output: str, 
+                     barcode_counts: List[Dict], 
+                     cell_barcodes: Dict) -> None:
+    """Write barcode count files"""
+    # Write position-specific barcode counts
+    for i, counts in enumerate(barcode_counts):
+        barcodes = pd.DataFrame(
+            list(counts.items()), 
+            columns=["Barcode", "Count"]
+        ).sort_values(by="Count")
+        barcodes.insert(0, "Index", i + 1)
+        
+        mode = 'w' if i == 0 else 'a'
+        header = i == 0
+        barcodes.to_csv(
+            f'{output}.barcodes.csv',
+            index=False,
+            mode=mode,
+            header=header
+        )
+    
+    # Write combined barcode counts
+    barcodes = pd.DataFrame(
+        list(cell_barcodes.items()),
+        columns=["BarcodeCombination", "Count"]
+    ).sort_values(by="Count")
+    barcodes.to_csv(
+        f'{output}.barcode.combinations.csv',
+        index=False
+    )
+
+# Update run_reap to use the optimized version
+def run_reap(fastqs: List[str], 
+             barcode_positions: str = None,
+             barcode_reverse_order: bool = False,
+             output: str = 'extracted.fastq',
+             extract: str = None,
+             umi: Optional[str] = None,
+             barcodes: List[str] = None,
+             jitter: int = 5,
+             mismatches: int = 1,
+             batches: int = 10000,
+             threads: int = 4,
+             verbose: bool = False) -> None:
+    """
+    Main function to extract sequences with barcode headers
+    """    
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
+
+    # Extract barcodes and convert whitelist to set
+    expected_barcodes = parse_seed_arguments(barcodes)  
+    for key, barcode in expected_barcodes.items():
+        expected_barcodes[key] = sorted(set(barcode))
+        if verbose:
+            logger.info(f"{key}: {barcode}")
+
+    # Check if the output filename string ends with .gz
+    if output.endswith(".gz"):
+        output = output[:-3]
+
+    # Extract sequences using optimized parallel processing
+    optimized_parallel_extract(
+        fastq_files=[f for f in fastqs],
+        barcode_positions_file=barcode_positions,
+        barcode_reverse_order=barcode_reverse_order,
+        barcode_sequences=expected_barcodes,
+        output=output,
+        extract=extract,
+        umi=umi,
+        jitter=jitter,
+        mismatches=mismatches,
+        batch_size=batches,
+        threads=threads,
+        verbose=verbose
+    )
