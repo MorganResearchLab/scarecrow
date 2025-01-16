@@ -333,6 +333,10 @@ def process_read_batch(read_batch: List[Tuple],
 
             whitelist = ast.literal_eval(config['whitelist'])
 
+            if verbose:
+                logger.info(f"whitelist: {whitelist}")
+                logger.info(f"matcher.matchers: {matcher.matchers}")
+
             if whitelist in matcher.matchers:
                 matched_barcode = matcher.find_match(
                     barcode_seq, whitelist, config['orientation'])
