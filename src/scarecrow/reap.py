@@ -304,6 +304,7 @@ class BarcodeMatcherOptimized:
 
         return 'null'
 
+@log_errors
 def process_read_batch(read_batch: List[Tuple], 
                       barcode_configs: List[Dict],
                       matcher: BarcodeMatcherOptimized,
