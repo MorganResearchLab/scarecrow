@@ -333,11 +333,15 @@ def process_read_batch(read_batch: List[Tuple],
 
             whitelist = ast.literal_eval(config['whitelist'])
 
+            # This condition check was added due to whitelist being read as a list when passed via SLURM
+            if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
+                whitelist = whitelist[0]
+
             if verbose:
                 logger.info(f"whitelist: {tuple(whitelist)}")
                 logger.info(f"matcher.matchers: {matcher.matchers}")
 
-            if tuple(whitelist) in matcher.matchers:
+            if whitelist in matcher.matchers:
                 matched_barcode = matcher.find_match(
                     barcode_seq, whitelist, config['orientation'])
                 if verbose:
