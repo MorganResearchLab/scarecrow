@@ -9,6 +9,7 @@ import gzip
 import logging
 import pandas as pd
 import pysam
+import re
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
@@ -55,6 +56,11 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         default=[],
     )
     subparser.add_argument(
+        "-r", "--barcode_reverse_order",
+        action='store_true',
+        help='Reverse retrieval order of barcodes in barcode positions file [false]'
+    )
+    subparser.add_argument(
         "-j", "--jitter",
         metavar="jitter",
         type=int,
@@ -68,18 +74,17 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         default=1,
         help='Number of allowed mismatches in barcode [1]',
     )
-    group = subparser.add_mutually_exclusive_group(required=True)
-    group.add_argument(
-        "-1", "--read1",
-        metavar="read1_range",
-        help=("Sequence range to extract from read1 (e.g. (0-100))"),
+    subparser.add_argument(
+        "-x", "--extract",
+        metavar="umi range",
+        help=("Sequence range to extract <read>:<range> (e.g. 1:1-64)"),
         type=str,
         default=None
     )
-    group.add_argument(
-        "-2", "--read2",
-        metavar="read2_range",
-        help=("Sequence range to extract from read2 (e.g. 0-100)"),
+    subparser.add_argument(
+        "-u", "--umi",
+        metavar="umi range",
+        help=("Sequence range to extract for UMI <read>:<range> (e.g. 2:1-10)"),
         type=str,
         default=None
     )
@@ -116,9 +121,10 @@ def validate_reap_args(parser, args) -> None:
     """
     run_reap(fastqs = [f for f in args.fastqs], 
              barcode_positions = args.barcode_positions,
+             barcode_reverse_order = args.barcode_reverse_order,
              output = args.out,
-             read1_range = args.read1,
-             read2_range = args.read2, 
+             extract = args.extract,
+             umi = args.umi, 
              barcodes = args.barcodes,
              jitter = args.jitter,
              mismatches = args.mismatches,
@@ -128,10 +134,11 @@ def validate_reap_args(parser, args) -> None:
 
 @log_errors
 def run_reap(fastqs: List[str], 
-             barcode_positions: str,
+             barcode_positions: str = None,
+             barcode_reverse_order: bool = False,
              output: str = 'extracted.fastq',
-             read1_range: Optional[str] = None,
-             read2_range: Optional[str] = None,
+             extract: str = None,
+             umi: Optional[str] = None,
              barcodes: List[str] = None,
              jitter: int = 5,
              mismatches: int = 1,
@@ -161,10 +168,11 @@ def run_reap(fastqs: List[str],
     extract_sequences(
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
+        barcode_reverse_order = barcode_reverse_order,
         barcode_sequences = expected_barcodes,
         output = output,
-        read1_range = read1_range,
-        read2_range = read2_range,
+        extract = extract,
+        umi = umi,
         jitter = jitter,
         mismatches = mismatches,
         batch_size = batches,
@@ -218,8 +226,8 @@ def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, 
 
             # Check if the header contains 'barcodes='
             if 'barcodes=' in header:
-                # Extract the barcodes string (everything after 'barcodes=')
-                barcodes_str = header.split('barcodes=')[1]
+                # Extract the barcodes substring
+                barcodes_str = re.search(r'barcodes=([\w_]+)', header).group(1)
                 cell_barcodes[barcodes_str] += 1
                 
                 # Split the barcodes string by underscore
@@ -301,6 +309,8 @@ def process_read_batch(read_batch: List[Tuple],
                       matcher: BarcodeMatcherOptimized,
                       read_range: Tuple[int, int],
                       read_index: int,
+                      umi_index: int,
+                      umi_range: Tuple[int, int],
                       verbose: bool) -> List[str]:
     """
     Process a batch of reads with optimized matching
@@ -320,7 +330,7 @@ def process_read_batch(read_batch: List[Tuple],
                 logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
                 logger.info(f"Sequence: {reads[config['file_index']].sequence}")
 
-            whitelist = ast.literal_eval(config['whitelist'])[0]
+            whitelist = ast.literal_eval(config['whitelist'])
 
             if whitelist in matcher.matchers:
                 matched_barcode = matcher.find_match(
@@ -335,19 +345,22 @@ def process_read_batch(read_batch: List[Tuple],
         # Extract sequence and create output
         source_entry = reads[read_index]
         extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
-        extract_qual = source_entry.quality[read_range[0]:read_range[1]]        
-        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}\n"
+        extract_qual = source_entry.quality[read_range[0]:read_range[1]] 
+        
+        umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
+        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)} UMI={umi_seq}\n"
         output_entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
 
     return output_entries
 
 def extract_sequences(
-    fastq_files: List[str],
-    barcode_positions_file: str,
-    barcode_sequences: Dict[str, List[str]],
+    fastq_files: List[str] = None,
+    barcode_positions_file: str = None,
+    barcode_reverse_order: bool = False,
+    barcode_sequences: Dict[str, List[str]] = None,
     output: str = 'extracted.fastq.gz',
-    read1_range: Optional[str] = None,
-    read2_range: Optional[str] = None,
+    extract: str = None,
+    umi: Optional[str] = None,
     jitter: int = 5,
     mismatches: int = 1,
     batch_size: int = 100000,
@@ -360,9 +373,19 @@ def extract_sequences(
     
     # Initialize configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
+    if barcode_reverse_order:
+        barcode_positions = barcode_positions[::-1].reset_index(drop=True)
     barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
-    parsed_range = parse_range(read1_range) if read1_range else parse_range(read2_range)
-    read_index = 0 if read1_range else 1
+
+    # Extract range
+    extract_index, extract_range = extract.split(':')
+    extract_index = int(extract_index)-1
+    extract_range = parse_range(extract_range)
+
+    # UMI range
+    umi_index, umi_range = umi.split(':')
+    umi_index = int(umi_index)-1
+    umi_range = parse_range(umi_range)
 
     # Create optimized matcher
     matcher = BarcodeMatcherOptimized(
@@ -387,7 +410,8 @@ def extract_sequences(
             if len(current_batch) >= batch_size:
                 entries = process_read_batch(
                     current_batch, barcode_configs, matcher, 
-                    parsed_range, read_index, verbose
+                    extract_range, extract_index, umi_index, umi_range,
+                    verbose
                 )
                 out_fastq.writelines(entries)
                 current_batch = []
@@ -396,7 +420,8 @@ def extract_sequences(
         if current_batch:
             entries = process_read_batch(
                 current_batch, barcode_configs, matcher, 
-                parsed_range, read_index, verbose
+                extract_range, extract_index,  umi_index, umi_range,
+                verbose
             )
             out_fastq.writelines(entries)
             
@@ -406,6 +431,7 @@ def parse_range(range_str: str) -> Tuple[int, int]:
     Parse range string
     """
     start, end = map(int, range_str.split('-'))
+    start = max(0, start -1)
     return (start, end)
 
 def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:

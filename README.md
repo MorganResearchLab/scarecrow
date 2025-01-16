@@ -7,11 +7,10 @@ A toolkit for preprocessing single cell sequencing data.
 ### Todo
 
 * Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
-* `scarecrow reap` needs checking after optimizing for efficiency
+* `scarecrow reap` needs thorough checking after optimizing for efficiency
 * Replace --read1 --read2 flags in reap with --extract <read>:<range>
-* Consider adding --udi <read>:<range> to reap
-* Refactor harvest for efficiency
-* Increase font size on harvest plot
+* In reap, extract UMI to include with barcodes (--umi <read>:<range>)
+
 
 
 ## Environment
@@ -115,4 +114,8 @@ done
 
 FILES=(./results/barcodes_BC*csv)
 scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 --out barcode_positions.csv
+
+scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
+    -j 5 -m 1 --barcodes ${BARCODES[@]} --read1 1-64 --umi 2:1-10 --out ./cDNA.fq.gz  
+
 ```
