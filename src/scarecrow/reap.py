@@ -7,9 +7,11 @@
 import ast
 import gzip
 import logging
+import os
 import pandas as pd
 import pysam
 import re
+import shutil
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
@@ -161,8 +163,8 @@ def run_reap(fastqs: List[str],
             logger.info(f"{key}: {barcode}")
 
     # Check if the output filename string ends with .gz
-    if not output.endswith(".gz"):
-        output += ".gz"
+    if output.endswith(".gz"):
+        output = output[:-3]
 
     # Extract sequences
     extract_sequences(
@@ -202,6 +204,11 @@ def run_reap(fastqs: List[str],
     barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
     barcodes.to_csv('{}.{}'.format(output, 'barcode.combinations.csv'), index = False)
 
+    # Check if the output filename string ends with .gz
+    logger.info(f"Compressing {output}")
+    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb') as f_out:
+        shutil.copyfileobj(f_in, f_out)
+    os.remove(output)
 
 def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
     """
@@ -408,7 +415,7 @@ def extract_sequences(
     # Process files with minimal overhead
     with pysam.FastqFile(fastq_files[0]) as r1, \
          pysam.FastqFile(fastq_files[1]) as r2, \
-         gzip.open(output, 'wt') as out_fastq:
+         open(output, 'w') as out_fastq:
         
         # Create batches efficiently
         read_pairs = zip(r1, r2)

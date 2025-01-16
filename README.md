@@ -8,9 +8,7 @@ A toolkit for preprocessing single cell sequencing data.
 
 * Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
 * `scarecrow reap` needs thorough checking after optimizing for efficiency
-* Replace --read1 --read2 flags in reap with --extract <read>:<range>
-* In reap, extract UMI to include with barcodes (--umi <read>:<range>)
-
+* Possibly need to consider jitter for UMI position
 
 
 ## Environment
