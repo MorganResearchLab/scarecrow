@@ -2,6 +2,7 @@
 """
 #!/usr/bin/env python3
 @author: David Wragg
+
 """
 
 import ast
@@ -10,11 +11,9 @@ import logging
 import os
 import pandas as pd
 import pysam
-import re
 import shutil
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
-from queue import Empty
 from itertools import islice
 from typing import List, Tuple, Optional, Dict, Set
 from collections import defaultdict
@@ -22,6 +21,8 @@ from functools import lru_cache
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.seed import parse_seed_arguments
 from scarecrow.tools import generate_random_string
+
+
 
 class BarcodeMatcherOptimized:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
@@ -82,7 +83,39 @@ class BarcodeMatcherOptimized:
                 return matcher['mismatch'][sequence]
 
         return 'null'
-    
+
+class FastqChunkReader:
+    """Efficient chunk reader for FASTQ files"""
+    def __init__(self, fastq_files: List[str], chunk_size: int):
+        self.fastq_files = fastq_files
+        self.chunk_size = chunk_size
+        self._file_handles = None
+        
+    def __enter__(self):
+        self._file_handles = [pysam.FastxFile(f) for f in self.fastq_files]
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        for handle in self._file_handles:
+            handle.close()
+            
+    def read_chunk(self, start_position: int) -> List[Tuple]:
+        """Read a chunk of reads from the starting position"""
+        # Skip to position
+        for handle in self._file_handles:
+            for _ in range(start_position):
+                try:
+                    next(handle)
+                except StopIteration:
+                    return []
+        
+        # Read chunk
+        chunk = []
+        for reads in zip(*[islice(h, self.chunk_size) for h in self._file_handles]):
+            chunk.append(reads)
+            
+        return chunk
+
 def parser_reap(parser):
     subparser = parser.add_parser(
         "reap",
@@ -194,6 +227,56 @@ def validate_reap_args(parser, args) -> None:
              threads = args.threads,
              verbose = args.verbose)
 
+# Update run_reap to use the optimized version
+def run_reap(fastqs: List[str], 
+             barcode_positions: str = None,
+             barcode_reverse_order: bool = False,
+             output: str = 'extracted.fastq',
+             extract: str = None,
+             umi: Optional[str] = None,
+             barcodes: List[str] = None,
+             jitter: int = 5,
+             mismatches: int = 1,
+             batches: int = 10000,
+             threads: int = 4,
+             verbose: bool = False) -> None:
+    """
+    Main function to extract sequences with barcode headers
+    """    
+    mp.set_start_method('spawn')  # Use 'spawn' instead of 'fork'
+
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"logfile: ${logfile}")
+
+    # Extract barcodes and convert whitelist to set
+    expected_barcodes = parse_seed_arguments(barcodes)  
+    for key, barcode in expected_barcodes.items():
+        expected_barcodes[key] = sorted(set(barcode))
+        if verbose:
+            logger.info(f"{key}: {barcode}")
+
+    # Check if the output filename string ends with .gz
+    if output.endswith(".gz"):
+        output = output[:-3]
+
+    # Extract sequences using optimized parallel processing
+    optimized_parallel_extract(
+        fastq_files=[f for f in fastqs],
+        barcode_positions_file=barcode_positions,
+        barcode_reverse_order=barcode_reverse_order,
+        barcode_sequences=expected_barcodes,
+        output=output,
+        extract=extract,
+        umi=umi,
+        jitter=jitter,
+        mismatches=mismatches,
+        batch_size=batches,
+        threads=threads,
+        verbose=verbose
+    )
+
 def parse_range(range_str: str) -> Tuple[int, int]:
     """
     Parse range string
@@ -272,55 +355,6 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
         'orientation': row['orientation'],
         'whitelist': row['barcode_whitelist']
     } for idx, row in positions.iterrows()]
-
-
-
-import ast
-import gzip
-import logging
-import os
-import pandas as pd
-import pysam
-import re
-import shutil
-import multiprocessing as mp
-from itertools import islice
-from typing import List, Tuple, Optional, Dict, Set
-from collections import defaultdict
-from functools import lru_cache
-import numpy as np
-
-class FastqChunkReader:
-    """Efficient chunk reader for FASTQ files"""
-    def __init__(self, fastq_files: List[str], chunk_size: int):
-        self.fastq_files = fastq_files
-        self.chunk_size = chunk_size
-        self._file_handles = None
-        
-    def __enter__(self):
-        self._file_handles = [pysam.FastxFile(f) for f in self.fastq_files]
-        return self
-        
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        for handle in self._file_handles:
-            handle.close()
-            
-    def read_chunk(self, start_position: int) -> List[Tuple]:
-        """Read a chunk of reads from the starting position"""
-        # Skip to position
-        for handle in self._file_handles:
-            for _ in range(start_position):
-                try:
-                    next(handle)
-                except StopIteration:
-                    return []
-        
-        # Read chunk
-        chunk = []
-        for reads in zip(*[islice(h, self.chunk_size) for h in self._file_handles]):
-            chunk.append(reads)
-            
-        return chunk
 
 def efficient_process_chunk(args: Tuple) -> Tuple[List[str], List[Dict], Dict]:
     """
@@ -515,52 +549,4 @@ def write_count_files(output: str,
     barcodes.to_csv(
         f'{output}.barcode.combinations.csv',
         index=False
-    )
-
-# Update run_reap to use the optimized version
-def run_reap(fastqs: List[str], 
-             barcode_positions: str = None,
-             barcode_reverse_order: bool = False,
-             output: str = 'extracted.fastq',
-             extract: str = None,
-             umi: Optional[str] = None,
-             barcodes: List[str] = None,
-             jitter: int = 5,
-             mismatches: int = 1,
-             batches: int = 10000,
-             threads: int = 4,
-             verbose: bool = False) -> None:
-    """
-    Main function to extract sequences with barcode headers
-    """    
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: ${logfile}")
-
-    # Extract barcodes and convert whitelist to set
-    expected_barcodes = parse_seed_arguments(barcodes)  
-    for key, barcode in expected_barcodes.items():
-        expected_barcodes[key] = sorted(set(barcode))
-        if verbose:
-            logger.info(f"{key}: {barcode}")
-
-    # Check if the output filename string ends with .gz
-    if output.endswith(".gz"):
-        output = output[:-3]
-
-    # Extract sequences using optimized parallel processing
-    optimized_parallel_extract(
-        fastq_files=[f for f in fastqs],
-        barcode_positions_file=barcode_positions,
-        barcode_reverse_order=barcode_reverse_order,
-        barcode_sequences=expected_barcodes,
-        output=output,
-        extract=extract,
-        umi=umi,
-        jitter=jitter,
-        mismatches=mismatches,
-        batch_size=batches,
-        threads=threads,
-        verbose=verbose
     )

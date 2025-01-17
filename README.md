@@ -113,7 +113,7 @@ done
 FILES=(./results/barcodes_BC*csv)
 scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 --out barcode_positions.csv
 
-scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
-    -j 5 -m 1 --barcodes ${BARCODES[@]} --read1 1-64 --umi 2:1-10 --out ./cDNA.fq.gz  
+time scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
+    -j 5 -m 1 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq.gz --threads 4 
 
 ```
