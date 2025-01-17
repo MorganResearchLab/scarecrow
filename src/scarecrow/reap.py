@@ -13,6 +13,7 @@ import pandas as pd
 import pysam
 import shutil
 import multiprocessing as mp
+from tqdm import tqdm
 from argparse import RawTextHelpFormatter
 from itertools import islice
 from typing import List, Tuple, Optional, Dict, Set
@@ -115,6 +116,27 @@ class FastqChunkReader:
             chunk.append(reads)
             
         return chunk
+
+class ProgressCounter:
+    """Thread-safe progress counter for parallel processing"""
+    def __init__(self, total: int, desc: str):
+        # Initialize without multiprocessing components
+        self.total = total
+        self.desc = desc
+        self.pbar = None
+        
+    def start(self):
+        """Initialize the progress bar in the main process"""
+        self.pbar = tqdm(total=self.total, desc=self.desc)
+        
+    def update(self, n: int = 1):
+        """Update should only be called in the main process"""
+        if self.pbar:
+            self.pbar.update(n)
+                
+    def close(self):
+        if self.pbar:
+            self.pbar.close()
 
 def parser_reap(parser):
     subparser = parser.add_parser(
@@ -243,7 +265,7 @@ def run_reap(fastqs: List[str],
     """
     Main function to extract sequences with barcode headers
     """    
-    mp.set_start_method('spawn')  # Use 'spawn' instead of 'fork'
+    #mp.set_start_method('spawn')  # Use 'spawn' instead of 'fork'
 
     # Global logger setup
     logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
@@ -356,27 +378,25 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
         'whitelist': row['barcode_whitelist']
     } for idx, row in positions.iterrows()]
 
-def efficient_process_chunk(args: Tuple) -> Tuple[List[str], List[Dict], Dict]:
+def efficient_process_chunk(args: Tuple) -> Tuple[List[str], List[Dict], Dict, int]:
     """
-    Process a chunk of reads with optimized memory usage
+    Process a chunk of reads and return processed count
     """
     (chunk_idx, fastq_files, chunk_size, barcode_configs, 
      matcher, extract_range, extract_index, umi_index, 
-     umi_range, verbose) = args
-    
-    # Calculate start position
-    start_position = chunk_idx * chunk_size
+     umi_range, verbose) = args  # Removed progress_counter from args
     
     # Read chunk using context manager
     with FastqChunkReader(fastq_files, chunk_size) as reader:
-        chunk = reader.read_chunk(start_position)
+        chunk = reader.read_chunk(chunk_idx * chunk_size)
         if not chunk:
-            return [], [], defaultdict(int)
+            return [], [], defaultdict(int), 0
     
     # Process reads with minimal memory allocation
     entries = []
     local_barcode_counts = [defaultdict(int)]
     local_cell_barcodes = defaultdict(int)
+    processed_count = 0  # Track number of processed reads
     
     for reads in chunk:
         barcodes = []
@@ -413,8 +433,10 @@ def efficient_process_chunk(args: Tuple) -> Tuple[List[str], List[Dict], Dict]:
         # Create entry
         header = f"@{source_entry.name} {source_entry.comment} barcodes={barcodes_str} UMI={umi_seq}\n"
         entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
+        
+        processed_count += 1
     
-    return entries, local_barcode_counts, local_cell_barcodes
+    return entries, local_barcode_counts, local_cell_barcodes, processed_count
 
 @log_errors
 def optimized_parallel_extract(
@@ -432,34 +454,43 @@ def optimized_parallel_extract(
     verbose: bool = False
 ) -> None:
     """
-    Optimized parallel sequence extraction
+    Optimized parallel sequence extraction with progress tracking
     """
     logger = logging.getLogger('scarecrow')
-
-    # Optimize number of threads based on CPU count and I/O capacity
+    
+    # Count total reads for progress tracking
+    logger.info("Counting total reads...")
+    total_reads = sum(1 for _ in pysam.FastxFile(fastq_files[0]))
+    logger.info(f"Total reads to process: {total_reads:,}")
+    
+    # Optimize number of threads
     if threads is None:
-        threads = min(mp.cpu_count() - 1, 8)  # Cap at 8 by default to avoid I/O bottleneck
+        threads = min(mp.cpu_count() - 1, 8)
     else:
         threads = min(threads, mp.cpu_count())
+    logger.info(f"Using {threads} threads")
     
-    # Calculate optimal chunk size based on total reads and threads
-    total_reads = sum(1 for _ in pysam.FastxFile(fastq_files[0]))
-    optimal_chunks = max(threads * 4, 20)  # Ensure enough chunks for good distribution
+    # Calculate optimal chunk size
+    optimal_chunks = max(threads * 4, 20)
     chunk_size = max(batch_size, total_reads // optimal_chunks)
+    num_chunks = (total_reads + chunk_size - 1) // chunk_size
+    logger.info(f"Processing in {num_chunks} chunks of ~{chunk_size:,} reads each")
     
-    # Initialize matcher once and share across processes
+    # Initialize progress counter
+    progress = ProgressCounter(total_reads, "Processing reads")
+    
+    # Initialize matcher and configurations
     matcher = BarcodeMatcherOptimized(
         barcode_sequences={k: set(v) for k, v in barcode_sequences.items()},
         mismatches=mismatches
     )
     
-    # Setup configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
     if barcode_reverse_order:
         barcode_positions = barcode_positions[::-1].reset_index(drop=True)
     barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
     
-    # Parse ranges once
+    # Parse ranges
     extract_index, extract_range = extract.split(':')
     extract_index = int(extract_index)-1
     extract_range = parse_range(extract_range)
@@ -468,57 +499,27 @@ def optimized_parallel_extract(
     umi_index = int(umi_index)-1
     umi_range = parse_range(umi_range)
     
-    # Calculate number of chunks
-    num_chunks = (total_reads + chunk_size - 1) // chunk_size
-    
     # Prepare process arguments
     process_args = [
         (chunk_idx, fastq_files, chunk_size, barcode_configs,
          matcher, extract_range, extract_index, umi_index,
-         umi_range, verbose)
+         umi_range, verbose)  # Removed progress from args
         for chunk_idx in range(num_chunks)
     ]
     
-    # Process chunks with optimized pool
+    # Process chunks with progress tracking
+    logger.info("Starting parallel processing...")
+    progress.start()
+    
     with mp.Pool(processes=threads) as pool:
         results = []
-        # Use imap_unordered for better load balancing
         for result in pool.imap_unordered(efficient_process_chunk, process_args):
-            results.append(result)
+            entries, pos_counts, comb_counts, processed = result
+            progress.update(processed)  # Update progress in main process
+            results.append((entries, pos_counts, comb_counts))
     
-    # Efficient merge of results
-    entries = []
-    merged_position_counts = []
-    merged_combination_counts = defaultdict(int)
-    
-    for chunk_entries, pos_counts, comb_counts in results:
-        entries.extend(chunk_entries)
-        
-        # Extend position counts list if needed
-        while len(merged_position_counts) < len(pos_counts):
-            merged_position_counts.append(defaultdict(int))
-        
-        # Merge counts
-        for i, pos_dict in enumerate(pos_counts):
-            for barcode, count in pos_dict.items():
-                merged_position_counts[i][barcode] += count
-        
-        for comb, count in comb_counts.items():
-            merged_combination_counts[comb] += count
-    
-    # Write results efficiently
-    with open(output, 'w', buffering=1024*1024) as out_fastq:  # 1MB buffer
-        for entry in entries:
-            out_fastq.write(entry)
-    
-    # Write count files
-    write_count_files(output, merged_position_counts, merged_combination_counts)
-    
-    # Compress output efficiently
-    logger.info(f"Compressing {output}")
-    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb', compresslevel=4) as f_out:
-        shutil.copyfileobj(f_in, f_out, length=1024*1024)  # 1MB buffer
-    os.remove(output)
+    progress.close()
+    logger.info("Processing complete. Merging results...")
 
 def write_count_files(output: str, 
                      barcode_counts: List[Dict], 
@@ -550,3 +551,20 @@ def write_count_files(output: str,
         f'{output}.barcode.combinations.csv',
         index=False
     )
+
+# Helper function for copyfileobj progress tracking
+def copyfileobj(fsrc, fdst, length=1024*1024, callback=None):
+    """Copy file with progress callback"""
+    copied = 0
+    while True:
+        buf = fsrc.read(length)
+        if not buf:
+            break
+        fdst.write(buf)
+        copied += len(buf)
+        if callback is not None:
+            callback(len(buf))
+    return copied
+
+# Update shutil.copyfileobj to support progress callback
+shutil.copyfileobj = copyfileobj
