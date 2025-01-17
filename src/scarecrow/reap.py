@@ -511,46 +511,72 @@ def optimized_parallel_extract(
     logger.info("Starting parallel processing...")
     progress.start()
     
+    # Initialize merged results containers
+    all_entries = []
+    merged_position_counts = []
+    merged_combination_counts = defaultdict(int)
+    
     with mp.Pool(processes=threads) as pool:
-        results = []
-        for result in pool.imap_unordered(efficient_process_chunk, process_args):
-            entries, pos_counts, comb_counts, processed = result
+        for entries, pos_counts, comb_counts, processed in pool.imap_unordered(efficient_process_chunk, process_args):
             progress.update(processed)  # Update progress in main process
-            results.append((entries, pos_counts, comb_counts))
+            
+            # Merge results
+            all_entries.extend(entries)
+            
+            # Extend merged_position_counts if needed
+            while len(merged_position_counts) < len(pos_counts):
+                merged_position_counts.append(defaultdict(int))
+            
+            # Merge position counts
+            for i, counts in enumerate(pos_counts):
+                for barcode, count in counts.items():
+                    merged_position_counts[i][barcode] += count
+            
+            # Merge combination counts
+            for comb, count in comb_counts.items():
+                merged_combination_counts[comb] += count
     
     progress.close()
-    logger.info("Processing complete. Merging results...")
+    logger.info("Processing complete. Writing output files...")
+    
+    # Write FASTQ output
+    logger.info(f"Writing FASTQ to {output}")
+    with open(output, 'w') as out_fastq:
+        for entry in all_entries:
+            out_fastq.write(entry)
+    
+    # Write count files
+    write_count_files(output, merged_position_counts, merged_combination_counts)
+    
+    # Compress output
+    logger.info(f"Compressing output to {output}.gz...")
+    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb', compresslevel=4) as f_out:
+        shutil.copyfileobj(f_in, f_out, length=1024*1024)
+    
+    # Remove uncompressed file
+    os.remove(output)
+    logger.info("Processing complete!")
 
 def write_count_files(output: str, 
                      barcode_counts: List[Dict], 
                      cell_barcodes: Dict) -> None:
     """Write barcode count files"""
+    logger = logging.getLogger('scarecrow')
+    
     # Write position-specific barcode counts
-    for i, counts in enumerate(barcode_counts):
-        barcodes = pd.DataFrame(
-            list(counts.items()), 
-            columns=["Barcode", "Count"]
-        ).sort_values(by="Count")
-        barcodes.insert(0, "Index", i + 1)
-        
-        mode = 'w' if i == 0 else 'a'
-        header = i == 0
-        barcodes.to_csv(
-            f'{output}.barcodes.csv',
-            index=False,
-            mode=mode,
-            header=header
-        )
+    logger.info(f"Writing position-specific barcode counts to {output}.barcodes.csv")
+    with open(f'{output}.barcodes.csv', 'w') as f:
+        f.write("Index,Barcode,Count\n")  # Write header once
+        for i, counts in enumerate(barcode_counts, 1):  # Start index at 1
+            for barcode, count in sorted(counts.items(), key=lambda x: (-x[1], x[0])):  # Sort by count desc, then barcode
+                f.write(f"{i},{barcode},{count}\n")
     
     # Write combined barcode counts
-    barcodes = pd.DataFrame(
-        list(cell_barcodes.items()),
-        columns=["BarcodeCombination", "Count"]
-    ).sort_values(by="Count")
-    barcodes.to_csv(
-        f'{output}.barcode.combinations.csv',
-        index=False
-    )
+    logger.info(f"Writing combined barcode counts to {output}.barcode.combinations.csv")
+    with open(f'{output}.barcode.combinations.csv', 'w') as f:
+        f.write("BarcodeCombination,Count\n")  # Write header
+        for comb, count in sorted(cell_barcodes.items(), key=lambda x: (-x[1], x[0])):  # Sort by count desc, then combination
+            f.write(f"{comb},{count}\n")
 
 # Helper function for copyfileobj progress tracking
 def copyfileobj(fsrc, fdst, length=1024*1024, callback=None):
