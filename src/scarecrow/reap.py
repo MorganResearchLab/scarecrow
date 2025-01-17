@@ -127,7 +127,6 @@ def validate_reap_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
-    print(f"args: {args}")
     run_reap(fastqs = [f for f in args.fastqs], 
              barcode_positions = args.barcode_positions,
              barcode_reverse_order = args.barcode_reverse_order,
@@ -495,7 +494,8 @@ def extract_sequences(
     with open(output, 'w') as out_fastq:
         for fastq_file in files:
             with open(fastq_file, 'r') as in_fastq:
-                out_fastq.write(in_fastq.read())
+                for line in in_fastq:
+                    out_fastq.write(line)
             os.remove(fastq_file)
 
 def parse_range(range_str: str) -> Tuple[int, int]:
