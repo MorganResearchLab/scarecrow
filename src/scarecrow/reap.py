@@ -8,6 +8,7 @@ import ast
 import gzip as gz
 import logging
 import os
+import gc
 import pandas as pd
 import pysam
 import re
@@ -449,7 +450,9 @@ def extract_sequences(
             for job in jobs:
                 results = job.get()
                 out_fastq.writelines(results)
+                del results
             jobs.clear()
+            gc.collect()
 
         for reads in read_pairs:            
             batch.append(reads)            
