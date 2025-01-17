@@ -5,7 +5,7 @@
 """
 
 import ast
-import gzip
+import gzip as gz
 import logging
 import os
 import pandas as pd
@@ -46,9 +46,9 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
     subparser.add_argument(
         "-o", "--out",
         metavar="out.fastq.gz",
-        help=("Path to output fastq.gz file"),
+        help=("Path to output fastq file"),
         type=str,
-        default='extracted.fastq.gz',
+        default='extracted.fastq',
     )
     subparser.add_argument(
         "-p", "--barcode_positions",
@@ -106,14 +106,19 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
     subparser.add_argument(
         "-@", "--threads",
         metavar="threads",
-        help=("Number of processing threads [4]"),
+        help=("Number of processing threads [1]"),
         type=int,
-        default=4,
+        default=1,
     )
     subparser.add_argument(
         "-v", "--verbose",
         action='store_true',
         help='Enable verbose output [false]'
+    )
+    subparser.add_argument(
+        "-z", "--gzip",
+        action='store_true',
+        help='Compress (gzip) fastq output [false]'
     )
     return subparser
 
@@ -132,7 +137,8 @@ def validate_reap_args(parser, args) -> None:
              mismatches = args.mismatches,
              batches = args.batch_size, 
              threads = args.threads,
-             verbose = args.verbose)
+             verbose = args.verbose,
+             gzip = args.gzip)
 
 @log_errors
 def run_reap(fastqs: List[str], 
@@ -146,14 +152,15 @@ def run_reap(fastqs: List[str],
              mismatches: int = 1,
              batches: int = 10000,
              threads: int = 4,
-             verbose: bool = False) -> None:
+             verbose: bool = False,
+             gzip: bool = False) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
     # Global logger setup
     logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
     logger = setup_logger(logfile)
-    logger.info(f"logfile: ${logfile}")
+    logger.info(f"logfile: '{logfile}'")
 
     # Extract barcodes and convert whitelist to set
     expected_barcodes = parse_seed_arguments(barcodes)  
@@ -204,11 +211,12 @@ def run_reap(fastqs: List[str],
     barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
     barcodes.to_csv('{}.{}'.format(output, 'barcode.combinations.csv'), index = False)
 
-    # Check if the output filename string ends with .gz
-    logger.info(f"Compressing {output}")
-    with open(output, 'rb') as f_in, gzip.open(output + ".gz", 'wb') as f_out:
-        shutil.copyfileobj(f_in, f_out)
-    os.remove(output)
+    # gzip
+    if gzip:
+        logger.info(f"Compressing '{output}'")
+        with open(output, 'rb') as f_in, gz.open(output + ".gz", 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        os.remove(output)
 
 def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
     """
@@ -369,6 +377,7 @@ def process_read_batch(read_batch: List[Tuple],
 
     return output_entries
 
+@log_errors
 def extract_sequences(
     fastq_files: List[str] = None,
     barcode_positions_file: str = None,
@@ -386,7 +395,8 @@ def extract_sequences(
     """
     Optimized sequence extraction focused on matching performance
     """
-    
+    logger = logging.getLogger('scarecrow')
+
     # Initialize configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
     if barcode_reverse_order:
@@ -397,22 +407,23 @@ def extract_sequences(
     extract_index, extract_range = extract.split(':')
     extract_index = int(extract_index)-1
     extract_range = parse_range(extract_range)
+    logger.info(f"FASTQ sequence range to extract: '{extract}'")
 
     # UMI range
     umi_index, umi_range = umi.split(':')
     umi_index = int(umi_index)-1
     umi_range = parse_range(umi_range)
+    logger.info(f"UMI sequence range to extract: '{umi}'")
 
     # Create optimized matcher
+    logger.info(f"Generating barcode matcher")
     matcher = BarcodeMatcherOptimized(
-        barcode_sequences={k: set(v) for k, v in barcode_sequences.items()},
-        mismatches=mismatches
+        barcode_sequences = {k: set(v) for k, v in barcode_sequences.items()},
+        mismatches = mismatches
     )
-    
-    # Use minimal threading for I/O
-    threads = min(4, threads or mp.cpu_count())
-    
+       
     # Process files with minimal overhead
+    logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
          pysam.FastqFile(fastq_files[1]) as r2, \
          open(output, 'w') as out_fastq:
