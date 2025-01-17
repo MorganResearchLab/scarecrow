@@ -14,7 +14,6 @@ import pysam
 import re
 import shutil
 import multiprocessing as mp
-import tempfile
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 from functools import lru_cache
@@ -431,11 +430,27 @@ def extract_sequences(
         threads = min(threads, mp.cpu_count())
     logger.info(f"Using {threads} threads")
 
+    # List of files generated
+    files = []
+
+    def write_and_clear_results(jobs):
+        """Retrieve results from completed jobs, write to file, and free memory."""
+        for idx, job in enumerate(jobs):
+            results = job.get()
+            outfile = output + "_" + str(idx)
+            if outfile not in files:
+                files.append(outfile)
+                if os.path.exists(outfile):
+                    os.remove(outfile)
+            with open(outfile, 'a') as out_fastq:
+                out_fastq.writelines(results)
+            del results                
+        jobs.clear()
+        gc.collect()
 
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
-         pysam.FastqFile(fastq_files[1]) as r2, \
-         open(output, 'w') as out_fastq:
+         pysam.FastqFile(fastq_files[1]) as r2:
         
         # Create batches efficiently
         read_pairs = zip(r1, r2)        
@@ -443,16 +458,7 @@ def extract_sequences(
         pool = mp.Pool(threads)
         batch = []
         jobs = []
-        counter = 0
-        
-        def write_and_clear_results(jobs, out_fastq):
-            """Retrieve results from completed jobs, write to file, and free memory."""
-            for job in jobs:
-                results = job.get()
-                out_fastq.writelines(results)
-                del results
-            jobs.clear()
-            gc.collect()
+        counter = 0       
 
         for reads in read_pairs:            
             batch.append(reads)            
@@ -465,7 +471,7 @@ def extract_sequences(
 
                 # Write results and free memory if jobs exceed a threshold
                 if len(jobs) >= threads:
-                    write_and_clear_results(jobs, out_fastq)
+                    write_and_clear_results(jobs)
                 
                 # Clear the current batch
                 batch = []                
@@ -475,13 +481,20 @@ def extract_sequences(
             jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
                                                                  extract_range, extract_index, 
                                                                  umi_index, umi_range, verbose),)))
+            
+        write_and_clear_results(jobs)
         
-        for job in jobs:
-            results = job.get()
-            out_fastq.writelines(results)
-
+        # Close pools
         pool.close()
         pool.join()
+
+    # Combine results
+    logger.info(f"Combining results: {files}")
+    with open(output, 'w') as out_fastq:
+        for fastq_file in files:
+            with open(fastq_file, 'r') as in_fastq:
+                out_fastq.write(in_fastq.read())
+            os.remove(fastq_file)
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """

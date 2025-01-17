@@ -49,6 +49,9 @@ def setup_logger(log_file: str = 'scarecrow.log',
         file_handler.setFormatter(file_formatter)
         logger.addHandler(shell_handler)
         logger.addHandler(file_handler)
+
+        # Add log file name to logger
+        logger.filename = log_file
  
         # Test logging
         logger.info("Logger successfully initialized")
