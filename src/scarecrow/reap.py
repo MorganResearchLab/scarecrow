@@ -466,12 +466,12 @@ def extract_sequences(
                 jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
                                                                  extract_range, extract_index, 
                                                                  umi_index, umi_range, verbose),)))
-                counter += len(batch)
-                logger.info(f"Processed {counter} reads")
+                counter += len(batch)                
 
                 # Write results and free memory if jobs exceed a threshold
                 if len(jobs) >= threads:
                     write_and_clear_results(jobs)
+                    logger.info(f"Processed {counter} reads")
                 
                 # Clear the current batch
                 batch = []                
@@ -483,6 +483,7 @@ def extract_sequences(
                                                                  umi_index, umi_range, verbose),)))
             
         write_and_clear_results(jobs)
+        logger.info(f"Processed {counter} reads")
         
         # Close pools
         pool.close()
