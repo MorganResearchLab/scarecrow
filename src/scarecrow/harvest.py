@@ -284,7 +284,7 @@ def run_harvest(barcodes: List[str],
     # Setup logging
     logfile = f'./scarecrow_harvest_{generate_random_string()}.log'
     logger = setup_logger(logfile)
-    logger.info(f"logfile: {logfile}")
+    logger.info(f"logfile: '{logfile}'")
     
     # Initialize optimizer
     optimizer = HarvestOptimizer(min_distance)

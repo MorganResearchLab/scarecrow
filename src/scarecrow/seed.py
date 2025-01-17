@@ -110,7 +110,7 @@ def parse_seed_arguments(barcode_args):
                 raise Exception(f"Barcode file not found: {file_path}")
 
             expected_barcodes[key,label] = barcodes
-            logger.info(f"Loaded {len(barcodes)} barcodes for {key} from {label} at {file_path}")
+            logger.info(f"Loaded {len(barcodes)} barcodes for barcode '{key}' from whitelist '{label}' file '{file_path}'")
                                     
         except ValueError:
             logger.error(f"Invalid barcode argument format: {arg}. Use 'KEY:FILE'")
@@ -281,7 +281,7 @@ def run_seed(
     # Setup logging
     logfile = f'./scarecrow_seed_{generate_random_string()}.log'
     logger = setup_logger(logfile)
-    logger.info(f"logfile: {logfile}")
+    logger.info(f"logfile: '{logfile}'")
 
     # Parse barcode whitelists
     expected_barcodes = parse_seed_arguments(barcodes)
