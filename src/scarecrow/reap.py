@@ -127,6 +127,7 @@ def validate_reap_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
+    print(f"args: {args}")
     run_reap(fastqs = [f for f in args.fastqs], 
              barcode_positions = args.barcode_positions,
              barcode_reverse_order = args.barcode_reverse_order,
