@@ -13,6 +13,7 @@ import pysam
 import re
 import shutil
 import multiprocessing as mp
+import tempfile
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 from functools import lru_cache
@@ -429,6 +430,7 @@ def extract_sequences(
         threads = min(threads, mp.cpu_count())
     logger.info(f"Using {threads} threads")
 
+
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
          pysam.FastqFile(fastq_files[1]) as r2, \
@@ -442,6 +444,13 @@ def extract_sequences(
         jobs = []
         counter = 0
         
+        def write_and_clear_results(jobs, out_fastq):
+            """Retrieve results from completed jobs, write to file, and free memory."""
+            for job in jobs:
+                results = job.get()
+                out_fastq.writelines(results)
+            jobs.clear()
+
         for reads in read_pairs:            
             batch.append(reads)            
             if len(batch) >= batch_size:
@@ -450,6 +459,12 @@ def extract_sequences(
                                                                  umi_index, umi_range, verbose),)))
                 counter += len(batch)
                 logger.info(f"Processed {counter} reads")
+
+                # Write results and free memory if jobs exceed a threshold
+                if len(jobs) >= threads:
+                    write_and_clear_results(jobs, out_fastq)
+                
+                # Clear the current batch
                 batch = []                
         
         # Process remaining reads
@@ -488,3 +503,13 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
 
 def worker_task(args):
     return process_read_batch(*args)
+
+def write_to_file(tempfile_path, data):
+    """
+    Write data to a temporary file.
+    Args:
+        tempfile_path: Path to the file.
+        data: List of processed data to write.
+    """
+    with open(tempfile_path, "a") as temp_file:
+        temp_file.writelines(data)
