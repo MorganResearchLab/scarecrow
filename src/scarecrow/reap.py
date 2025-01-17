@@ -447,6 +447,14 @@ def extract_sequences(
             del results                
         jobs.clear()
         gc.collect()
+    
+    def combine_results_chunked(files, output, chunk_size=1024*1024):
+        with open(output, 'w') as out_fastq:
+            for fastq_file in files:
+                with open(fastq_file, 'r') as in_fastq:
+                    while chunk := in_fastq.read(chunk_size):
+                        out_fastq.write(chunk)
+                os.remove(fastq_file)
 
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
@@ -491,12 +499,10 @@ def extract_sequences(
 
     # Combine results
     logger.info(f"Combining results: {files}")
-    with open(output, 'w') as out_fastq:
-        for fastq_file in files:
-            with open(fastq_file, 'r') as in_fastq:
-                for line in in_fastq:
-                    out_fastq.write(line)
-            os.remove(fastq_file)
+    combine_results_chunked(files, output)
+
+
+
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """
@@ -521,13 +527,3 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
 
 def worker_task(args):
     return process_read_batch(*args)
-
-def write_to_file(tempfile_path, data):
-    """
-    Write data to a temporary file.
-    Args:
-        tempfile_path: Path to the file.
-        data: List of processed data to write.
-    """
-    with open(tempfile_path, "a") as temp_file:
-        temp_file.writelines(data)
