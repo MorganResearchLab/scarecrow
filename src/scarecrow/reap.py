@@ -265,7 +265,7 @@ def run_reap(fastqs: List[str],
     """
     Main function to extract sequences with barcode headers
     """    
-    #mp.set_start_method('spawn')  # Use 'spawn' instead of 'fork'
+    mp.set_start_method('spawn')  # Use 'spawn' instead of 'fork'
 
     # Global logger setup
     logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
