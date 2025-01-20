@@ -240,7 +240,7 @@ class BarcodeMatcherOptimized:
         return None
 
 @log_errors
-def process_read_batch(read_batch: List[Tuple], matcher: BarcodeMatcherOptimized, verbose: bool) -> List[Dict]:
+def process_read_batch(read_batch: List[Tuple], verbose: bool = False, matcher: BarcodeMatcherOptimized) -> List[Dict]:
     """
     Process a batch of reads efficiently
     """
@@ -310,7 +310,7 @@ def run_seed(
             if len(current_batch) >= batches:
 
                 # Process batch
-                results = process_read_batch(current_batch, matcher, verbose)
+                results = process_read_batch(current_batch, verbose, matcher)
                 
                 # Write results
                 for result in results:
@@ -320,7 +320,7 @@ def run_seed(
         
         # Process remaining reads
         if current_batch:
-            results = process_read_batch(current_batch, matcher)
+            results = process_read_batch(current_batch, verbose, matcher)
             for result in results:
                 write_batch_results(result, out_csv)
 
