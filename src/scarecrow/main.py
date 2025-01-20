@@ -16,6 +16,7 @@ import warnings
 from scarecrow.seed import parser_seed, validate_seed_args
 from scarecrow.reap import parser_reap, validate_reap_args
 from scarecrow.harvest import parser_harvest, validate_harvest_args
+from scarecrow.tally import parser_tally, validate_tally_args
 
 def main():
     warnings.simplefilter("default", DeprecationWarning)
@@ -48,7 +49,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     command_to_parser = {
         "seed": parser_seed(subparsers),
         "reap": parser_reap(subparsers),
-        "harvest": parser_harvest(subparsers)
+        "harvest": parser_harvest(subparsers),
+        "tally": parser_tally(subparsers)
     }
     
     # Show help when no arguments are given
@@ -70,7 +72,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
     COMMAND_TO_FUNCTION = {
         "seed": validate_seed_args,
         "reap": validate_reap_args,
-        "harvest": validate_harvest_args
+        "harvest": validate_harvest_args,
+        "tally": validate_tally_args
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 

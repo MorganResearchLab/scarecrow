@@ -8,6 +8,7 @@ import ast
 import gzip as gz
 import logging
 import os
+import gc
 import pandas as pd
 import pysam
 import re
@@ -423,35 +424,85 @@ def extract_sequences(
     )
        
     # Process files with minimal overhead
+    if threads is None:
+        threads = min(mp.cpu_count() - 1, 8)
+    else:
+        threads = min(threads, mp.cpu_count())
+    logger.info(f"Using {threads} threads")
+
+    # List of files generated
+    files = []
+
+    def write_and_clear_results(jobs):
+        """Retrieve results from completed jobs, write to file, and free memory."""
+        for idx, job in enumerate(jobs):
+            results = job.get()
+            outfile = output + "_" + str(idx)
+            if outfile not in files:
+                files.append(outfile)
+                if os.path.exists(outfile):
+                    os.remove(outfile)
+            with open(outfile, 'a') as out_fastq:
+                out_fastq.writelines(results)
+            del results                
+        jobs.clear()
+        gc.collect()
+    
+    def combine_results_chunked(files, output, chunk_size=1024*1024):
+        with open(output, 'w') as out_fastq:
+            for fastq_file in files:
+                with open(fastq_file, 'r') as in_fastq:
+                    while chunk := in_fastq.read(chunk_size):
+                        out_fastq.write(chunk)
+                os.remove(fastq_file)
+
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
-         pysam.FastqFile(fastq_files[1]) as r2, \
-         open(output, 'w') as out_fastq:
+         pysam.FastqFile(fastq_files[1]) as r2:
         
         # Create batches efficiently
-        read_pairs = zip(r1, r2)
-        current_batch = []
-        
+        read_pairs = zip(r1, r2)        
+
+        pool = mp.Pool(threads)
+        batch = []
+        jobs = []
+        counter = 0       
+
         for reads in read_pairs:            
-            current_batch.append(reads)            
-            if len(current_batch) >= batch_size:
-                entries = process_read_batch(
-                    current_batch, barcode_configs, matcher, 
-                    extract_range, extract_index, umi_index, umi_range,
-                    verbose
-                )
-                out_fastq.writelines(entries)
-                current_batch = []
+            batch.append(reads)            
+            if len(batch) >= batch_size:
+                jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
+                                                                 extract_range, extract_index, 
+                                                                 umi_index, umi_range, verbose),)))
+                counter += len(batch)                
+
+                # Write results and free memory if jobs exceed a threshold
+                if len(jobs) >= threads:
+                    write_and_clear_results(jobs)
+                    logger.info(f"Processed {counter} reads")
+                
+                # Clear the current batch
+                batch = []                
         
         # Process remaining reads
-        if current_batch:
-            entries = process_read_batch(
-                current_batch, barcode_configs, matcher, 
-                extract_range, extract_index,  umi_index, umi_range,
-                verbose
-            )
-            out_fastq.writelines(entries)
+        if batch:
+            jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
+                                                                 extract_range, extract_index, 
+                                                                 umi_index, umi_range, verbose),)))
             
+        write_and_clear_results(jobs)
+        logger.info(f"Processed {counter} reads")
+        
+        # Close pools
+        pool.close()
+        pool.join()
+
+    # Combine results
+    logger.info(f"Combining results: {files}")
+    combine_results_chunked(files, output)
+
+
+
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """
@@ -473,3 +524,6 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
         'orientation': row['orientation'],
         'whitelist': row['barcode_whitelist']
     } for idx, row in positions.iterrows()]
+
+def worker_task(args):
+    return process_read_batch(*args)
