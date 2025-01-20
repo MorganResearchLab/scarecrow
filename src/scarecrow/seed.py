@@ -240,7 +240,9 @@ class BarcodeMatcherOptimized:
         return None
 
 @log_errors
-def process_read_batch(read_batch: List[Tuple], verbose: bool = False, matcher: BarcodeMatcherOptimized) -> List[Dict]:
+def process_read_batch(read_batch: List[Tuple], 
+                       verbose: bool = False, 
+                       matcher: BarcodeMatcherOptimized = None) -> List[Dict]:
     """
     Process a batch of reads efficiently
     """
