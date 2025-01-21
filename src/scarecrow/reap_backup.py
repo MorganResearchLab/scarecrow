@@ -23,6 +23,66 @@ from scarecrow.seed import parse_seed_arguments
 from scarecrow.tools import generate_random_string
 
 
+class BarcodeMatcherOptimized:
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
+        self.mismatches = mismatches
+        self.matchers = {}
+        
+        # Create optimized lookup structures for each whitelist
+        for whitelist, sequences in barcode_sequences.items():
+            exact_matches = set(sequences)
+            # Create lookup tables for 1-mismatch sequences if needed
+            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
+            self.matchers[whitelist] = {
+                'exact': exact_matches,
+                'mismatch': mismatch_lookup,
+                'length': len(next(iter(sequences)))
+            }
+
+    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
+        """Create a lookup table for sequences with 1 mismatch"""
+        lookup = {}
+        for seq in sequences:
+            # Store the original sequence
+            lookup[seq] = seq
+            # Generate all 1-mismatch variants
+            for i in range(len(seq)):
+                for base in 'ACGTN':
+                    if base != seq[i]:
+                        variant = seq[:i] + base + seq[i+1:]
+                        # Only store if this variant hasn't been seen or is closer to current sequence
+                        if variant not in lookup:
+                            lookup[variant] = seq
+        return lookup
+
+    @lru_cache(maxsize=1024)
+    def _reverse_complement(self, sequence: str) -> str:
+        """Cached reverse complement computation"""
+        return str(Seq(sequence).reverse_complement())
+
+    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
+        """Find best matching barcode sequence"""
+        matcher = self.matchers[whitelist]
+        barcode_len = matcher['length']
+        
+        if len(sequence) < barcode_len:
+            return 'null'
+
+        # Handle reverse orientation
+        if orientation == 'reverse':
+            sequence = self._reverse_complement(sequence)
+
+        # Try exact match first
+        if sequence in matcher['exact']:
+            return sequence
+
+        # If mismatches allowed, check mismatch lookup
+        if self.mismatches > 0 and matcher['mismatch'] is not None:
+            if sequence in matcher['mismatch']:
+                return matcher['mismatch'][sequence]
+
+        return 'null'
+    
 
 def parser_reap(parser):
     subparser = parser.add_parser(
@@ -190,135 +250,12 @@ def run_reap(fastqs: List[str],
         verbose = verbose
     )
     
-    # Process fastq header
-    barcode_counts, cell_barcodes = process_fastq_headers(output)
-
-    # Log the barcode counts for each position
-    for i, counts in enumerate(barcode_counts):
-        if verbose:
-            for barcode, count in counts.items():
-                logger.info(f"Barcode index: {i + 1}\tBarcode: {barcode}\tCount: {count}")
-        barcodes = pd.DataFrame(list(barcode_counts[i].items()), columns=["Barcode", "Count"]).sort_values(by="Count")
-        barcodes.insert(0, "Index", i + 1)
-        if i == 0:
-            barcodes.to_csv('{}.{}'.format(output, 'barcodes.csv'), index = False)
-        else:
-            barcodes.to_csv('{}.{}'.format(output, 'barcodes.csv'), index = False, mode = "a", header = False)
-
-    # Log the combined barcode counts (i.e. cell sequence counts)
-    if verbose:
-        for cell, count in cell_barcodes.items():
-            logger.info(f"Barcode combination: {cell}\tCount: {count}")
-    barcodes = pd.DataFrame(list(cell_barcodes.items()), columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
-    barcodes.to_csv('{}.{}'.format(output, 'barcode.combinations.csv'), index = False)
-
     # gzip
     if gzip:
         logger.info(f"Compressing '{output}'")
         with open(output, 'rb') as f_in, gz.open(output + ".gz", 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
         os.remove(output)
-
-def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
-    """
-    Process fastq header to report on barcode counts
-
-    Args:
-        file_path: fastq file to operate on
-    
-    Returns:
-        (1) list of dictionary of barcode counts, and (2) dictionary of barcode combination counts
-    """
-
-    # Create a list of dictionaries, one for each barcode position
-    barcode_counts = []
-    cell_barcodes = defaultdict(int)
-
-    # Open the FASTQ file using pysam
-    with pysam.FastxFile(file_path) as fastq_file:
-        for entry in fastq_file:
-            # Extract the header line
-            header = entry.comment
-
-            # Check if the header contains 'barcodes='
-            if 'barcodes=' in header:
-                # Extract the barcodes substring
-                barcodes_str = re.search(r'barcodes=([\w_]+)', header).group(1)
-                cell_barcodes[barcodes_str] += 1
-                
-                # Split the barcodes string by underscore
-                barcodes = barcodes_str.split('_')
-                
-                # Ensure barcode_counts has enough dictionaries for all barcode positions
-                while len(barcode_counts) < len(barcodes):
-                    barcode_counts.append(defaultdict(int))
-                
-                # Update counts in the corresponding dictionaries
-                for i, barcode in enumerate(barcodes):
-                    barcode_counts[i][barcode] += 1
-
-    return barcode_counts, cell_barcodes
-
-
-class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
-        self.mismatches = mismatches
-        self.matchers = {}
-        
-        # Create optimized lookup structures for each whitelist
-        for whitelist, sequences in barcode_sequences.items():
-            exact_matches = set(sequences)
-            # Create lookup tables for 1-mismatch sequences if needed
-            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
-            self.matchers[whitelist] = {
-                'exact': exact_matches,
-                'mismatch': mismatch_lookup,
-                'length': len(next(iter(sequences)))
-            }
-
-    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
-        """Create a lookup table for sequences with 1 mismatch"""
-        lookup = {}
-        for seq in sequences:
-            # Store the original sequence
-            lookup[seq] = seq
-            # Generate all 1-mismatch variants
-            for i in range(len(seq)):
-                for base in 'ACGTN':
-                    if base != seq[i]:
-                        variant = seq[:i] + base + seq[i+1:]
-                        # Only store if this variant hasn't been seen or is closer to current sequence
-                        if variant not in lookup:
-                            lookup[variant] = seq
-        return lookup
-
-    @lru_cache(maxsize=1024)
-    def _reverse_complement(self, sequence: str) -> str:
-        """Cached reverse complement computation"""
-        return str(Seq(sequence).reverse_complement())
-
-    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
-        """Find best matching barcode sequence"""
-        matcher = self.matchers[whitelist]
-        barcode_len = matcher['length']
-        
-        if len(sequence) < barcode_len:
-            return 'null'
-
-        # Handle reverse orientation
-        if orientation == 'reverse':
-            sequence = self._reverse_complement(sequence)
-
-        # Try exact match first
-        if sequence in matcher['exact']:
-            return sequence
-
-        # If mismatches allowed, check mismatch lookup
-        if self.mismatches > 0 and matcher['mismatch'] is not None:
-            if sequence in matcher['mismatch']:
-                return matcher['mismatch'][sequence]
-
-        return 'null'
 
 @log_errors
 def process_read_batch(read_batch: List[Tuple], 
@@ -372,9 +309,15 @@ def process_read_batch(read_batch: List[Tuple],
         extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
         extract_qual = source_entry.quality[read_range[0]:read_range[1]] 
         
-        umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
-        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)} UMI={umi_seq}\n"
-        output_entries.append(f"{header}{extract_seq}\n+\n{extract_qual}\n")
+        # FASTQ sequence header
+        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}"
+
+        # Add UMI to header if requested
+        if umi_index is not None:
+            umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
+            header = f"@{header} UMI={umi_seq}"
+
+        output_entries.append(f"{header}\n{extract_seq}\n+\n{extract_qual}\n")
 
     return output_entries
 
@@ -411,10 +354,14 @@ def extract_sequences(
     logger.info(f"FASTQ sequence range to extract: '{extract}'")
 
     # UMI range
-    umi_index, umi_range = umi.split(':')
-    umi_index = int(umi_index)-1
-    umi_range = parse_range(umi_range)
-    logger.info(f"UMI sequence range to extract: '{umi}'")
+    if umi is not None:
+        umi_index, umi_range = umi.split(':')
+        umi_index = int(umi_index)-1
+        umi_range = parse_range(umi_range)
+        logger.info(f"UMI sequence range to extract: '{umi}'")
+    else:
+        umi_index = None
+        umi_range = None
 
     # Create optimized matcher
     logger.info(f"Generating barcode matcher")
@@ -500,8 +447,6 @@ def extract_sequences(
     # Combine results
     logger.info(f"Combining results: {files}")
     combine_results_chunked(files, output)
-
-
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:
