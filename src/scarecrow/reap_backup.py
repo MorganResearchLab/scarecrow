@@ -31,57 +31,82 @@ class BarcodeMatcherOptimized:
         # Create optimized lookup structures for each whitelist
         for whitelist, sequences in barcode_sequences.items():
             exact_matches = set(sequences)
-            # Create lookup tables for 1-mismatch sequences if needed
-            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
+            # Pre-calculate barcode length once
+            barcode_len = len(next(iter(sequences)))
             self.matchers[whitelist] = {
                 'exact': exact_matches,
-                'mismatch': mismatch_lookup,
-                'length': len(next(iter(sequences)))
+                'sequences': sequences,  # Keep full set for mismatch calculation
+                'length': barcode_len
             }
-
-    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
-        """Create a lookup table for sequences with 1 mismatch"""
-        lookup = {}
-        for seq in sequences:
-            # Store the original sequence
-            lookup[seq] = seq
-            # Generate all 1-mismatch variants
-            for i in range(len(seq)):
-                for base in 'ACGTN':
-                    if base != seq[i]:
-                        variant = seq[:i] + base + seq[i+1:]
-                        # Only store if this variant hasn't been seen or is closer to current sequence
-                        if variant not in lookup:
-                            lookup[variant] = seq
-        return lookup
 
     @lru_cache(maxsize=1024)
     def _reverse_complement(self, sequence: str) -> str:
         """Cached reverse complement computation"""
         return str(Seq(sequence).reverse_complement())
 
-    def find_match(self, sequence: str, whitelist: str, orientation: str) -> str:
-        """Find best matching barcode sequence"""
-        matcher = self.matchers[whitelist]
-        barcode_len = matcher['length']
-        
-        if len(sequence) < barcode_len:
-            return 'null'
+    def _hamming_distance(self, s1: str, s2: str) -> int:
+        """Calculate Hamming distance between sequences of equal length"""
+        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
 
-        # Handle reverse orientation
+    def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> list[Tuple[str, int]]:
+        """
+        Get all possible sequence windows within jitter range.
+        Returns list of (sequence, adjusted_start) tuples.
+        """
+        sequences = []
+        # Calculate bounds with jitter, ensuring we don't go out of bounds
+        min_start = max(0, start - jitter - 1)  # -1 for 0-based indexing
+        max_start = min(len(full_sequence) - (end - start), start + jitter - 1)
+        
+        barcode_length = end - start + 1
+        for adj_start in range(min_start, max_start + 1):
+            adj_end = adj_start + barcode_length
+            if adj_end <= len(full_sequence):
+                sequences.append((full_sequence[adj_start:adj_end], adj_start))
+        
+        return sequences
+
+    def find_match(self, sequence: str, whitelist: str, orientation: str, 
+                  original_start: int, original_end: int, jitter: int) -> Tuple[str, int, int]:
+        """
+        Find best matching barcode sequence considering jitter and position.
+        Returns tuple of (matched_sequence, number_of_mismatches, adjusted_start_position)
+        """
+        matcher = self.matchers[whitelist]
+        
+        # Handle reverse orientation if needed
         if orientation == 'reverse':
             sequence = self._reverse_complement(sequence)
-
-        # Try exact match first
-        if sequence in matcher['exact']:
-            return sequence
-
-        # If mismatches allowed, check mismatch lookup
-        if self.mismatches > 0 and matcher['mismatch'] is not None:
-            if sequence in matcher['mismatch']:
-                return matcher['mismatch'][sequence]
-
-        return 'null'
+        
+        # Get all possible sequences within jitter range
+        possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
+        
+        best_match = 'null'
+        best_mismatches = self.mismatches + 1  # Initialize worse than maximum allowed
+        best_position = original_start - 1
+        
+        # First try exact matches
+        for seq, pos in possible_sequences:
+            if seq in matcher['exact']:
+                return seq, 0, pos
+        
+        # If no exact match, try with mismatches
+        if self.mismatches > 0:
+            for seq, pos in possible_sequences:
+                for valid_seq in matcher['sequences']:
+                    if len(seq) == len(valid_seq):  # Only compare equal length sequences
+                        distance = self._hamming_distance(seq, valid_seq)
+                        # Update if we found a better match (fewer mismatches or same mismatches but closer to original position)
+                        if distance <= self.mismatches and (
+                            distance < best_mismatches or 
+                            (distance == best_mismatches and 
+                             abs(pos - (original_start - 1)) < abs(best_position - (original_start - 1)))
+                        ):
+                            best_match = valid_seq
+                            best_mismatches = distance
+                            best_position = pos
+        
+        return best_match, best_mismatches, best_position
     
 
 def parser_reap(parser):
@@ -265,57 +290,59 @@ def process_read_batch(read_batch: List[Tuple],
                       read_index: int,
                       umi_index: int,
                       umi_range: Tuple[int, int],
-                      verbose: bool) -> List[str]:
+                      jitter: int = 5,
+                      verbose: bool = False) -> List[str]:
     """
-    Process a batch of reads with optimized matching
+    Modified process_read_batch to handle jitter and improved matching
     """
     logger = logging.getLogger('scarecrow')
-
     output_entries = []
     
     for reads in read_batch:
         barcodes = []
+        positions = []
+        mismatches = []
         for config in barcode_configs:
             seq = reads[config['file_index']].sequence
             start, end = config['start'], config['end']
-            barcode_seq = seq[start-1:end]
 
             if verbose:
                 logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
-                logger.info(f"Sequence: {reads[config['file_index']].sequence}")
+                logger.info(f"Sequence: {seq}")
+                logger.info(f"Looking for barcode in range {start}-{end} with jitter {jitter}")
 
             whitelist = ast.literal_eval(config['whitelist'])
-
-            # This condition check was added due to whitelist being read as a list when passed via SLURM
             if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
                 whitelist = whitelist[0]
 
-            if verbose:
-                logger.info(f"whitelist: {tuple(whitelist)}")
-                logger.info(f"matcher.matchers: {matcher.matchers}")
-
             if whitelist in matcher.matchers:
-                matched_barcode = matcher.find_match(
-                    barcode_seq, whitelist, config['orientation'])
+                matched_barcode, mismatch_count, adj_position = matcher.find_match(
+                    seq, whitelist, config['orientation'], start, end, jitter)
+                
                 if verbose:
-                    logger.info(f"Matched barcode: {matched_barcode} for {barcode_seq} @ range {start}-{end}")
-
+                    logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
+                
                 barcodes.append(matched_barcode)
+                positions.append(str(adj_position + 1))  # Convert to 1-based position for output
+                mismatches.append(str(mismatch_count))
             else:
                 barcodes.append('null')
+                positions.append(str(start))
+                mismatches.append('NA')
 
-        # Extract sequence and create output
+        # Create output entry with original and adjusted positions
         source_entry = reads[read_index]
         extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
-        extract_qual = source_entry.quality[read_range[0]:read_range[1]] 
+        extract_qual = source_entry.quality[read_range[0]:read_range[1]]
         
-        # FASTQ sequence header
-        header = f"@{source_entry.name} {source_entry.comment} barcodes={('_').join(barcodes)}"
+        header = f"@{source_entry.name} {source_entry.comment}"
+        header += f" barcodes={('_').join(barcodes)}"
+        header += f" positions={('_').join(positions)}"
+        header += f" mismatches={('_').join(mismatches)}"
 
-        # Add UMI to header if requested
         if umi_index is not None:
             umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
-            header = f"@{header} UMI={umi_seq}"
+            header += f" UMI={umi_seq}"
 
         output_entries.append(f"{header}\n{extract_seq}\n+\n{extract_qual}\n")
 

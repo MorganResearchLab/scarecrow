@@ -6,9 +6,12 @@ A toolkit for preprocessing single cell sequencing data.
 
 ### Todo
 
-* Needs error handling implementing to capture missing or incorrect parameters, and unexpected file content.
-* `scarecrow reap` needs thorough checking after optimizing for efficiency
+* Error handling implementing to capture missing or incorrect parameters, and unexpected file content
 * Possibly need to consider jitter for UMI position
+* Peaks in between barcodes need further investigation
+* Benchmark different assays (SPLiTseq, Parse, 10X) and methods (split-pipe, scarecrow, UMI tools)
+*   - barcode recovery
+*   - alignment (STARsolo and kallisto)
 
 
 ## Environment
@@ -48,13 +51,13 @@ scarecrow harvest <BC1_counts.csv> <BC2_counts.csv> <BC3_counts.csv> \
 # 2  read1     79   87     forward  [('BC3', 'n198')]        6002           0.60
 ```
 
-Finally, the `reap` tool extracts a target sequence (i.e. cDNA) and its associated quality values from either `--read1` or `--read2`. This sequence data is written to a new fastq file, and the combination of cell barcodes identified near the positions previously estimated are appened to the sequence header. The `jitter` value is the flanking distance to extend the barcode search for from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence.
+Finally, the `reap` tool extracts a target sequence (i.e. cDNA) and its associated quality values from either read 1 or read2. This sequence data is written to a new fastq file, and the combination of cell barcodes identified near the positions previously estimated are appened to the sequence header. The `jitter` value is the flanking distance to extend the barcode search for from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence.
 
 ```bash
 # Reap target sequence from fastqs (TBC)
 scarecrow reap --fastqs <paired_fastq_R1> <paired_fastq_R2> --barcode_positions <barcode_positions.csv> \
     --barcodes BC1:v1:<v1_whitelist.txt> BC2:v1:<v1_whitelist.txt> BC3:n198:<n198_whitelist.txt> \
-    --jitter 5 --mismatches 1 --read2 0-100 --out cDNA.fastq.gz
+    --jitter 5 --mismatches 1 --extract 1:1-64 --out cDNA.fastq.gz
 ```
 
 ### Parse Evercode WTv3 Example
@@ -114,6 +117,8 @@ FILES=(./results/barcodes_BC*csv)
 scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 --out barcode_positions.csv
 
 time scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
-    -j 5 -m 1 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq.gz --threads 1
+    -j 5 -m 1 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 1
+
+scarecrow tally -f ./cDNA.fq
 
 ```
