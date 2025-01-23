@@ -7,11 +7,10 @@ A toolkit for preprocessing single cell sequencing data.
 ### Todo
 
 * Error handling implementing to capture missing or incorrect parameters, and unexpected file content
-* Possibly need to consider jitter for UMI position
 * Peaks in between barcodes need further investigation
 * Benchmark different assays (SPLiTseq, Parse, 10X) and methods (split-pipe, scarecrow, UMI tools)
 *   - barcode recovery
-*   - alignment (STARsolo and kallisto)
+*   - alignment (STAR and kallisto)
 
 
 ## Environment

@@ -66,46 +66,58 @@ class BarcodeMatcherOptimized:
         
         return sequences
 
-    def find_match(self, sequence: str, whitelist: str, orientation: str, 
-                  original_start: int, original_end: int, jitter: int) -> Tuple[str, int, int]:
+    def find_match(self, sequence: str, whitelist: str, orientation: str,
+               original_start: int, original_end: int, jitter: int) -> Tuple[str, int, int]:
         """
         Find best matching barcode sequence considering jitter and position.
         Returns tuple of (matched_sequence, number_of_mismatches, adjusted_start_position)
+        If multiple sequences share the best score (same mismatches and distance), returns ('null', mismatches, position)
         """
         matcher = self.matchers[whitelist]
         
         # Handle reverse orientation if needed
         if orientation == 'reverse':
             sequence = self._reverse_complement(sequence)
-        
+            
         # Get all possible sequences within jitter range
         possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
         
         best_match = 'null'
-        best_mismatches = self.mismatches + 1  # Initialize worse than maximum allowed
+        best_mismatches = self.mismatches + 1
         best_position = original_start - 1
         
         # First try exact matches
         for seq, pos in possible_sequences:
             if seq in matcher['exact']:
                 return seq, 0, pos
-        
+                
         # If no exact match, try with mismatches
         if self.mismatches > 0:
+            # Track all matches with their scores
+            candidates = []
+            best_score = (self.mismatches + 1, float('inf'))  # (mismatches, distance)
+            
             for seq, pos in possible_sequences:
                 for valid_seq in matcher['sequences']:
                     if len(seq) == len(valid_seq):  # Only compare equal length sequences
                         distance = self._hamming_distance(seq, valid_seq)
-                        # Update if we found a better match (fewer mismatches or same mismatches but closer to original position)
-                        if distance <= self.mismatches and (
-                            distance < best_mismatches or 
-                            (distance == best_mismatches and 
-                             abs(pos - (original_start - 1)) < abs(best_position - (original_start - 1)))
-                        ):
-                            best_match = valid_seq
-                            best_mismatches = distance
-                            best_position = pos
-        
+                        if distance <= self.mismatches:
+                            pos_distance = abs(pos - (original_start - 1))
+                            current_score = (distance, pos_distance)
+                            
+                            # If we found a better score, clear previous candidates
+                            if current_score < best_score:
+                                candidates = [(valid_seq, distance, pos)]
+                                best_score = current_score
+                                best_match = valid_seq
+                                best_mismatches = distance
+                                best_position = pos
+                            # If we found an equal score, add to candidates
+                            elif current_score == best_score:
+                                candidates.append((valid_seq, distance, pos))
+                                best_match = 'null'  # Multiple matches found, set to null
+                                # Keep the same best_mismatches and best_position
+            
         return best_match, best_mismatches, best_position
     
 

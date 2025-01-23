@@ -11,7 +11,7 @@ import os
 import gc
 import pandas as pd
 import pysam
-import re
+import numpy as np
 import shutil
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
@@ -24,8 +24,9 @@ from scarecrow.tools import generate_random_string
 
 
 class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int):
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1, base_quality_threshold: int = 20):
         self.mismatches = mismatches
+        self.base_quality_threshold = base_quality_threshold
         self.matchers = {}
         
         # Create optimized lookup structures for each whitelist
@@ -46,9 +47,9 @@ class BarcodeMatcherOptimized:
 
     def _hamming_distance(self, s1: str, s2: str) -> int:
         """Calculate Hamming distance between sequences of equal length"""
-        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+        return sum(c1 != c2 for c1, c2 in zip(s1, s2))    
 
-    def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> list[Tuple[str, int]]:
+    def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> List[Tuple[str, int]]:
         """
         Get all possible sequence windows within jitter range.
         Returns list of (sequence, adjusted_start) tuples.
@@ -66,13 +67,17 @@ class BarcodeMatcherOptimized:
         
         return sequences
 
-    def find_match(self, sequence: str, whitelist: str, orientation: str,
-               original_start: int, original_end: int, jitter: int) -> Tuple[str, int, int]:
+    def find_match(self, sequence: str, quality_scores: str, whitelist: str, orientation: str,
+               original_start: int, original_end: int, jitter: int, base_quality: int) -> Tuple[str, int, int]:
         """
-        Find best matching barcode sequence considering jitter and position.
+        Find best matching barcode sequence considering base quality, jitter, and position.
+        
         Returns tuple of (matched_sequence, number_of_mismatches, adjusted_start_position)
         If multiple sequences share the best score (same mismatches and distance), returns ('null', mismatches, position)
         """
+        # Apply base quality filtering
+        sequence, _ = filter_low_quality_bases(sequence, quality_scores, base_quality)
+        
         matcher = self.matchers[whitelist]
         
         # Handle reverse orientation if needed
@@ -93,31 +98,29 @@ class BarcodeMatcherOptimized:
                 
         # If no exact match, try with mismatches
         if self.mismatches > 0:
-            # Track all matches with their scores
+            # Faster candidate tracking
+            best_score = (self.mismatches + 1, float('inf'))
             candidates = []
-            best_score = (self.mismatches + 1, float('inf'))  # (mismatches, distance)
             
             for seq, pos in possible_sequences:
                 for valid_seq in matcher['sequences']:
-                    if len(seq) == len(valid_seq):  # Only compare equal length sequences
+                    if len(seq) == len(valid_seq):
                         distance = self._hamming_distance(seq, valid_seq)
                         if distance <= self.mismatches:
                             pos_distance = abs(pos - (original_start - 1))
                             current_score = (distance, pos_distance)
                             
-                            # If we found a better score, clear previous candidates
+                            # More efficient candidate management
                             if current_score < best_score:
                                 candidates = [(valid_seq, distance, pos)]
                                 best_score = current_score
                                 best_match = valid_seq
                                 best_mismatches = distance
                                 best_position = pos
-                            # If we found an equal score, add to candidates
                             elif current_score == best_score:
                                 candidates.append((valid_seq, distance, pos))
-                                best_match = 'null'  # Multiple matches found, set to null
-                                # Keep the same best_mismatches and best_position
-            
+                                best_match = 'null'
+        
         return best_match, best_mismatches, best_position
     
 
@@ -173,6 +176,13 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         type=int,
         default=1,
         help='Number of allowed mismatches in barcode [1]',
+    )
+    subparser.add_argument(
+        "-q", "--quality",
+        metavar="quality",
+        type=int,
+        default=20,
+        help='Minimum base quality filter [20]',
     )
     subparser.add_argument(
         "-x", "--extract",
@@ -233,6 +243,7 @@ def validate_reap_args(parser, args) -> None:
              barcodes = args.barcodes,
              jitter = args.jitter,
              mismatches = args.mismatches,
+             base_quality = args.quality,
              batches = args.batch_size, 
              threads = args.threads,
              verbose = args.verbose,
@@ -248,6 +259,7 @@ def run_reap(fastqs: List[str],
              barcodes: List[str] = None,
              jitter: int = 5,
              mismatches: int = 1,
+             base_quality: int = 20,
              batches: int = 10000,
              threads: int = 4,
              verbose: bool = False,
@@ -282,6 +294,7 @@ def run_reap(fastqs: List[str],
         umi = umi,
         jitter = jitter,
         mismatches = mismatches,
+        base_quality = base_quality,
         batch_size = batches,
         threads = threads,
         verbose = verbose
@@ -302,6 +315,7 @@ def process_read_batch(read_batch: List[Tuple],
                       read_index: int,
                       umi_index: int,
                       umi_range: Tuple[int, int],
+                      base_quality: int = 20,
                       jitter: int = 5,
                       verbose: bool = False) -> List[str]:
     """
@@ -329,7 +343,8 @@ def process_read_batch(read_batch: List[Tuple],
 
             if whitelist in matcher.matchers:
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                    seq, whitelist, config['orientation'], start, end, jitter)
+                    seq, reads[config['file_index']].quality, whitelist, config['orientation'], 
+                    start, end, jitter, base_quality)
                 
                 if verbose:
                     logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
@@ -344,8 +359,12 @@ def process_read_batch(read_batch: List[Tuple],
 
         # Create output entry with original and adjusted positions
         source_entry = reads[read_index]
-        extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
-        extract_qual = source_entry.quality[read_range[0]:read_range[1]]
+        # Apply base quality filtering to extracted sequence
+        filtered_seq, filtered_qual = filter_low_quality_bases(
+            source_entry.sequence[read_range[0]:read_range[1]], 
+            source_entry.quality[read_range[0]:read_range[1]], base_quality)
+        #extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
+        #extract_qual = source_entry.quality[read_range[0]:read_range[1]]
         
         header = f"@{source_entry.name} {source_entry.comment}"
         header += f" barcodes={('_').join(barcodes)}"
@@ -356,7 +375,9 @@ def process_read_batch(read_batch: List[Tuple],
             umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
             header += f" UMI={umi_seq}"
 
-        output_entries.append(f"{header}\n{extract_seq}\n+\n{extract_qual}\n")
+        #output_entries.append(f"{header}\n{extract_seq}\n+\n{extract_qual}\n")
+        output_entries.append(f"{header}\n{filtered_seq}\n+\n{filtered_qual}\n")
+
 
     return output_entries
 
@@ -371,6 +392,7 @@ def extract_sequences(
     umi: Optional[str] = None,
     jitter: int = 5,
     mismatches: int = 1,
+    base_quality: int = 20,
     batch_size: int = 100000,
     threads: Optional[int] = None,
     verbose: bool = False
@@ -406,7 +428,8 @@ def extract_sequences(
     logger.info(f"Generating barcode matcher")
     matcher = BarcodeMatcherOptimized(
         barcode_sequences = {k: set(v) for k, v in barcode_sequences.items()},
-        mismatches = mismatches
+        mismatches = mismatches,
+        base_quality_threshold = base_quality
     )
        
     # Process files with minimal overhead
@@ -459,7 +482,8 @@ def extract_sequences(
             if len(batch) >= batch_size:
                 jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
                                                                  extract_range, extract_index, 
-                                                                 umi_index, umi_range, verbose),)))
+                                                                 umi_index, umi_range, 
+                                                                 base_quality, jitter, verbose),)))
                 counter += len(batch)                
 
                 # Write results and free memory if jobs exceed a threshold
@@ -474,7 +498,8 @@ def extract_sequences(
         if batch:
             jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
                                                                  extract_range, extract_index, 
-                                                                 umi_index, umi_range, verbose),)))
+                                                                 umi_index, umi_range, 
+                                                                 base_quality, jitter, verbose),)))
             
         write_and_clear_results(jobs)
         logger.info(f"Processed {counter} reads")
@@ -495,6 +520,31 @@ def parse_range(range_str: str) -> Tuple[int, int]:
     start, end = map(int, range_str.split('-'))
     start = max(0, start -1)
     return (start, end)
+
+def filter_low_quality_bases(sequence: str, quality: str, threshold: int) -> Tuple[str, str]:
+    """
+    Efficiently filter low-quality bases using NumPy.
+    """
+    # Convert to NumPy arrays
+    seq_array = np.array(list(sequence))
+    qual_array = np.frombuffer(quality.encode(), dtype='u1') - 33
+    
+    # Create mask for high-quality bases
+    mask = qual_array >= threshold
+    
+    # Replace low-quality bases with 'N'
+    filtered_seq = ''.join(
+        base if qual >= threshold else 'N'
+        for base, qual in zip(seq_array, qual_array)
+    )
+    
+    # Create quality string with minimum quality for low-quality bases
+    filtered_qual = ''.join(
+        quality[i] if qual >= threshold else chr(33)
+        for i, qual in enumerate(qual_array)
+    )
+    
+    return filtered_seq, filtered_qual
 
 def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
     """
