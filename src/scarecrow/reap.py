@@ -24,7 +24,7 @@ from scarecrow.tools import generate_random_string
 
 
 class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1, base_quality_threshold: int = 20):
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1, base_quality_threshold: int = None):
         self.mismatches = mismatches
         self.base_quality_threshold = base_quality_threshold
         self.matchers = {}
@@ -76,7 +76,8 @@ class BarcodeMatcherOptimized:
         If multiple sequences share the best score (same mismatches and distance), returns ('null', mismatches, position)
         """
         # Apply base quality filtering
-        sequence, _ = filter_low_quality_bases(sequence, quality_scores, base_quality)
+        if base_quality is not None:
+            sequence, _ = filter_low_quality_bases(sequence, quality_scores, base_quality)
         
         matcher = self.matchers[whitelist]
         
@@ -178,11 +179,11 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         help='Number of allowed mismatches in barcode [1]',
     )
     subparser.add_argument(
-        "-q", "--quality",
-        metavar="quality",
+        "-q", "--base_quality",
+        metavar="base_quality",
         type=int,
-        default=20,
-        help='Minimum base quality filter [20]',
+        default=None,
+        help='Minimum base quality filter [None]',
     )
     subparser.add_argument(
         "-x", "--extract",
@@ -243,7 +244,7 @@ def validate_reap_args(parser, args) -> None:
              barcodes = args.barcodes,
              jitter = args.jitter,
              mismatches = args.mismatches,
-             base_quality = args.quality,
+             base_quality = args.base_quality,
              batches = args.batch_size, 
              threads = args.threads,
              verbose = args.verbose,
@@ -259,7 +260,7 @@ def run_reap(fastqs: List[str],
              barcodes: List[str] = None,
              jitter: int = 5,
              mismatches: int = 1,
-             base_quality: int = 20,
+             base_quality: int = None,
              batches: int = 10000,
              threads: int = 4,
              verbose: bool = False,
@@ -315,7 +316,7 @@ def process_read_batch(read_batch: List[Tuple],
                       read_index: int,
                       umi_index: int,
                       umi_range: Tuple[int, int],
-                      base_quality: int = 20,
+                      base_quality: int = None,
                       jitter: int = 5,
                       verbose: bool = False) -> List[str]:
     """
@@ -360,11 +361,13 @@ def process_read_batch(read_batch: List[Tuple],
         # Create output entry with original and adjusted positions
         source_entry = reads[read_index]
         # Apply base quality filtering to extracted sequence
-        filtered_seq, filtered_qual = filter_low_quality_bases(
-            source_entry.sequence[read_range[0]:read_range[1]], 
-            source_entry.quality[read_range[0]:read_range[1]], base_quality)
-        #extract_seq = source_entry.sequence[read_range[0]:read_range[1]]
-        #extract_qual = source_entry.quality[read_range[0]:read_range[1]]
+        if base_quality is not None:
+            filtered_seq, filtered_qual = filter_low_quality_bases(
+                source_entry.sequence[read_range[0]:read_range[1]], 
+                source_entry.quality[read_range[0]:read_range[1]], base_quality)
+        else:
+            filtered_seq = source_entry.sequence[read_range[0]:read_range[1]]
+            filtered_qual = source_entry.quality[read_range[0]:read_range[1]]
         
         header = f"@{source_entry.name} {source_entry.comment}"
         header += f" barcodes={('_').join(barcodes)}"
@@ -392,7 +395,7 @@ def extract_sequences(
     umi: Optional[str] = None,
     jitter: int = 5,
     mismatches: int = 1,
-    base_quality: int = 20,
+    base_quality: int = None,
     batch_size: int = 100000,
     threads: Optional[int] = None,
     verbose: bool = False
@@ -521,30 +524,19 @@ def parse_range(range_str: str) -> Tuple[int, int]:
     start = max(0, start -1)
     return (start, end)
 
+@lru_cache(maxsize=1024)
 def filter_low_quality_bases(sequence: str, quality: str, threshold: int) -> Tuple[str, str]:
     """
-    Efficiently filter low-quality bases using NumPy.
+    Efficiently filter low-quality bases with minimal overhead
     """
-    # Convert to NumPy arrays
-    seq_array = np.array(list(sequence))
-    qual_array = np.frombuffer(quality.encode(), dtype='u1') - 33
-    
-    # Create mask for high-quality bases
-    mask = qual_array >= threshold
-    
-    # Replace low-quality bases with 'N'
+    # Pre-compute quality scores to avoid repeated calculation
+    qual_scores = [ord(q) - 33 for q in quality]    
+    # Use list comprehension for efficient filtering
     filtered_seq = ''.join(
-        base if qual >= threshold else 'N'
-        for base, qual in zip(seq_array, qual_array)
-    )
-    
-    # Create quality string with minimum quality for low-quality bases
-    filtered_qual = ''.join(
-        quality[i] if qual >= threshold else chr(33)
-        for i, qual in enumerate(qual_array)
-    )
-    
-    return filtered_seq, filtered_qual
+        base if score >= threshold else 'N'
+        for base, score in zip(sequence, qual_scores)
+    )    
+    return filtered_seq, quality
 
 def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
     """
