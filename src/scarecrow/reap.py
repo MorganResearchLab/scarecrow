@@ -286,6 +286,11 @@ def run_reap(fastqs: List[str],
     logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
     logger = setup_logger(logfile)
     logger.info(f"logfile: '{logfile}'")
+    logger.info(f"fastqs: {fastqs}")
+    logger.info(f"output: '{output}'")
+    logger.info(f"jitter: '{jitter}'")
+    logger.info(f"mismatches: '{mismatches}'")
+    logger.info(f"base_quality: '{base_quality}'")
 
     # Extract barcodes and convert whitelist to set
     expected_barcodes = parse_seed_arguments(barcodes)  
