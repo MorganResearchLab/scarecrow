@@ -29,14 +29,19 @@ class BarcodeMatcherOptimized:
         self.base_quality_threshold = base_quality_threshold
         self.matchers = {}
         
-        # Create optimized lookup structures for each whitelist
+        # Optimize initialization with precomputed structures
         for whitelist, sequences in barcode_sequences.items():
             exact_matches = set(sequences)
-            # Pre-calculate barcode length once
             barcode_len = len(next(iter(sequences)))
+            
+            # Precompute valid sequences for faster matching
+            length_matched_sequences = {
+                seq for seq in sequences if len(seq) == barcode_len
+            }
+            
             self.matchers[whitelist] = {
                 'exact': exact_matches,
-                'sequences': sequences,  # Keep full set for mismatch calculation
+                'sequences': length_matched_sequences,
                 'length': barcode_len
             }
 
@@ -46,83 +51,79 @@ class BarcodeMatcherOptimized:
         return str(Seq(sequence).reverse_complement())
 
     def _hamming_distance(self, s1: str, s2: str) -> int:
-        """Calculate Hamming distance between sequences of equal length"""
+        """Efficient Hamming distance calculation"""
         return sum(c1 != c2 for c1, c2 in zip(s1, s2))    
 
     def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> List[Tuple[str, int]]:
         """
-        Get all possible sequence windows within jitter range.
-        Returns list of (sequence, adjusted_start) tuples.
+        Optimized sequence window generation with jitter
+        Minimizes redundant calculations and boundary checks
         """
-        sequences = []
-        # Calculate bounds with jitter, ensuring we don't go out of bounds
-        min_start = max(0, start - jitter - 1)  # -1 for 0-based indexing
-        max_start = min(len(full_sequence) - (end - start), start + jitter - 1)
-        
         barcode_length = end - start + 1
-        for adj_start in range(min_start, max_start + 1):
-            adj_end = adj_start + barcode_length
-            if adj_end <= len(full_sequence):
-                sequences.append((full_sequence[adj_start:adj_end], adj_start))
+        sequences = []
+        
+        # Vectorized bounds calculation
+        min_start = max(0, start - jitter)
+        max_start = min(len(full_sequence) - barcode_length + 1, start + jitter)        
+        sequences = [
+            (full_sequence[adj_start:adj_start + barcode_length], adj_start)
+            for adj_start in range(min_start, max_start)
+        ]
         
         return sequences
 
     def find_match(self, sequence: str, quality_scores: str, whitelist: str, orientation: str,
                original_start: int, original_end: int, jitter: int, base_quality: int) -> Tuple[str, int, int]:
         """
-        Find best matching barcode sequence considering base quality, jitter, and position.
-        
-        Returns tuple of (matched_sequence, number_of_mismatches, adjusted_start_position)
-        If multiple sequences share the best score (same mismatches and distance), returns ('null', mismatches, position)
+        Optimized matching algorithm with early exit and efficient candidate tracking
         """
-        # Apply base quality filtering
+        # Base quality filtering with early exit
         if base_quality is not None:
-            sequence, _ = filter_low_quality_bases(sequence, quality_scores, base_quality)
+            sequence = filter_low_quality_bases(sequence, quality_scores, base_quality)[0]
         
         matcher = self.matchers[whitelist]
         
-        # Handle reverse orientation if needed
+        # Orientation handling
         if orientation == 'reverse':
             sequence = self._reverse_complement(sequence)
             
-        # Get all possible sequences within jitter range
+        # Precompute possible sequences
         possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
         
-        best_match = 'null'
-        best_mismatches = self.mismatches + 1
-        best_position = original_start - 1
-        
-        # First try exact matches
+        # Early exact match check (O(1) lookup)
         for seq, pos in possible_sequences:
             if seq in matcher['exact']:
                 return seq, 0, pos
-                
-        # If no exact match, try with mismatches
-        if self.mismatches > 0:
-            # Faster candidate tracking
-            best_score = (self.mismatches + 1, float('inf'))
-            candidates = []
-            
-            for seq, pos in possible_sequences:
-                for valid_seq in matcher['sequences']:
-                    if len(seq) == len(valid_seq):
-                        distance = self._hamming_distance(seq, valid_seq)
-                        if distance <= self.mismatches:
-                            pos_distance = abs(pos - (original_start - 1))
-                            current_score = (distance, pos_distance)
-                            
-                            # More efficient candidate management
-                            if current_score < best_score:
-                                candidates = [(valid_seq, distance, pos)]
-                                best_score = current_score
-                                best_match = valid_seq
-                                best_mismatches = distance
-                                best_position = pos
-                            elif current_score == best_score:
-                                candidates.append((valid_seq, distance, pos))
-                                best_match = 'null'
         
-        return best_match, best_mismatches, best_position
+        # Mismatch handling with optimized candidate tracking
+        if not self.mismatches:
+            return 'null', self.mismatches + 1, original_start - 1
+        
+        best_score = (self.mismatches + 1, float('inf'))
+        best_match = 'null'
+        best_position = original_start - 1
+        candidates = []
+        
+        for seq, pos in possible_sequences:
+            # Prefilter sequences by length
+            for valid_seq in matcher['sequences']:
+                distance = self._hamming_distance(seq, valid_seq)
+                
+                if distance <= self.mismatches:
+                    pos_distance = abs(pos - (original_start - 1))
+                    current_score = (distance, pos_distance)
+                    
+                    # Efficient candidate management
+                    if current_score < best_score:
+                        candidates = [(valid_seq, distance, pos)]
+                        best_score = current_score
+                        best_match = valid_seq
+                        best_position = pos
+                    elif current_score == best_score:
+                        candidates.append((valid_seq, distance, pos))
+                        best_match = 'null'
+        
+        return best_match, best_score[0], best_position
     
 
 def parser_reap(parser):
