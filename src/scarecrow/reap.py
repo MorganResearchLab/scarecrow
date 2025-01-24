@@ -63,7 +63,7 @@ class BarcodeMatcherOptimized:
         sequences = []
         
         # Vectorized bounds calculation
-        min_start = max(0, start - jitter)
+        min_start = max(0, start - jitter - 1)
         max_start = min(len(full_sequence) - barcode_length + 1, start + jitter)        
         sequences = [
             (full_sequence[adj_start:adj_start + barcode_length], adj_start)
