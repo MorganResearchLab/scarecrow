@@ -69,7 +69,6 @@ class BarcodeMatcherOptimized:
             (full_sequence[adj_start:adj_start + barcode_length], adj_start)
             for adj_start in range(min_start, max_start)
         ]
-        
         return sequences
 
     def find_match(self, sequence: str, quality_scores: str, whitelist: str, orientation: str,
@@ -91,9 +90,23 @@ class BarcodeMatcherOptimized:
         possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
         
         # Early exact match check (O(1) lookup)
+        #for seq, pos in possible_sequences:
+        #    if seq in matcher['exact']:
+        #        return seq, 0, pos
+        # Early exact match check (O(1) lookup)
+        closest_match = None
+        min_distance = float('inf')
+
         for seq, pos in possible_sequences:
             if seq in matcher['exact']:
-                return seq, 0, pos
+                distance = abs(pos - (original_start - 1))
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_match = (seq, pos)
+
+        if closest_match:
+            return closest_match[0], 0, closest_match[1]
+
         
         # Mismatch handling with optimized candidate tracking
         if not self.mismatches:
