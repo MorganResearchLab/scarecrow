@@ -4,16 +4,17 @@
 @author: David Wragg
 """
 
-import os, sys
+import os
 import pysam
-import multiprocessing as mp
-from argparse import RawTextHelpFormatter
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
+import gzip
+from argparse import RawTextHelpFormatter
+from concurrent.futures import ThreadPoolExecutor
+from collections import defaultdict
+from functools import lru_cache
+from typing import List, Dict, Set, Tuple
 from scarecrow.logger import log_errors, setup_logger
-from scarecrow.tools import FastqProcessingError, reverse_complement, count_fastq_reads, region_indices, generate_random_string
-from typing import List, Dict, Optional, Set, Union
-from rich.progress import track
+from scarecrow.tools import generate_random_string, reverse_complement
 
 def parser_seed(parser):
     subparser = parser.add_parser(
@@ -66,6 +67,11 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
         type=int,
         default=4,
     )
+    subparser.add_argument(
+        "-v", "--verbose",
+        action='store_true',
+        help='Enable verbose output [false]'
+    )
     return subparser
 
 def validate_seed_args(parser, args):
@@ -74,77 +80,9 @@ def validate_seed_args(parser, args):
              barcodes = args.barcodes, 
              output_file = args.out, 
              batches = args.batch_size, 
-             threads = args.threads)
-
-@log_errors
-def run_seed(fastqs, strands, barcodes, output_file, batches, threads):
-    """
-    Search for barcodes in fastq reads, write summary to file.
-    """
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_seed', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: ${logfile}")
-
-    # Originally we imported a seqspec yaml and called region_indices (scarecrow tools)
-    # which would return the following structure:
-    #[
-    #{
-    #    "R1.fastq": [  # fastq filename as key
-    #        # List of RegionCoordinate objects for each region
-    #        # From the YAML, these would include regions like I5, R1, cdna, BC1, etc.
-    #        RegionCoordinate(
-    #            region_id: str,  # e.g. "BC1", "cdna", etc.
-    #            start: int,      # 0-indexed start position
-    #            stop: int        # 0-indexed stop position
-    #        ),
-    #        # ... more regions
-    #    ],
-    #    "strand": "pos"  # or "neg" depending on the read
-    #},
-    ## ... one dict per fastq file
-    #]
-
-    # This was achieved as follows:
+             threads = args.threads,
+             verbose = args.verbose)
     
-    # spec = load_spec(yaml)
-    # fastq_info = region_indices(spec, fastqs)
-
-    # However, we only use the fastq and strand information, so don't need
-    # the level of complexity of the YAML file. However, for possible
-    # future-compataibility, have retained the same structure when reading
-    # in the fastqs and strands information:
-    fastq_info = create_fastq_info(fastqs, strands)
-    logger.info(f"{fastq_info}")
-
-    # Load barcodes
-    expected_barcodes = parse_seed_arguments(barcodes)    
-    logger.info(f"Expected barcodes")
-    for key, barcode in expected_barcodes.items():
-        logger.info(f"{key}: {barcode}")
-    
-
-    # Open file for writing output
-    if output_file:
-        try:
-            f = open(f"{output_file}", 'w')
-            f.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
-        except FileNotFoundError:
-            logger.error(f"Output file directory not found: {os.path.dirname(output_file)}")
-            sys.exit(1)
-
-    # Extract elements from sequencing reads
-    process_read_pair_batches(fastq_info = fastq_info, batch_size = batches, output_handler = f,
-                              num_workers = threads, barcodes = expected_barcodes)
-
-    return 
-
-def create_fastq_info(fastqs, strands):
-    return [
-        {fastq: [], "strand": strand}
-        for fastq, strand in zip(fastqs, strands)
-    ]
-
 @log_errors
 def parse_seed_arguments(barcode_args):
     """
@@ -172,13 +110,12 @@ def parse_seed_arguments(barcode_args):
                 raise Exception(f"Barcode file not found: {file_path}")
 
             expected_barcodes[key,label] = barcodes
-            logger.info(f"Loaded {len(barcodes)} barcodes for {key} from {label} at {file_path}")
+            logger.info(f"Loaded {len(barcodes)} barcodes for barcode '{key}' from whitelist '{label}' file '{file_path}'")
                                     
         except ValueError:
             logger.error(f"Invalid barcode argument format: {arg}. Use 'KEY:FILE'")
     
     return expected_barcodes
-
 
 @log_errors
 def read_barcode_file(file_path):
@@ -215,329 +152,190 @@ def read_barcode_file(file_path):
         sys.exit(1)
 
 
+
+class BarcodeMatcherOptimized:
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1):
+        """
+        Initialize optimized barcode matcher with pre-computed lookup tables
+        """
+        self.mismatches = mismatches
+        self.matchers = {}
+        
+        for whitelist_key, sequences in barcode_sequences.items():
+            exact_matches = set(sequences)
+            mismatch_lookup = self._create_mismatch_lookup(sequences) if mismatches > 0 else None
+            self.matchers[whitelist_key] = {
+                'exact': exact_matches,
+                'mismatch': mismatch_lookup,
+                'length': len(next(iter(sequences)))
+            }
+
+    def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
+        """Create lookup table for sequences with allowed mismatches"""
+        lookup = {}
+        for seq in sequences:
+            lookup[seq] = (seq, 0)  # (original sequence, mismatch count)
+            if self.mismatches > 0:
+                for i in range(len(seq)):
+                    for base in 'ACGTN':
+                        if base != seq[i]:
+                            variant = seq[:i] + base + seq[i+1:]
+                            if variant not in lookup:
+                                lookup[variant] = (seq, 1)
+        return lookup
+
+    @lru_cache(maxsize=1024)
+    def _reverse_complement(self, sequence: str) -> str:
+        """Cached reverse complement computation"""
+        return reverse_complement(sequence)
+
+    def find_matches(self, sequence: str) -> List[Dict]:
+        """
+        Find all matching barcodes in a sequence
+        Returns list of matches with positions and orientations
+        """
+        matches = []
+        seq_len = len(sequence)
+        
+        for whitelist_key, matcher in self.matchers.items():
+            barcode_len = matcher['length']
+            
+            # Scan sequence for matches in both orientations
+            for start in range(seq_len - barcode_len + 1):
+                candidate = sequence[start:start + barcode_len]
+                
+                # Check forward orientation
+                match = self._check_match(candidate, matcher, whitelist_key, 'forward')
+                if match:
+                    matches.append({
+                        'barcode': match[0],
+                        'whitelist': whitelist_key,
+                        'orientation': 'forward',
+                        'start': start + 1,  # 1-based position
+                        'end': start + barcode_len,
+                        'mismatches': match[1]
+                    })
+                
+                # Check reverse orientation
+                rev_candidate = self._reverse_complement(candidate)
+                match = self._check_match(rev_candidate, matcher, whitelist_key, 'reverse')
+                if match:
+                    matches.append({
+                        'barcode': match[0],
+                        'whitelist': whitelist_key,
+                        'orientation': 'reverse',
+                        'start': start + 1,
+                        'end': start + barcode_len,
+                        'mismatches': match[1]
+                    })
+        
+        return sorted(matches, key=lambda x: x['start'])
+
+    def _check_match(self, candidate: str, matcher: Dict, whitelist: str, orientation: str) -> Tuple[str, int]:
+        """Check if candidate matches any barcode in the matcher"""
+        if candidate in matcher['exact']:
+            return (candidate, 0)
+        if self.mismatches > 0 and matcher['mismatch'] and candidate in matcher['mismatch']:
+            return matcher['mismatch'][candidate]
+        return None
+
 @log_errors
-def process_read_pair_batches(
-    fastq_info: List[Dict],
-    batch_size: int = 10000,
-    output_handler: Optional[str] = None,
-    num_workers: int = None,
-    barcodes: Dict = None
-) -> Dict[str, int]:
+def process_read_batch(read_batch: List[Tuple], 
+                       verbose: bool = False, 
+                       matcher: BarcodeMatcherOptimized = None) -> List[Dict]:
     """
-    Process paired-end FASTQ files with improved parallel and memory-efficient processing.
-    
-    Args:
-        fastq_info (List[Dict]): FASTQ file information
-        batch_size (int): Number of read pairs per batch
-        output_handler (str, optional): Output handling method
-        num_workers (int, optional): Number of parallel processing workers
-        barcodes (Dict, optional): Barcode information
-    
-    Returns:
-        Dict[str, int]: Barcode count distribution
+    Process a batch of reads efficiently
     """
     logger = logging.getLogger('scarecrow')
-
-    # Use all available CPU cores if not specified
-    if num_workers is None:
-        num_workers = mp.cpu_count()
+    results = []
     
-    # Prepare chunk arguments for parallel processing
-    chunk_args = (list(fastq_info[0].keys())[0],
-                  list(fastq_info[1].keys())[0],
-                  batch_size, barcodes,
-                  fastq_info[0]['strand'],
-                  fastq_info[1]['strand']
+    for read1, read2 in read_batch:
+        read_pair_info = {
+            'read1': {
+                'header': read1.name,
+                'regions': matcher.find_matches(read1.sequence)
+            },
+            'read2': {
+                'header': read2.name,
+                'regions': matcher.find_matches(read2.sequence)
+            }
+        }
+        results.append(read_pair_info)
+        if verbose:
+            logger.info(f"Read 1\t{read1.name}\n{read1.sequence}\n{read_pair_info['read1']['regions']}")
+            logger.info(f"Read 2\t{read2.name}\n{read2.sequence}\n{read_pair_info['read2']['regions']}")
+    
+    return results
+
+@log_errors
+def run_seed(
+    fastqs: List[str],
+    strands: List[str],
+    barcodes: List[str],
+    output_file: str,
+    batches: int = 10000,
+    threads: int = 4,
+    verbose: bool = False
+) -> None:
+    """
+    Optimized implementation of seed functionality
+    """
+    # Setup logging
+    logfile = f'./scarecrow_seed_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"logfile: '{logfile}'")
+
+    # Parse barcode whitelists
+    expected_barcodes = parse_seed_arguments(barcodes)
+    
+    # Initialize optimized matcher
+    matcher = BarcodeMatcherOptimized(
+        barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
+        mismatches=1
     )
     
-    barcode_counts = {}
-    total_read_pairs = 0
-    
-    try:
-        # Parallel processing of FASTQ chunks
-        with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            # Submit chunk processing
-            future = executor.submit(process_fastq_chunk, chunk_args)
+    # Process files with minimal overhead
+    with pysam.FastxFile(fastqs[0]) as r1, \
+         pysam.FastxFile(fastqs[1]) as r2, \
+         open(output_file, 'w') as out_csv:
+        
+        # Write header
+        out_csv.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
+        
+        # Create batches efficiently
+        read_pairs = zip(r1, r2)
+        current_batch = []
+        
+        for reads in read_pairs:
+            current_batch.append(reads)
             
-            # Process results
-            batches = future.result()
-            
-            # Progress tracking
-            for batch in track(batches, total = len(batches)):
-                for read_pair in batch:
-                    try:
-                        write_barcodes_CSV(read_pair, output_handler)
-                    
-                    except Exception as e:
-                        logger.error(f"Error processing read pair: {e}")
+            if len(current_batch) >= batches:
+
+                # Process batch
+                results = process_read_batch(current_batch, verbose, matcher)
                 
-                total_read_pairs += len(batch)
-
-        return barcode_counts
-    
-    except Exception as e:
-        logger.error(f"Processing failed: {e}")
-        raise
-
-@log_errors
-def process_fastq_chunk(chunk_args):
-    """
-    Process a chunk of FASTQ files with improved parallel processing.
-    
-    Args:
-        chunk_args (tuple): Contains:
-            - r1_file_path (str): Path to Read 1 FASTQ file
-            - r2_file_path (str): Path to Read 2 FASTQ file
-            - batch_size (int): Number of read pairs per batch
-            - barcodes (Optional[Dict]): Barcode information
-            - r1_strand (str): Strand information for Read 1
-            - r2_strand (str): Strand information for Read 2
-    
-    Returns:
-        List[Dict]: Processed batches of read pair information
-    """
-    logfile = '{}_{}.{}'.format('./scarecrow_seed_barcodes', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: ${logfile}")
-
-    # Chunk arguments
-    r1_file_path, r2_file_path, batch_size, barcodes, r1_strand, r2_strand = chunk_args
-    
-    # Test if fastq files exist
-    if os.path.exists(r1_file_path) is False:
-        logger.warning(f"File not found: {r1_file_path}")        
-        raise RuntimeError(f"File not found: {r1_file_path}")
-    if os.path.exists(r2_file_path) is False:
-        logger.warning(f"File not found: {r2_file_path}")
-        raise RuntimeError(f"File not found: {r2_file_path}")
-    
-    processed_batches = []   
-    try:
-        reads = count_fastq_reads(r1_file_path)
-        logger.info(f"Number of read pairs: {reads}")
-        with pysam.FastxFile(r1_file_path) as r1_fastq, pysam.FastxFile(r2_file_path) as r2_fastq:
-
-            batch = []
-            batch_count = 0
-
-            while True:
-
-                for r1_entry, r2_entry in track(zip(r1_fastq, r2_fastq), description="Processing FastQ files", total=reads):
-                                   
-                    # Barcode or region extraction
-                    r1_region_details = extract_barcodes(r1_entry, rev = False, expected_barcodes = barcodes)                    
-                    r2_region_details = extract_barcodes(r2_entry, rev = True, expected_barcodes = barcodes)
-                    
-                    # Combine pair information
-                    read_pair_info = {
-                        'read1': {
-                            'file': os.path.basename(r1_file_path),
-                            'strand': r1_strand,
-                            'header': r1_entry.name,
-                            'regions': r1_region_details
-                        },
-                        'read2': {
-                            'file': os.path.basename(r2_file_path),
-                            'strand': r2_strand,
-                            'header': r2_entry.name,
-                            'regions': r2_region_details
-                        }
-                    }
-                    
-                    batch.append(read_pair_info)          
-                    
-                    # Yield batch when full
-                    if len(batch) >= batch_size:
-                        processed_batches.append(batch)
-                        batch = []
-                        batch_count += 1
-                        
-                # Yield final batch if not empty
-                if batch:
-                    processed_batches.append(batch)
-
-                # Move onto next read
-                try:
-                    r1_entry = next(r1_fastq)
-                    r2_entry = next(r2_fastq)
-                except StopIteration:
-                    break
-        
-        return processed_batches
-    
-    except IOError as e:
-        logger.error(f"File reading error: {e}")
-        raise FastqProcessingError(f"Unable to process FASTQ files: {e}")
-
-
-@log_errors
-def extract_barcodes(
-    entry: pysam.FastxRecord,
-    rev: bool = False,
-    expected_barcodes: Optional[Union[Dict[str, List[str]], List[str]]] = None
-) -> List[Dict]:
-    """
-    Extract either specific regions or find barcodes in a sequence.
-    
-    Args:
-        entry (pysam.FastxRecord): Input sequencing read
-        regions (Optional[List[RegionCoordinate]]): Regions to extract coordinates
-        expected_barcodes (Optional[Union[Dict[str, List[str]], List[str]]]): 
-            Barcodes to cross-reference
-        rev (bool): Whether to reverse the sequence
-    
-    Returns:
-        List[Dict]: Extracted region or barcode details
-    
-    Raises:
-        ValueError: If neither regions nor barcodes are provided
-    """
-    logger = logging.getLogger('scarecrow')
-
-    try:
-        # Validate input
-        if expected_barcodes is None:
-            raise ValueError("Must provide whitelist of barcodes to search")
-        
-        # Prepare sequence
-        full_sequence = entry.sequence
+                # Write results
+                for result in results:
+                    write_batch_results(result, out_csv)
                 
-        # Find barcodes
-        # Prepare variables to track dictionary keys
-        barcode_dict_keys = {}
-        if isinstance(expected_barcodes, dict):
-            # Create a reverse mapping of barcodes to their original dictionary keys
-            barcode_dict_keys = {}
-            for key, barcode_list in expected_barcodes.items():
-                for barcode in barcode_list:
-                    if barcode not in barcode_dict_keys:
-                        barcode_dict_keys[barcode] = []
-                    barcode_dict_keys[barcode].append(key)
-            
-            # Flatten barcodes for searching
-            barcodes_to_search = list(barcode_dict_keys.keys())
-        elif isinstance(expected_barcodes, list):
-            barcodes_to_search = expected_barcodes
-        else:
-            raise ValueError(f"Unexpected barcode type: {type(expected_barcodes)}")
+                current_batch = []
         
-        # Find barcode positions
-        barcode_matches = find_barcode_positions(full_sequence, barcodes_to_search)
+        # Process remaining reads
+        if current_batch:
+            results = process_read_batch(current_batch, verbose, matcher)
+            for result in results:
+                write_batch_results(result, out_csv)
 
-        logger.info(f">{entry.name} {entry.comment}")
-        logger.info(f"{full_sequence}")
-        
-        # Prepare barcode match details
-        barcode_details = []
-        for match in barcode_matches:
-            barcode_detail = {
-                'barcode': match['barcode'],
-                'orientation': match['orientation'],
-                'sequence': match['sequence'],
-                'start': match['start'],
-                'end': match['end'],
-                'mismatches': match['mismatches']
-            }
-            
-            # Add all matching dictionary keys if available
-            if barcode_dict_keys and match['barcode'] in barcode_dict_keys:
-                barcode_detail['dict_keys'] = barcode_dict_keys[match['barcode']]
-            elif barcode_dict_keys and reverse_complement(match['barcode']) in barcode_dict_keys:
-                barcode_detail['dict_keys'] = barcode_dict_keys[reverse_complement(match['barcode'])]
-            else:
-                barcode_detail['dict_keys'] = []
-
-            
-            barcode_details.append(barcode_detail)
-            
-            logger.info(f"...{barcode_detail['dict_keys']} ({match['barcode']}) hit: {match['sequence']}, "
-                    f"Orientation: {match['orientation']}, "
-                    f"Start: {match['start']}, "
-                    f"End: {match['end']}, "
-                    f"Mismatches: {match['mismatches']}")
-
-        
-        return barcode_details
-            
-    except Exception as e:
-        logger.error(f"Error in extract_region_details: {e}")
-        raise
-
-@log_errors
-def find_barcode_positions(sequence, barcodes, max_mismatches=1):
+def write_batch_results(read_pair: Dict, output_handler) -> None:
     """
-    Find all positions of barcodes in a sequence with tolerance for mismatches.
-    
-    Args:
-        sequence (str): The input DNA sequence to search
-        barcodes (List[str]): List of expected barcode sequences
-        max_mismatches (int): Maximum allowed mismatches when matching barcodes
-    
-    Returns:
-        List[Dict]: A list of dictionaries with details of all barcode matches
+    Write batch results to output file efficiently
     """
-    logger = logging.getLogger('scarecrow')
-
-    def hamming_distance(s1, s2):
-        """Calculate Hamming distance between two strings."""
-        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-    
-    # List to store all barcode matches
-    barcode_matches = []
-    orientations = ['forward', 'reverse']
-    
-    # Iterate through all possible start positions
-    for start in range(len(sequence)):
-        for barcode in barcodes:
-            for orientation in orientations:
-                # reverse complement barcode if testing reverse strand
-                if orientation == 'reverse':
-                    barcode = reverse_complement(barcode)
-                # Check all possible end positions for this barcode
-                # Deduct 1 from barcode length when adding to start position so that
-                # the extracted sequence is correct length
-                for end in range(start + len(barcode)-1, len(sequence)+1):
-                    candidate = sequence[start:end]
-                    # Check if candidate matches barcode within max mismatches
-                    if len(candidate) == len(barcode):
-                        #logger.info(f"query range:{start}:{end}\tcandidate:{candidate}\tbarcode:{barcode}")
-                        mismatches = hamming_distance(candidate, barcode)
-                        if mismatches <= max_mismatches:
-                            match_details = {
-                                'barcode': barcode,
-                                'orientation': orientation,
-                                'sequence': candidate,
-                                'start': start + 1, # for 1-based start
-                                'end': end,
-                                'mismatches': mismatches
-                            }
-                            barcode_matches.append(match_details)
-    
-    # Sort matches by start position
-    barcode_matches.sort(key=lambda x: x['start'])
-    
-    return barcode_matches
-
-@log_errors
-def write_barcodes_CSV(read_pair: List, output_handler):
-    """
-    Write barcodes found to CSV file.
-    
-    Args:
-        read_key (List): List of barcodes found in read pairs
-        output_file (str): Output file path
-    """
-    logger = logging.getLogger('scarecrow')
-
     for read_key in ['read1', 'read2']:
-    # Get barcodes for current read
-        read_barcodes = read_pair.get(read_key, {}).get('regions', [])
-        read = read_pair.get(read_key, {}).get('header', str)
-        for sub_barcode in read_barcodes:
-            bc = sub_barcode['dict_keys']
-            barcode = sub_barcode['barcode']
-            orientation = sub_barcode['orientation']
-            start = sub_barcode['start']
-            end = sub_barcode['end']
-            mm = sub_barcode['mismatches']
-            output_handler.write(f"{read_key}\t{read}\t{bc}\t{barcode}\t{orientation}\t{start}\t{end}\t{mm}\n")
+        read_info = read_pair[read_key]
+        header = read_info['header']
+        
+        for region in read_info['regions']:
+            output_handler.write(
+                f"{read_key}\t{header}\t{region['whitelist']}\t{region['barcode']}\t"
+                f"{region['orientation']}\t{region['start']}\t{region['end']}\t{region['mismatches']}\n"
+            )
