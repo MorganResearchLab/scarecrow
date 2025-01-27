@@ -8,9 +8,18 @@ A toolkit for preprocessing single cell sequencing data.
 
 * Error handling implementing to capture missing or incorrect parameters, and unexpected file content
 * Peaks in between barcodes need further investigation
+* Write function to identify linker sequence positions from base counts across a subset of reads
+*   - integrate into scarerow harvest
+*   - this is to support distance selection (scarecrow reap§)
+* Write tool to output barcode position distributions for subset of reads
+*   - this is to support jitter selection (scarecrow reap§)
+* Write report tool to process fastq from scarecrow reap
+*   - count valid barcodes, perfect matches, barcode position distributions
 * Benchmark different assays (SPLiTseq, Parse, 10X) and methods (split-pipe, scarecrow, UMI tools)
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
+* Test alignment with kallisto and STAR
+*    - may need to alter sequence header formatting depending on what is retained in BAM file
 
 
 ## Environment
@@ -116,8 +125,27 @@ FILES=(./results/barcodes_BC*csv)
 scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 --out barcode_positions.csv
 
 time scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
-    -j 5 -m 1 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 1
+    -j 2 -m 2 -q 30 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 4
 
 scarecrow tally -f ./cDNA.fq
 
 ```
+
+FQ=cDNA.fq
+grep "^@" ${FQ} | grep -v "null" | cut -d' ' -f4 |
+    awk -F'[=_]' '
+        {
+            first[$2]++
+            second[$3]++
+            third[$4]++
+        }
+        END {
+            print "First number counts:"
+            for (num in first) print num, first[num]
+            print "\nSecond number counts:"
+            for (num in second) print num, second[num]
+            print "\nThird number counts:"
+            for (num in third) print num, third[num]
+        }' 
+
+
