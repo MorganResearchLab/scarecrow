@@ -8,13 +8,7 @@ A toolkit for preprocessing single cell sequencing data.
 
 * Error handling implementing to capture missing or incorrect parameters, and unexpected file content
 * Peaks in between barcodes need further investigation
-* Write function to identify linker sequence positions from base counts across a subset of reads
-*   - integrate into scarerow harvest
-*   - this is to support distance selection (scarecrow reap§)
-* Write tool to output barcode position distributions for subset of reads
-*   - this is to support jitter selection (scarecrow reap§)
-* Write report tool to process fastq from scarecrow reap
-*   - count valid barcodes, perfect matches, barcode position distributions
+* Edit harvest to accept frequencies tsv file to mask barcode peaks in those regions
 * Benchmark different assays (SPLiTseq, Parse, 10X) and methods (split-pipe, scarecrow, UMI tools)
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
@@ -104,7 +98,8 @@ scarecrow reap --fastqs ${R1} ${R2} -p ${OUTDIR}/barcode_positions.csv \
     -j 5 -m 1 --barcodes ${BARCODES[@]} --read1 0-64 --out ./cDNA.fq.gz  
 ```
 
-To process 150M read pairs with `scarecrow reap` takes around 90 mins, requires 1 core and ~ 200 MB RAM.
+
+
 
 
 
@@ -112,9 +107,9 @@ To process 150M read pairs with `scarecrow reap` takes around 90 mins, requires 
 ```bash
 R1=100K_1.fastq
 R2=100K_2.fastq
-BARCODES=("BC1:R1_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_n123_R1_v3_5.barcodes"
-    "BC2:v1:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_v1.barcodes"
-    "BC3:R3_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_R3_v3.barcodes")
+BARCODES=(BC1:R1_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_n123_R1_v3_5.barcodes
+          BC2:v1:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_v1.barcodes
+          BC3:R3_v3:/Users/s14dw4/Documents/scarecrow_test/barcodes/bc_data_R3_v3.barcodes)
 for BARCODE in ${BARCODES[@]}
 do
     scarecrow seed --fastqs ${R1} ${R2} --strands pos neg \
@@ -131,21 +126,84 @@ scarecrow tally -f ./cDNA.fq
 
 ```
 
-FQ=cDNA.fq
-grep "^@" ${FQ} | grep -v "null" | cut -d' ' -f4 |
-    awk -F'[=_]' '
-        {
-            first[$2]++
-            second[$3]++
-            third[$4]++
-        }
-        END {
-            print "First number counts:"
-            for (num in first) print num, first[num]
-            print "\nSecond number counts:"
-            for (num in second) print num, second[num]
-            print "\nThird number counts:"
-            for (num in third) print num, third[num]
-        }' 
+Details on RG tags:
+https://github.com/samtools/hts-specs
+https://github.com/samtools/hts-specs/blob/master/SAMtags.pdf
+https://www.biostars.org/p/9593008/
 
+```python
+import pysam
 
+def add_tags_to_sam(input_sam, output_sam):
+    with pysam.AlignmentFile(input_sam, "r") as infile, pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+        for read in infile:
+            # Extract the sequence header
+            fastq_header = read.query_name
+            
+            # Parse the barcodes and UMI from the FASTQ header
+            # Example header: "@LH00509:177:22W5HTLT3:1:1101:46251:1000 1:N:0:CAGATCAC+ATGTGAAG barcodes=TCTGATCC_GAACAGGC_ATCCTGTA positions=51_31_11 mismatches=0_0_0 UMI=NGAACTGAGT"
+            try:
+                details = fastq_header.split(" ")
+                attributes = {item.split("=")[0]: item.split("=")[1] for item in details if "=" in item}
+                
+                # Add the CB and ZU tags if available
+                if "barcodes" in attributes:
+                    read.set_tag("CB", attributes["barcodes"], value_type="Z")
+                if "UMI" in attributes:
+                    read.set_tag("ZU", attributes["UMI"], value_type="Z")
+            except Exception as e:
+                print(f"Failed to parse header for read {fastq_header}: {e}")
+
+            # Write the updated read to the output SAM file
+            outfile.write(read)
+
+# Input and output SAM file paths
+input_sam = "input.sam"
+output_sam = "output.sam"
+
+add_tags_to_sam(input_sam, output_sam)
+```
+
+More efficient approach, which may require a lot of RAM
+
+```python
+import pysam
+
+def preprocess_fastq_headers(fastq_file):
+    """Preprocess FASTQ headers to create a mapping of read names to tags."""
+    read_tags = {}
+    with open(fastq_file, "r") as fq:
+        for line in fq:
+            if line.startswith("@"):
+                # Extract the read name and tags
+                fastq_header = line.strip()
+                read_name = fastq_header.split(" ")[0][1:]  # Remove "@" and split to get the read name
+                attributes = {item.split("=")[0]: item.split("=")[1] for item in fastq_header.split() if "=" in item}
+                
+                # Store barcodes and UMI if they exist
+                barcodes = attributes.get("barcodes", None)
+                umi = attributes.get("UMI", None)
+                read_tags[read_name] = {"CB": barcodes, "ZU": umi}
+    return read_tags
+
+def add_tags_to_sam(input_sam, output_sam, read_tags):
+    """Add tags to SAM file based on the preprocessed FASTQ headers."""
+    with pysam.AlignmentFile(input_sam, "r") as infile, pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+        for read in infile:
+            if read.query_name in read_tags:
+                tags = read_tags[read.query_name]
+                if tags["CB"]:
+                    read.set_tag("CB", tags["CB"], value_type="Z")
+                if tags["ZU"]:
+                    read.set_tag("ZU", tags["ZU"], value_type="Z")
+            outfile.write(read)
+
+# Paths to the input files
+fastq_file = "input.fastq"
+input_sam = "input.sam"
+output_sam = "output.sam"
+
+# Preprocess FASTQ headers and add tags
+read_tags = preprocess_fastq_headers(fastq_file)
+add_tags_to_sam(input_sam, output_sam, read_tags)
+```

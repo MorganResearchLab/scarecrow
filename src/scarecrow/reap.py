@@ -343,6 +343,7 @@ def process_read_batch(read_batch: List[Tuple],
     """
     logger = logging.getLogger('scarecrow')
     output_entries = []
+    read_count = len(read_batch) # Count reads in this batch
     
     for reads in read_batch:
         barcodes = []
@@ -401,7 +402,7 @@ def process_read_batch(read_batch: List[Tuple],
         output_entries.append(f"{header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
 
-    return output_entries
+    return output_entries, read_count
 
 @log_errors
 def extract_sequences(
@@ -463,11 +464,14 @@ def extract_sequences(
 
     # List of files generated
     files = []
+    total_reads = 0 # Initialize total read counter
 
     def write_and_clear_results(jobs):
         """Retrieve results from completed jobs, write to file, and free memory."""
+        nonlocal total_reads  # Access the outer scope counter
         for idx, job in enumerate(jobs):
-            results = job.get()
+            results, batch_count = job.get()
+            total_reads += batch_count  # Update total count
             outfile = output + "_" + str(idx)
             if outfile not in files:
                 files.append(outfile)
@@ -534,6 +538,10 @@ def extract_sequences(
     logger.info(f"Combining results: {files}")
     combine_results_chunked(files, output)
 
+    # Log final count
+    logger.info(f"Total reads processed: {total_reads}")
+
+
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """
@@ -571,4 +579,5 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
     } for idx, row in positions.iterrows()]
 
 def worker_task(args):
-    return process_read_batch(*args)
+    entries, count = process_read_batch(*args)
+    return entries, count
