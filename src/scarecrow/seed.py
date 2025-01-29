@@ -234,47 +234,47 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
         help="Pair of FASTQ files")
     subparser.add_argument(
         "-s", "--strands", 
-        metavar="strands",
+        metavar="<string>",
         nargs="+", 
         default=['pos', 'neg'],
         help="Orientations of FASTQ files (e.g. pos neg)")
     subparser.add_argument(
         "-c", "--barcodes",
-        metavar="barcodes",
+        metavar="<string>",
         nargs='+', 
-        help='Barcode whitelist files in format <name>:<whitelist>:<file> (e.g. BC1:v1:barcodes1.txt BC2:n198:barcodes2.txt)',
+        help='Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt BC2:v2:barcodes2.txt ...)',
     )
     subparser.add_argument(
         "-o", "--out",
-        metavar="out",
-        help=("CSV file to write barcode counts to"),
+        metavar="<file>",
+        help=("CSV file to write barcode counts to, also serves as prefix for conserved.tsv and frequencies.tsv files."),
         type=str,
         default="./barcode_counts.csv",
     )
     subparser.add_argument(
         "-b", "--batch_size",
-        metavar="batch_size",
+        metavar="<int>",
         help=("Number of read pairs per batch to process at a time [10000]"),
         type=int,
         default=10000,
     )
     subparser.add_argument(
         "-l", "--linker_base_frequency",
-        metavar="linker_base_frequency",
+        metavar="<float>",
         help=("Nucleotide frequency indicative of linker (fixed) sequence [0.75]"),
         type=float,
         default=0.75,
     )
     subparser.add_argument(
         "-m", "--linker_min_length",
-        metavar="linker_min_length",
+        metavar="<int>",
         help=("Minimum run of bases exceeding linker_base_frequency to suggest linker sequence [10]"),
         type=int,
         default=10,
     )
     subparser.add_argument(
         "-@", "--threads",
-        metavar="threads",
+        metavar="<int>",
         help=("Number of processing threads [4]"),
         type=int,
         default=4,

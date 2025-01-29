@@ -29,7 +29,7 @@ scarecrow tally --fastq cdna.fastq.gz
     )
     subparser.add_argument(
         "-f", "--fastq",
-        metavar="fastq",
+        metavar="<file>",
         help=("Fastq file as output by scarecrow reap"),
         type=str,
         default=[],
