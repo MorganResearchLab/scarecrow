@@ -7,7 +7,7 @@
 from argparse import RawTextHelpFormatter
 import logging
 import os
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
@@ -18,27 +18,66 @@ from functools import lru_cache
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
+class ConservedRegion:
+    """Represents a conserved region in a read sequence"""
+    def __init__(self, read: str, start: int, end: int, sequence: str, median_frequency: float):
+        self.read = read
+        self.start = start
+        self.end = end
+        self.sequence = sequence
+        self.median_frequency = median_frequency
+
+    def __repr__(self) -> str:
+        return f"ConservedRegion(read={self.read}, start={self.start}, end={self.end})"
 
 class PeakAnalyzer:
     """Efficient peak analysis with caching and optimized computations"""
     
-    def __init__(self, min_distance: int = 10):
+    def __init__(self, min_distance: int = 10, conserved_regions: Optional[List[ConservedRegion]] = None):
         self.min_distance = min_distance
         self._peak_cache = {}
+        self.conserved_regions = conserved_regions or []
+    
+    @classmethod
+    def from_conserved_file(cls, min_distance: int, conserved_file: Optional[str] = None) -> 'PeakAnalyzer':
+        """Create PeakAnalyzer instance with conserved regions loaded from file"""
+        conserved_regions = []
+        if conserved_file:
+            df = pd.read_csv(conserved_file, sep='\t')
+            conserved_regions = [
+                ConservedRegion(
+                    read=row['read'],
+                    start=row['start'],
+                    end=row['end'],
+                    sequence=row['sequence'],
+                    median_frequency=row['median_frequency']
+                )
+                for _, row in df.iterrows()
+            ]
+        return cls(min_distance=min_distance, conserved_regions=conserved_regions)
     
     @lru_cache(maxsize=128)
     def _compute_position_counts(self, positions: Tuple[int]) -> pd.Series:
         """Cached computation of position counts"""
         return pd.Series(positions).value_counts().sort_index()
     
+    def _overlaps_conserved_region(self, read: str, start: int, end: int) -> bool:
+        """Check if a peak overlaps with any conserved region"""
+        for region in self.conserved_regions:
+            if (region.read == read and 
+                not (end < region.start or start > region.end)):
+                return True
+        return False
+
     def find_peaks_optimized(self, 
                            start_positions: np.ndarray, 
                            end_positions: np.ndarray, 
                            names: np.ndarray,
-                           barcodes: np.ndarray) -> List[Tuple]:
-        """Optimized peak finding with cached computations"""
+                           barcodes: np.ndarray,
+                           read: str) -> List[Tuple]:
+        """Optimized peak finding with cached computations and conserved region filtering"""
         # Create cache key
-        cache_key = hash((tuple(start_positions), tuple(end_positions)))
+        cache_key = hash((tuple(start_positions), tuple(end_positions), read))
         if cache_key in self._peak_cache:
             return self._peak_cache[cache_key]
 
@@ -63,6 +102,10 @@ class PeakAnalyzer:
             peak_names = names[mask]
             peak_barcodes = barcodes[mask]
             end = end_positions[mask][0]
+            
+            # Skip peaks that overlap with conserved regions
+            if self._overlaps_conserved_region(read, start, end):
+                continue
             
             # Vectorized operations for peak statistics
             peak_unique_names = len(np.unique(peak_names))
@@ -135,8 +178,8 @@ class OptimizedPlotter:
 class HarvestOptimizer:
     """Main class for optimized barcode harvesting"""
     
-    def __init__(self, min_distance: int = 10):
-        self.peak_analyzer = PeakAnalyzer(min_distance)
+    def __init__(self, min_distance: int = 10, conserved_file: Optional[str] = None):
+        self.peak_analyzer = PeakAnalyzer.from_conserved_file(min_distance, conserved_file)
         self.plotter = OptimizedPlotter()
         self.logger = logging.getLogger('scarecrow')
     
@@ -157,9 +200,9 @@ class HarvestOptimizer:
         # Process peaks efficiently
         results = self._get_barcode_peaks(barcode_data)
         return self._select_top_peaks(results, num_barcodes, min_distance)
-    
+
     def _get_barcode_peaks(self, barcode_data: pd.DataFrame) -> List[Dict]:
-        """Optimized peak detection"""
+        """Optimized peak detection with conserved region filtering"""
         results = []
         
         # Group data efficiently
@@ -172,7 +215,9 @@ class HarvestOptimizer:
             names_arr = group['name'].values
             barcodes_arr = group['barcode'].values
             
-            peaks = self.peak_analyzer.find_peaks_optimized(start_arr, end_arr, names_arr, barcodes_arr)
+            peaks = self.peak_analyzer.find_peaks_optimized(
+                start_arr, end_arr, names_arr, barcodes_arr, read
+            )
             
             results.append({
                 'read': read,
@@ -192,7 +237,7 @@ class HarvestOptimizer:
         # Sort efficiently using key function
         results.sort(key=lambda x: max((p['read_count'] for p in x['peaks']), default=0), reverse=True)
         return results
-    
+
     def _select_top_peaks(self, 
                          results: List[Dict], 
                          num_barcodes: int, 
@@ -277,19 +322,28 @@ scarecrow harveset BC1.csv BC2.csv BC3.csv --barcode_count 3 --min_distance 10
         type=int,
         default=10,
     )
+    subparser.add_argument(
+        "-c", "--conserved",
+        metavar="conserved_tsv",
+        help=("Path to TSV file containing conserved regions to exclude"),
+        type=str,
+        default=None,
+    )
     return subparser
 
 def validate_harvest_args(parser, args):
     run_harvest(barcodes = args.barcodes,
                 output_file = args.out,
                 num_barcodes = args.barcode_count,
-                min_distance = args.min_distance)
+                min_distance = args.min_distance,
+                conserved_file=args.conserved)
     
 @log_errors
 def run_harvest(barcodes: List[str],
                 output_file: str,
                 num_barcodes: int = 3,
-                min_distance: int = 10) -> None:
+                min_distance: int = 10,
+                conserved_file: Optional[str] = None) -> None:
     """
     Optimized main function for harvesting barcode positions
     """
@@ -299,11 +353,27 @@ def run_harvest(barcodes: List[str],
     logger.info(f"logfile: '{logfile}'")
     
     # Initialize optimizer
-    optimizer = HarvestOptimizer(min_distance)
+    optimizer = HarvestOptimizer(min_distance, conserved_file)
     
     # Process data
     results = optimizer.process_barcode_data(barcodes, num_barcodes, min_distance)
     logger.info(f"Peaks (n = {num_barcodes}) identified:\n{results}")
+
+        # Load conserved regions for plotting if file exists
+    conserved_regions = None
+    if conserved_file:
+        logger.info(f"Excluded peaks overlapping with conserved regions from: {conserved_file}")
+        df = pd.read_csv(conserved_file, sep='\t')
+        conserved_regions = [
+            ConservedRegion(
+                read=row['read'],
+                start=row['start'],
+                end=row['end'],
+                sequence=row['sequence'],
+                median_frequency=row['median_frequency']
+            )
+            for _, row in df.iterrows()
+        ]
 
     # Generate output
     if output_file:
@@ -311,23 +381,27 @@ def run_harvest(barcodes: List[str],
     
     # Generate plot with optimized settings
     pngfile = f'./scarecrow_harvest_{generate_random_string()}.png'
-    plot_peaks_optimized(pd.concat([pd.read_csv(f, sep='\t') for f in barcodes], ignore_index=True), 
-                        outfile=pngfile)
+    plot_peaks_optimized(
+        pd.concat([pd.read_csv(f, sep = '\t') for f in barcodes], ignore_index = True), 
+        outfile = pngfile,
+        conserved_regions = conserved_regions
+    )
     
     return results
 
 @log_errors
 def plot_peaks_optimized(barcode_data: pd.DataFrame, 
                         outfile: str = 'plot_faceted.png',
-                        dpi: int = 300) -> None:
-    """Optimized plotting function"""
+                        dpi: int = 300,
+                        conserved_regions: Optional[List[ConservedRegion]] = None) -> None:
+    """Optimized plotting function with conserved region highlighting"""
     logger = logging.getLogger('scarecrow')
 
     plotter = OptimizedPlotter()
     
     # Calculate ylim efficiently
     max_count = barcode_data.groupby(['read', 'orientation', 'barcode_whitelist'])['start'].value_counts().max()
-    ylim = (0, max_count)
+    ylim = (0, max_count * 1.2)  # Add 20% padding for conserved region labels
     
     # Create plots efficiently using matplotlib's background renderer
     plt.switch_backend('Agg')
@@ -335,10 +409,39 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
     # Generate plots for forward and reverse orientations
     forward_data = barcode_data[barcode_data['orientation'] == 'forward']
     reverse_data = barcode_data[barcode_data['orientation'] == 'reverse']
-    
+
+    def _add_conserved_regions(ax, data, ylim):
+        """Helper function to add conserved region highlighting"""
+        if conserved_regions:
+            read = data['read'].iloc[0] if not data.empty else None
+            if read:
+                for region in conserved_regions:
+                    # Add shaded region
+                    ax.axvspan(region.start, region.end, 
+                                alpha=0.2, 
+                                color='red', 
+                                label='Conserved Region')
+                    
+                    # Add label at the top
+                    y_pos = ylim[1] * 0.95
+                    x_pos = (region.start + region.end) / 2
+                    ax.text(x_pos, y_pos, 
+                            f'Conserved\n{region.start}-{region.end}',
+                            horizontalalignment='center',
+                            verticalalignment='top',
+                            color='red',
+                            fontsize=8)
+
     g1 = plotter._create_facet_plot(forward_data, ylim)
     g2 = plotter._create_facet_plot(reverse_data, ylim)
     
+    # Add conserved regions to each subplot
+    for g in [g1, g2]:
+        for ax in g.axes.flat:
+            if hasattr(ax, 'texts') and ax.texts:  # Check if subplot is active
+                data = forward_data if g == g1 else reverse_data
+                _add_conserved_regions(ax, data, ylim)
+
     # Save temporary files with optimized compression
     temp_forward = f'{outfile}.f.png'
     temp_reverse = f'{outfile}.r.png'
@@ -364,4 +467,4 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
     fig.tight_layout(pad=0)
     plt.savefig(outfile, dpi=dpi, bbox_inches='tight')
     plt.close()
-    logger.info(f"barcode count distribution: {outfile}")
+    logger.info(f"barcode count distribution with conserved regions: {outfile}")
