@@ -72,20 +72,15 @@ def run_tally(fastq: str = None,
     logger.info(f"Prcoessing fastq sequence headers, this may take a while")
     barcode_counts, cell_barcodes = process_fastq_headers(fastq)
 
-    # Count complete barcodes
-    #total_sequences, complete_barcode_count = count_complete_barcodes(fastq)
-    #logger.info(f"Total sequences processed: {total_sequences}")
-    #logger.info(f"Sequences with complete barcodes: {complete_barcode_count} ({(complete_barcode_count/total_sequences*100):.2f}%)")
-
-    # Count mismatch sums
-    mismatch_counts = count_mismatch_sums(fastq)
+    # Report barcode metrics summary
+    mismatch_counts, sequence_counts = count_mismatch_sums(fastq)
     if verbose:
         for mismatch_sum, count in sorted(mismatch_counts.items()):
             logger.info(f"Mismatch sum: {mismatch_sum}\tCount: {count}")
-    logger.info(f"Total sequences processed: {sum(mismatch_counts.values())}")
-    #sum(value for key, value in data.items() if key < x)
+    logger.info(f"Total sequences processed: {sequence_counts}")
+    logger.info(f"Sequences with non-null barcodes: {sum(mismatch_counts.values())}")
     valid_total = sum(value for key, value in mismatch_counts.items() if key < mismatches)
-    logger.info(f"Sequences with complete (valid) barcodes: {valid_total}")
+    logger.info(f"Sequences with non-null barcodes and <= {mismatches} mismatches: {valid_total}")
     
     # Save mismatch counts to CSV
     mismatch_df = pd.DataFrame(list(mismatch_counts.items()), 
@@ -171,31 +166,6 @@ def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, 
 
     return barcode_counts, cell_barcodes
 
-def count_complete_barcodes(file_path: str) -> Tuple[int, int]:
-    """
-    Count total sequences and sequences that have no 'null' barcodes.
-    
-    Args:
-        file_path: Path to the fastq file
-    
-    Returns:
-        Tuple of (total sequence count, count of sequences with complete non-null barcodes)
-    """
-    complete_count = 0
-    total_count = 0
-    
-    with pysam.FastxFile(file_path) as fastq_file:
-        for entry in fastq_file:
-            total_count += 1
-            header = entry.comment
-            if 'barcodes=' in header:
-                barcodes_str = re.search(r'barcodes=([\w_]+)', header).group(1)
-                # Check if any barcode is 'null'
-                if 'null' not in barcodes_str.lower():
-                    complete_count += 1
-
-    return total_count, complete_count
-
 def count_mismatch_sums(file_path: str) -> dict:
     """
     Count sequences for each sum of mismatch values.
@@ -207,17 +177,20 @@ def count_mismatch_sums(file_path: str) -> dict:
         Dictionary with mismatch sums as keys and sequence counts as values
     """
     mismatch_counts = defaultdict(int)
-    
+    sequences = 0
     with pysam.FastxFile(file_path) as fastq_file:
         for entry in fastq_file:
             header = entry.comment
-            if 'mismatches=' in header:
-                mismatches_str = re.search(r'mismatches=([\d_]+)', header).group(1)
-                # Convert string of mismatches to sum
-                mismatch_sum = sum(int(x) for x in mismatches_str.split('_'))
-                mismatch_counts[mismatch_sum] += 1
-                
-    return dict(mismatch_counts)
+            if header:
+                sequences += 1
+                if 'null' not in header:
+                    if 'mismatches=' in header:
+                        mismatches_str = re.search(r'mismatches=([\d_]+)', header).group(1)
+                        # Convert string of mismatches to sum
+                        mismatch_sum = sum(int(x) for x in mismatches_str.split('_'))
+                        mismatch_counts[mismatch_sum] += 1
+                    
+    return dict(mismatch_counts), sequences
 
 def count_position_occurrences(file_path: str) -> List[dict]:
     """
