@@ -33,7 +33,14 @@ scarecrow tally --fastq cdna.fastq.gz
         help=("Fastq file as output by scarecrow reap"),
         type=str,
         default=[],
-    )    
+    )
+    subparser.add_argument(
+        "-m", "--mismatches",
+        metavar="<int>",
+        type=int,
+        default=1,
+        help='Number of allowed mismatches in barcode [1]',
+    )
     subparser.add_argument(
         "-v", "--verbose",
         action='store_true',
@@ -46,10 +53,12 @@ def validate_tally_args(parser, args) -> None:
     Validate arguments 
     """
     run_tally(fastq = args.fastq,
+              mismatches = args.mismatches,
               verbose = args.verbose)
 
 @log_errors
 def run_tally(fastq: str = None,
+              mismatches: int = 1,
               verbose: bool = False) -> None:
     """
     Main function to extract sequences with barcode headers
@@ -60,19 +69,23 @@ def run_tally(fastq: str = None,
     logger.info(f"logfile: '{logfile}'")
 
     # Process fastq header
+    logger.info(f"Prcoessing fastq sequence headers, this may take a while")
     barcode_counts, cell_barcodes = process_fastq_headers(fastq)
 
     # Count complete barcodes
-    # Count complete barcodes and total sequences
-    total_sequences, complete_barcode_count = count_complete_barcodes(fastq)
-    logger.info(f"Total sequences processed: {total_sequences}")
-    logger.info(f"Sequences with complete barcodes: {complete_barcode_count} ({(complete_barcode_count/total_sequences*100):.2f}%)")
+    #total_sequences, complete_barcode_count = count_complete_barcodes(fastq)
+    #logger.info(f"Total sequences processed: {total_sequences}")
+    #logger.info(f"Sequences with complete barcodes: {complete_barcode_count} ({(complete_barcode_count/total_sequences*100):.2f}%)")
 
     # Count mismatch sums
     mismatch_counts = count_mismatch_sums(fastq)
     if verbose:
         for mismatch_sum, count in sorted(mismatch_counts.items()):
             logger.info(f"Mismatch sum: {mismatch_sum}\tCount: {count}")
+    logger.info(f"Total sequences processed: {sum(mismatch_counts.values())}")
+    #sum(value for key, value in data.items() if key < x)
+    valid_total = sum(value for key, value in mismatch_counts.items() if key < mismatches)
+    logger.info(f"Sequences with complete (valid) barcodes: {valid_total}")
     
     # Save mismatch counts to CSV
     mismatch_df = pd.DataFrame(list(mismatch_counts.items()), 
