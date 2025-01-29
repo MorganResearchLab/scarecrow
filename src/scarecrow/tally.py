@@ -73,18 +73,18 @@ def run_tally(fastq: str = None,
     barcode_counts, cell_barcodes = process_fastq_headers(fastq)
 
     # Report barcode metrics summary
-    mismatch_counts, sequence_counts = count_mismatch_sums(fastq)
+    mismatch_counts, valid_barcodes, sequence_counts, perfect_matches = count_mismatch_sums(fastq)
     if verbose:
         for mismatch_sum, count in sorted(mismatch_counts.items()):
             logger.info(f"Mismatch sum: {mismatch_sum}\tCount: {count}")
     logger.info(f"Total sequences processed: {sequence_counts}")
-    logger.info(f"Sequences with non-null barcodes: {sum(mismatch_counts.values())}")
-    valid_total = sum(value for key, value in mismatch_counts.items() if key < mismatches)
-    logger.info(f"Sequences with non-null barcodes and <= {mismatches} mismatches: {valid_total}")
+    logger.info(f"Sequences with non-null barcodes: {valid_barcodes}")
+    logger.info(f"Sequences with non-null barcodes and <= {mismatches} mismatches per barcode: {sum(mismatch_counts.values())}")
+    logger.info(f"Sequences with perfect matching barcodes: {perfect_matches}")
     
     # Save mismatch counts to CSV
     mismatch_df = pd.DataFrame(list(mismatch_counts.items()), 
-                              columns=["MismatchSum", "Count"]).sort_values(by="MismatchSum")
+                              columns=["BarcodeMismatches", "Count"]).sort_values(by="BarcodeMismatches")
     mismatch_df.to_csv(f"{fastq}.mismatches.csv", index=False)
     
     # Count position occurrences
@@ -178,19 +178,25 @@ def count_mismatch_sums(file_path: str) -> dict:
     """
     mismatch_counts = defaultdict(int)
     sequences = 0
+    valid_barcodes = 0
+    perfect_matches = 0
     with pysam.FastxFile(file_path) as fastq_file:
         for entry in fastq_file:
             header = entry.comment
             if header:
                 sequences += 1
                 if 'null' not in header:
+                    valid_barcodes += 1
                     if 'mismatches=' in header:
                         mismatches_str = re.search(r'mismatches=([\d_]+)', header).group(1)
-                        # Convert string of mismatches to sum
-                        mismatch_sum = sum(int(x) for x in mismatches_str.split('_'))
-                        mismatch_counts[mismatch_sum] += 1
+                        mismatch_sum = 0
+                        for x in mismatches_str.split('_'):
+                            mismatch_sum += int(x)
+                            mismatch_counts[int(x)] += 1
+                        if mismatch_sum == 0:
+                            perfect_matches += 1
                     
-    return dict(mismatch_counts), sequences
+    return dict(mismatch_counts), valid_barcodes, sequences, perfect_matches
 
 def count_position_occurrences(file_path: str) -> List[dict]:
     """
