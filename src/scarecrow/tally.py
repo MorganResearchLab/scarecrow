@@ -79,7 +79,7 @@ def run_tally(fastq: str = None,
             logger.info(f"Mismatch sum: {mismatch_sum}\tCount: {count}")
     logger.info(f"Total sequences processed: {sequence_counts}")
     logger.info(f"Sequences with non-null barcodes: {valid_barcodes}")
-    logger.info(f"Sequences with non-null barcodes and <= {mismatches} mismatches per barcode: {sum(mismatch_counts.values())}")
+    logger.info(f"Barcodes with <= {mismatches} mismatches: {sum(mismatch_counts.values())}")
     logger.info(f"Sequences with perfect matching barcodes: {perfect_matches}")
     
     # Save mismatch counts to CSV

@@ -6,6 +6,7 @@
 
 import ast
 import gzip as gz
+import json
 import logging
 import os
 import gc
@@ -19,50 +20,56 @@ from collections import defaultdict
 from functools import lru_cache
 from typing import List, Tuple, Optional, Dict, Set
 from scarecrow.logger import log_errors, setup_logger
-from scarecrow.seed import parse_seed_arguments
 from scarecrow.tools import generate_random_string
 
 
 class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1, base_quality_threshold: int = None):
+    def __init__(self, barcode_files: Dict[str, str], mismatches: int = 1, base_quality_threshold: int = None):
+        """
+        Initialize matcher with JSON whitelist files
+        
+        Args:
+            barcode_files: Dict mapping whitelist names to JSON file paths
+            mismatches: Maximum number of mismatches allowed (should match JSON data)
+            base_quality_threshold: Quality threshold for filtering
+        """
         self.mismatches = mismatches
         self.base_quality_threshold = base_quality_threshold
         self.matchers = {}
         
-        # Optimize initialization with precomputed structures
-        for whitelist, sequences in barcode_sequences.items():
-            exact_matches = set(sequences)
-            barcode_len = len(next(iter(sequences)))
+        # Load and organize barcode data from JSON files
+        for whitelist, json_file in barcode_files.items():
+            with open(json_file) as f:
+                barcode_data = json.load(f)
             
-            # Precompute valid sequences for faster matching
-            length_matched_sequences = {
-                seq for seq in sequences if len(seq) == barcode_len
-            }
+            # Create efficient lookup structures
+            exact_matches = set(barcode_data["0"].keys())
+            mismatch_lookup = {}
             
+            # Build mismatch lookup from level 1 data if mismatches are allowed
+            if self.mismatches > 0 and "1" in barcode_data:
+                for variant, original in barcode_data["1"].items():
+                    mismatch_lookup[variant] = original
+            
+            # Store precomputed data structures
+            barcode_len = len(next(iter(exact_matches)))
             self.matchers[whitelist] = {
                 'exact': exact_matches,
-                'sequences': length_matched_sequences,
+                'mismatches': mismatch_lookup,
                 'length': barcode_len
             }
 
     @lru_cache(maxsize=1024)
     def _reverse_complement(self, sequence: str) -> str:
         """Cached reverse complement computation"""
-        return str(Seq(sequence).reverse_complement())
-
-    def _hamming_distance(self, s1: str, s2: str) -> int:
-        """Efficient Hamming distance calculation"""
-        return sum(c1 != c2 for c1, c2 in zip(s1, s2))    
+        complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
+        return ''.join(complement.get(base, base) for base in reversed(sequence))
 
     def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> List[Tuple[str, int]]:
-        """
-        Optimized sequence window generation with jitter
-        Minimizes redundant calculations and boundary checks
-        """
+        """Generate possible sequences with position jitter"""
         barcode_length = end - start + 1
         sequences = []
         
-        # Vectorized bounds calculation
         min_start = max(0, start - jitter - 1)
         max_start = min(len(full_sequence) - barcode_length + 1, start + jitter)        
         sequences = [
@@ -72,28 +79,40 @@ class BarcodeMatcherOptimized:
         return sequences
 
     def find_match(self, sequence: str, quality_scores: str, whitelist: str, orientation: str,
-               original_start: int, original_end: int, jitter: int, base_quality: int) -> Tuple[str, int, int]:
+                  original_start: int, original_end: int, jitter: int, base_quality: int) -> Tuple[str, int, int]:
         """
-        Optimized matching algorithm with early exit and efficient candidate tracking
+        Find best matching barcode using precomputed exact and mismatch data
+        
+        Returns:
+            Tuple of (matched_barcode, mismatch_count, position)
         """
-        # Base quality filtering with early exit
+        # Convert whitelist string from CSV to actual whitelist key
+        if isinstance(whitelist, str):
+            try:
+                whitelist = ast.literal_eval(whitelist)
+                if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
+                    whitelist = whitelist[0][0]  # Extract the actual whitelist name
+            except (ValueError, SyntaxError):
+                pass
+
+        # Check if whitelist exists in matchers
+        if whitelist not in self.matchers:
+            return 'null', -1, original_start - 1
+            
+        # Apply quality filtering if needed
         if base_quality is not None:
             sequence = filter_low_quality_bases(sequence, quality_scores, base_quality)[0]
         
         matcher = self.matchers[whitelist]
         
-        # Orientation handling
+        # Handle reverse orientation
         if orientation == 'reverse':
             sequence = self._reverse_complement(sequence)
             
-        # Precompute possible sequences
+        # Get possible sequences with jitter
         possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
         
-        # Early exact match check (O(1) lookup)
-        #for seq, pos in possible_sequences:
-        #    if seq in matcher['exact']:
-        #        return seq, 0, pos
-        # Early exact match check (O(1) lookup)
+        # Try exact matches first
         closest_match = None
         min_distance = float('inf')
 
@@ -106,37 +125,27 @@ class BarcodeMatcherOptimized:
 
         if closest_match:
             return closest_match[0], 0, closest_match[1]
-
         
-        # Mismatch handling with optimized candidate tracking
-        if not self.mismatches:
-            return 'null', self.mismatches + 1, original_start - 1
-        
-        best_score = (self.mismatches + 1, float('inf'))
-        best_match = 'null'
-        best_position = original_start - 1
-        candidates = []
-        
-        for seq, pos in possible_sequences:
-            # Prefilter sequences by length
-            for valid_seq in matcher['sequences']:
-                distance = self._hamming_distance(seq, valid_seq)
-                
-                if distance <= self.mismatches:
+        # Try one-mismatch sequences if allowed
+        if self.mismatches > 0:
+            best_match = 'null'
+            best_position = original_start - 1
+            best_score = (1, float('inf'))  # (mismatches, position_distance)
+            
+            for seq, pos in possible_sequences:
+                if seq in matcher['mismatches']:
                     pos_distance = abs(pos - (original_start - 1))
-                    current_score = (distance, pos_distance)
+                    current_score = (1, pos_distance)
                     
-                    # Efficient candidate management
                     if current_score < best_score:
-                        candidates = [(valid_seq, distance, pos)]
                         best_score = current_score
-                        best_match = valid_seq
+                        best_match = matcher['mismatches'][seq]
                         best_position = pos
-                    elif current_score == best_score:
-                        candidates.append((valid_seq, distance, pos))
-                        best_match = 'null'
+                        
+            if best_match != 'null':
+                return best_match, 1, best_position
         
-        return best_match, best_score[0], best_position
+        return 'null', self.mismatches + 1, original_start - 1
     
 
 def parser_reap(parser):
@@ -293,11 +302,10 @@ def run_reap(fastqs: List[str],
     logger.info(f"base_quality: '{base_quality}'")
 
     # Extract barcodes and convert whitelist to set
-    expected_barcodes = parse_seed_arguments(barcodes)  
-    for key, barcode in expected_barcodes.items():
-        expected_barcodes[key] = sorted(set(barcode))
-        if verbose:
-            logger.info(f"{key}: {barcode}")
+    barcode_files = parse_seed_arguments(barcodes)
+    if verbose:
+        for whitelist, filename in barcode_files.items():
+            logger.info(f"{whitelist}: {filename}")
 
     # Check if the output filename string ends with .gz
     if output.endswith(".gz"):
@@ -308,7 +316,7 @@ def run_reap(fastqs: List[str],
         fastq_files = [f for f in fastqs],
         barcode_positions_file = barcode_positions,
         barcode_reverse_order = barcode_reverse_order,
-        barcode_sequences = expected_barcodes,
+        barcode_files = barcode_files,
         output = output,
         extract = extract,
         umi = umi,
@@ -351,24 +359,24 @@ def process_read_batch(read_batch: List[Tuple],
         mismatches = []
         for config in barcode_configs:
             seq = reads[config['file_index']].sequence
-            start, end = config['start'], config['end']
+            start, end = config['start'], config['end']            
 
-            if verbose:
-                logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
-                logger.info(f"Sequence: {seq}")
-                logger.info(f"Looking for barcode in range {start}-{end} with jitter {jitter}")
-
-            whitelist = ast.literal_eval(config['whitelist'])
+            whitelist = ast.literal_eval(config['whitelist'])[1]
             if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
                 whitelist = whitelist[0]
 
-            if whitelist in matcher.matchers:
+            if verbose:
+                print(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
+                print(f"Sequence: {seq}")
+                print(f"Looking for barcode in range {start}-{end} with jitter {jitter}")
+
+            if whitelist in matcher.matchers.keys():
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     seq, reads[config['file_index']].quality, whitelist, config['orientation'], 
                     start, end, jitter, base_quality)
-                
+
                 if verbose:
-                    logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
+                    print(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
                 
                 barcodes.append(matched_barcode)
                 positions.append(str(adj_position + 1))  # Convert to 1-based position for output
@@ -409,7 +417,7 @@ def extract_sequences(
     fastq_files: List[str] = None,
     barcode_positions_file: str = None,
     barcode_reverse_order: bool = False,
-    barcode_sequences: Dict[str, List[str]] = None,
+    barcode_files: Dict[str, str] = None,
     output: str = 'extracted.fastq.gz',
     extract: str = None,
     umi: Optional[str] = None,
@@ -421,7 +429,7 @@ def extract_sequences(
     verbose: bool = False
 ) -> None:
     """
-    Optimized sequence extraction focused on matching performance
+    Modified to use JSON whitelist files with mismatch parameter
     """
     logger = logging.getLogger('scarecrow')
 
@@ -447,10 +455,10 @@ def extract_sequences(
         umi_index = None
         umi_range = None
 
-    # Create optimized matcher
-    logger.info(f"Generating barcode matcher")
+    # Create matcher with JSON whitelist files
+    logger.info(f"Generating barcode matcher from JSON whitelists")
     matcher = BarcodeMatcherOptimized(
-        barcode_sequences = {k: set(v) for k, v in barcode_sequences.items()},
+        barcode_files = barcode_files,
         mismatches = mismatches,
         base_quality_threshold = base_quality
     )
@@ -550,6 +558,23 @@ def parse_range(range_str: str) -> Tuple[int, int]:
     start, end = map(int, range_str.split('-'))
     start = max(0, start -1)
     return (start, end)
+
+def parse_seed_arguments(barcodes: List[str]) -> Dict[str, str]:
+    """
+    Modified to handle JSON whitelist files instead of text files
+    Format: <barcode_name>:<whitelist_name>:<whitelist_file.json>
+    Returns: Dict mapping whitelist names to JSON file paths
+    """
+    barcode_files = {}
+    
+    if barcodes:
+        for barcode in barcodes:
+            name, whitelist, filename = barcode.split(':')
+            if not os.path.exists(filename):
+                raise FileNotFoundError(f"Barcode whitelist file not found: {filename}")
+            barcode_files[whitelist] = filename
+            
+    return barcode_files
 
 @lru_cache(maxsize=1024)
 def filter_low_quality_bases(sequence: str, quality: str, threshold: int) -> Tuple[str, str]:
