@@ -4,6 +4,8 @@
 
 A toolkit for preprocessing single cell sequencing data.
 
+[Docs](docs/root.md)
+
 ### Todo
 
 * Error handling implementing to capture missing or incorrect parameters, and unexpected file content
@@ -124,16 +126,34 @@ scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 \
 time scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
     -j 2 -m 2 -q 30 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 4
 
-scarecrow tally -f ./cDNA.fq
+scarecrow tally -f ./cDNA.fq -m 2
 
 ```
 
-BARCODES=(BC1:n99_v5:./barcodes/bc_data_n99_v5.txt
-          BC2:v1:./barcodes/bc_data_v1.txt
-          BC3:v1:./barcodes/bc_data_v1.txt)
-FILES=(./barcode_profiles/Parse/barcodes.BC*csv)
-scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 \
-    --conserved ./barcode_profiles/Parse/barcodes.BC1_conserved.tsv --out ./test.csv
+
+
+
+# Test issue with barcode not being matched (this is due to low quality scores)
+# @SRR28867558.1 2 VH01123:94:AACNK35M5:1:1101:65343:1000/3
+# TGTTATAACC[ATCATTCC]GTGGCCGATGTTTCGCATCGGCGTACGACT[AAGGTACA]ATCCACGTGCTTGAGACTGTGG[TTACCTGC]
+# @SRR28867558.1 1 VH01123:94:AACNK35M5:1:1101:65343:1000/2 barcodes=TTACCTGC_AAGGTACA_null positions=79_49_11 mismatches=0_0_-1 UMI=TGTTATAACC
+```bash
+OUT=/Users/s14dw4/Documents/scarecrow_test/WTv2
+FASTQS=(${OUT}/*fastq.gz)
+for FASTQ in ${FASTQS[@]}
+do
+    gunzip -c ${FASTQ} | head --l 400 > ${FASTQ%.gz}
+done
+POS=${OUT}/barcode_positions.csv
+BARCODES=(BC1:n99_v5:${OUT}/bc_data_n99_v5.txt
+          BC2:v1:${OUT}/bc_data_v1.txt
+          BC3:v1:${OUT}/bc_data_v1.txt)
+time scarecrow reap --fastqs ${FASTQS[@]%.gz} -p ${POS} --barcode_reverse_order \
+    -j 2 -m 2 -q 20 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 \
+    --out ${OUT}/cDNA.fq --threads 4 
+```
+
+
 
 
 
