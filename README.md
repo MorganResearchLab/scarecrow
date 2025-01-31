@@ -4,7 +4,7 @@
 
 A toolkit for preprocessing single cell sequencing data.
 
-[Docs](docs/root.md)
+[Documentation](docs/root.md)
 
 ### Todo
 
