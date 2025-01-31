@@ -66,6 +66,8 @@ class BarcodeMatcherOptimized:
             
             if self.verbose:
                 self.logger.info(f"Loaded {len(exact_matches)} exact matches and {len(mismatch_lookup)} variants for whitelist '{whitelist}'")
+                self.logger.info(f"{whitelist} exact matches:\n{exact_matches}\n")
+                self.logger.info(f"{whitelist} mismatches:\n{mismatch_lookup}\n")
 
     def _parse_whitelist_identifier(self, whitelist: str) -> str:
         """
