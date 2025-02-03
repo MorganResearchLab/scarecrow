@@ -52,7 +52,7 @@ scarecrow samtag --fastq in.fastq --sam in.sam
     )
     subparser.add_argument(
         "-m", "--max-read-buffer", 
-        metavar="<int>"       
+        metavar="<int>",       
         type=int, 
         default=10000, 
         help="Maximum number of reads to buffer (default: 10000)"
