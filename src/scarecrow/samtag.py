@@ -2,13 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 @author: David Wragg
+Refactored for multiprocessing batch processing
 """
 
 import logging
 import pysam
 import os
-import tempfile
+import multiprocessing as mp
+from functools import partial
 from argparse import RawTextHelpFormatter
+from typing import List, Dict, Tuple
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -40,15 +43,22 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         type=str,
         default=None,
     )
+    subparser.add_argument(
+        "-@", "--threads",
+        metavar="<int>",
+        help=("Number of processing threads [1]"),
+        type=int,
+        default=1,
+    )
     return subparser
 
 def validate_samtag_args(parser, args):
-    run_samtag(fastq_file=args.fastq, sam_file=args.sam)
-    
+    run_samtag(fastq_file=args.fastq, sam_file=args.sam, threads=args.threads)
+
 @log_errors
-def run_samtag(fastq_file: str = None, sam_file: str = None) -> None:
+def run_samtag(fastq_file: str = None, sam_file: str = None, threads: int = None) -> None:
     """
-    Function to process barcodes with minimal memory usage
+    Multiprocessing function to process SAM tags efficiently
     """
     # Setup logging
     logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
@@ -60,37 +70,35 @@ def run_samtag(fastq_file: str = None, sam_file: str = None) -> None:
         logger.error("Both FASTQ and SAM files must be provided")
         return
     
+    # Process files with minimal overhead
+    if threads is None:
+        threads = min(mp.cpu_count() - 1, 8)
+    else:
+        threads = min(threads, mp.cpu_count())
+    logger.info(f"Using {threads} threads")
+
     # Prepare output filename
     name, _ = os.path.splitext(sam_file)
     output = name + ".tagged.sam"
     
-    # Create temporary file for read tags
-    with tempfile.NamedTemporaryFile(mode='w+', delete=True) as tag_temp_file:
-        # Step 1: Extract tags from FASTQ file
-        extract_fastq_tags(fastq_file, tag_temp_file)
-        tag_temp_file.flush()
-        tag_temp_file.seek(0)
-        
-        # Step 2: Update SAM file with tags
-        process_sam_with_tags(sam_file, output, tag_temp_file)
+    # Extract read tags from FASTQ
+    read_tags = extract_fastq_tags(fastq_file)
+    logger.info(f"Extracted {len(read_tags)} read tags from FASTQ")
+    
+    # Process SAM file in batches
+    process_sam_with_tags_parallel(sam_file, output, read_tags, threads)
     
     logger.info(f"Processing complete. Output written to {output}")
 
-def extract_fastq_tags(fastq_file: str, tag_temp_file):
+def extract_fastq_tags(fastq_file: str) -> Dict[str, Dict[str, str]]:
     """
-    Extract read tags from FASTQ file and write to a temporary file.
+    Extract all read tags from FASTQ file into a dictionary
     
-    Temporary file format: 
-    read_name\tCR\tCY\tCB\tXP\tXM\tUR\tUY
+    Returns a dictionary with read names as keys and tag dictionaries as values
     """
-    logger = logging.getLogger('scarecrow')
-    logger.info(f"Extracting tags from {fastq_file}")
-    
-    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
-    
+    read_tags = {}
     with open(fastq_file, "r") as fq:
         while True:
-            # Read header line
             header = fq.readline().strip()
             if not header:
                 break
@@ -101,55 +109,105 @@ def extract_fastq_tags(fastq_file: str, tag_temp_file):
             fq.readline()
             
             if header.startswith("@"):
-                # Extract read name
+                # Extract the read name and tags
                 read_name = header.split(" ")[0][1:]  # Remove "@"
                 
-                # Extract tag values
-                tag_dict = {}
+                # Parse tags from header
+                tags = {}
                 for item in header.split():
                     if "=" in item:
                         key, value = item.split("=")
-                        tag_dict[key] = value
+                        tags[key] = value
                 
-                # Prepare tag line
-                tag_values = [tag_dict.get(tag, "") for tag in tag_names]
-                tag_line = f"{read_name}\t{'\t'.join(tag_values)}\n"
-                tag_temp_file.write(tag_line)
+                read_tags[read_name] = {
+                    "CR": tags.get("CR"),
+                    "CY": tags.get("CY"),
+                    "CB": tags.get("CB"),
+                    "XP": tags.get("XP"),
+                    "XM": tags.get("XM"),
+                    "UR": tags.get("UR"),
+                    "UY": tags.get("UY")
+                }
+    
+    return read_tags
 
-def process_sam_with_tags(input_sam: str, output_sam: str, tag_temp_file):
+def process_batch(batch: List[Tuple], read_tags: Dict[str, Dict[str, str]]) -> List[Tuple]:
     """
-    Process SAM file and add tags with absolute minimal memory usage.
+    Process a batch of reads and add tags
+    
+    Args:
+    batch: List of reads (as pysam AlignedSegment objects or their equivalent)
+    read_tags: Dictionary of read tags
+    
+    Returns:
+    List of processed reads with tags added
+    """
+    processed_batch = []
+    for read in batch:
+        # Check if read name exists in tags
+        if read.query_name in read_tags:
+            tags = read_tags[read.query_name]
+            
+            # Add tags if they exist
+            tag_mapping = [
+                ("CR", "Z"), ("CY", "Z"), ("CB", "Z"),
+                ("XP", "Z"), ("XM", "Z"), 
+                ("UR", "Z"), ("UY", "Z")
+            ]
+            
+            for tag_name, val_type in tag_mapping:
+                tag_value = tags.get(tag_name)
+                if tag_value:
+                    read.set_tag(tag_name, tag_value, value_type=val_type)
+        
+        processed_batch.append(read)
+    
+    return processed_batch
+
+def process_sam_with_tags_parallel(input_sam: str, output_sam: str, 
+                                    read_tags: Dict[str, Dict[str, str]], 
+                                    threads: int):
+    """
+    Process SAM file in parallel using multiprocessing
     """
     logger = logging.getLogger('scarecrow')
-    logger.info(f"Processing SAM file {input_sam}")
+    logger.info(f"Processing SAM file {input_sam} in parallel")
     
-    # Create tag lookup function
-    def get_read_tags(read_name):
-        tag_temp_file.seek(0)
-        for line in tag_temp_file:
-            parts = line.strip().split('\t')
-            if parts[0] == read_name:
-                return parts[1:]
-        return None
+    # Determine batch size (adjust based on your system's capabilities)
+    batch_size = 10000
     
-    # Tag names in order
-    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
-    
-    # Process SAM file
+    # Open input and output SAM files
     with pysam.AlignmentFile(input_sam, "r") as infile, \
          pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
         
-        for read in infile:
-            # Get tags for this read
-            tags = get_read_tags(read.query_name)
+        # Create a pool of worker processes
+        with mp.Pool(processes=threads) as pool:
+            # Partial function with read tags
+            process_batch_func = partial(process_batch, read_tags=read_tags)
             
-            if tags:
-                # Add tags if they exist
-                for tag_name, tag_value in zip(tag_names, tags):
-                    if tag_value:
-                        read.set_tag(tag_name, tag_value, value_type="Z")
+            # Batch reads and process
+            batch = []
+            for read in infile:
+                batch.append(read)
+                
+                # Process batch when it reaches the specified size
+                if len(batch) >= batch_size:
+                    # Use map to process batches in parallel
+                    processed_batches = pool.map(process_batch_func, [batch])
+                    
+                    # Write processed reads
+                    for processed_batch in processed_batches:
+                        for processed_read in processed_batch:
+                            outfile.write(processed_read)
+                    
+                    # Reset batch
+                    batch = []
             
-            # Write the read to output
-            outfile.write(read)
+            # Process any remaining reads
+            if batch:
+                processed_batches = pool.map(process_batch_func, [batch])
+                for processed_batch in processed_batches:
+                    for processed_read in processed_batch:
+                        outfile.write(processed_read)
     
-    logger.info(f"Completed processing. Output written to {output_sam}")
+    logger.info(f"Parallel processing complete")

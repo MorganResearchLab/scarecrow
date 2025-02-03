@@ -7,21 +7,20 @@
 import logging
 import pysam
 import os
+import tempfile
 from argparse import RawTextHelpFormatter
-from typing import List, Dict
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
-
 
 def parser_samtag(parser):
     subparser = parser.add_parser(
         "samtag",
         description="""
-Update SAM/BAM file with barcode and UMI tags from scarecrow reap fastq header.
+Update SAM file with barcode and UMI tags from scarecrow reap fastq header.
 
 Example:
 
-scarecrow samtag --fastq in.fastq --sam <in.sam|in.bam>
+scarecrow samtag --fastq in.fastq --sam in.sam
 ---
 """,
         help="Update SAM file with barcode and UMI tags from scarecrow reap fastq header",
@@ -37,88 +36,120 @@ scarecrow samtag --fastq in.fastq --sam <in.sam|in.bam>
     subparser.add_argument(
         "-s", "--sam",
         metavar="<file>",
-        help=("Path to SAM/BAM file to update tags"),
+        help=("Path to SAM file to update tags"),
         type=str,
         default=None,
     )
     return subparser
 
 def validate_samtag_args(parser, args):
-    run_samtag(fastq_file = args.fastq,
-               sam_file = args.sam)
+    run_samtag(fastq_file=args.fastq, sam_file=args.sam)
     
 @log_errors
-def run_samtag(fastq_file: str = None,
-               sam_file: str = None) -> None:
+def run_samtag(fastq_file: str = None, sam_file: str = None) -> None:
     """
-    Function to rake barcodes for mismatches
+    Function to process barcodes with minimal memory usage
     """
     # Setup logging
     logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
     logger = setup_logger(logfile)
     logger.info(f"logfile: '{logfile}'")
     
-    # Preprocess fastq headers
-    if fastq_file:
-        logger.info(f"Pre-processing {fastq_file}")
-        read_tags = preprocess_fastq_headers(fastq_file)    
+    # Validate inputs
+    if not fastq_file or not sam_file:
+        logger.error("Both FASTQ and SAM files must be provided")
+        return
+    
+    # Prepare output filename
+    name, _ = os.path.splitext(sam_file)
+    output = name + ".tagged.sam"
+    
+    # Create temporary file for read tags
+    with tempfile.NamedTemporaryFile(mode='w+', delete=True) as tag_temp_file:
+        # Step 1: Extract tags from FASTQ file
+        extract_fastq_tags(fastq_file, tag_temp_file)
+        tag_temp_file.flush()
+        tag_temp_file.seek(0)
+        
+        # Step 2: Update SAM file with tags
+        process_sam_with_tags(sam_file, output, tag_temp_file)
+    
+    logger.info(f"Processing complete. Output written to {output}")
 
-    # Add tags to SAM file
-    if sam_file:
-        name, _ = os.path.splitext(fastq_file)
-        output = name + ".tagged.sam"
-        logger.info(f"Adding tags and writing to {output}")
-        add_tags_to_sam(sam_file, output, read_tags)
-
-def preprocess_fastq_headers(fastq_file):
-    """Preprocess FASTQ headers to create a mapping of read names to tags."""
-    read_tags = {}
-    with open(fastq_file, "r") as fq:
-        for line in fq:
-            if line.startswith("@"):
-                # Extract the read name and tags
-                fastq_header = line.strip()
-                read_name = fastq_header.split(" ")[0][1:]  # Remove "@" and split to get the read name
-                attributes = {item.split("=")[0]: item.split("=")[1] for item in fastq_header.split() if "=" in item}
-                
-                # Store barcodes and UMI if they exist
-                original_barcodes = attributes.get("CR", None)
-                barcode_qualities = attributes.get("CY", None)
-                corrected_barcodes = attributes.get("CB", None)
-                barcode_positions = attributes.get("XP", None)
-                barcode_mismatches = attributes.get("XM", None)
-                umi = attributes.get("UR", None)
-                umi_quality = attributes.get("UY", None)
-                read_tags[read_name] = {"CR": original_barcodes, 
-                                        "CY": barcode_qualities, 
-                                        "CB": corrected_barcodes, 
-                                        "XP": barcode_positions, 
-                                        "XM": barcode_mismatches, 
-                                        "UR": umi, 
-                                        "UY": umi_quality}
-
-    return read_tags
-
-@log_errors
-def add_tags_to_sam(input_sam, output_sam, read_tags):
-    """Add tags to SAM/BAM file based on the preprocessed FASTQ headers."""
+def extract_fastq_tags(fastq_file: str, tag_temp_file):
+    """
+    Extract read tags from FASTQ file and write to a temporary file.
+    
+    Temporary file format: 
+    read_name\tCR\tCY\tCB\tXP\tXM\tUR\tUY
+    """
     logger = logging.getLogger('scarecrow')
-    with pysam.AlignmentFile(input_sam, "r") as infile, pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+    logger.info(f"Extracting tags from {fastq_file}")
+    
+    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
+    
+    with open(fastq_file, "r") as fq:
+        while True:
+            # Read header line
+            header = fq.readline().strip()
+            if not header:
+                break
+            
+            # Skip the next 3 lines (sequence, '+', quality)
+            fq.readline()
+            fq.readline()
+            fq.readline()
+            
+            if header.startswith("@"):
+                # Extract read name
+                read_name = header.split(" ")[0][1:]  # Remove "@"
+                
+                # Extract tag values
+                tag_dict = {}
+                for item in header.split():
+                    if "=" in item:
+                        key, value = item.split("=")
+                        tag_dict[key] = value
+                
+                # Prepare tag line
+                tag_values = [tag_dict.get(tag, "") for tag in tag_names]
+                tag_line = f"{read_name}\t{'\t'.join(tag_values)}\n"
+                tag_temp_file.write(tag_line)
+
+def process_sam_with_tags(input_sam: str, output_sam: str, tag_temp_file):
+    """
+    Process SAM file and add tags with absolute minimal memory usage.
+    """
+    logger = logging.getLogger('scarecrow')
+    logger.info(f"Processing SAM file {input_sam}")
+    
+    # Create tag lookup function
+    def get_read_tags(read_name):
+        tag_temp_file.seek(0)
+        for line in tag_temp_file:
+            parts = line.strip().split('\t')
+            if parts[0] == read_name:
+                return parts[1:]
+        return None
+    
+    # Tag names in order
+    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
+    
+    # Process SAM file
+    with pysam.AlignmentFile(input_sam, "r") as infile, \
+         pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+        
         for read in infile:
-            if read.query_name in read_tags:
-                tags = read_tags[read.query_name]
-                if tags["CR"]:
-                    read.set_tag("CR", tags["CR"], value_type="Z")
-                if tags["CY"]:
-                    read.set_tag("CY", tags["CY"], value_type="Z")
-                if tags["CB"]:
-                    read.set_tag("CB", tags["CB"], value_type="Z")
-                if tags["XP"]:
-                    read.set_tag("XP", tags["XP"], value_type="Z")
-                if tags["XM"]:
-                    read.set_tag("XM", tags["XM"], value_type="Z")
-                if tags["UR"]:
-                    read.set_tag("UR", tags["UR"], value_type="Z")
-                if tags["UY"]:
-                    read.set_tag("UY", tags["UY"], value_type="Z")
+            # Get tags for this read
+            tags = get_read_tags(read.query_name)
+            
+            if tags:
+                # Add tags if they exist
+                for tag_name, tag_value in zip(tag_names, tags):
+                    if tag_value:
+                        read.set_tag(tag_name, tag_value, value_type="Z")
+            
+            # Write the read to output
             outfile.write(read)
+    
+    logger.info(f"Completed processing. Output written to {output_sam}")
