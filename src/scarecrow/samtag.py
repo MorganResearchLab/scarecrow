@@ -1,52 +1,102 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Low-memory SAM/FASTQ tag processing for large genomic files
+@author: David Wragg
+Refactored for multiprocessing batch processing
 """
 
-import os
-import sys
 import logging
 import pysam
-import argparse
-from typing import Dict, Generator, Optional
+import os
+import multiprocessing as mp
+from functools import partial
+from argparse import RawTextHelpFormatter
+from typing import List, Dict, Tuple
+from scarecrow.logger import log_errors, setup_logger
+from scarecrow.tools import generate_random_string
 
-def create_argument_parser():
-    """Create argument parser for the script."""
-    parser = argparse.ArgumentParser(
-        description="Low-memory SAM/FASTQ tag processing",
-        formatter_class=argparse.RawTextHelpFormatter
+def parser_samtag(parser):
+    subparser = parser.add_parser(
+        "samtag",
+        description="""
+Update SAM file with barcode and UMI tags from scarecrow reap fastq header.
+
+Example:
+
+scarecrow samtag --fastq in.fastq --sam in.sam
+---
+""",
+        help="Update SAM file with barcode and UMI tags from scarecrow reap fastq header",
+        formatter_class=RawTextHelpFormatter,
     )
-    parser.add_argument(
-        "-f", "--fastq", 
-        required=True, 
-        help="Path to input FASTQ file"
+    subparser.add_argument(
+        "-f", "--fastq",
+        metavar="<file>",
+        help=("Path to scarecrow reap fastq file"),
+        type=str,
+        default=None,
     )
-    parser.add_argument(
-        "-s", "--sam", 
-        required=True, 
-        help="Path to input SAM/BAM file"
+    subparser.add_argument(
+        "-s", "--sam",
+        metavar="<file>",
+        help=("Path to SAM file to update tags"),
+        type=str,
+        default=None,
     )
-    parser.add_argument(
-        "-o", "--output", 
-        help="Path to output SAM/BAM file (default: input filename with .tagged suffix)"
+    subparser.add_argument(
+        "-o", "--out",
+        metavar="<file>",
+        help=("Path to SAM file to output"),
+        type=str,
+        default=None,
     )
-    parser.add_argument(
+    subparser.add_argument(
         "-m", "--max-read-buffer", 
+        metavar="<int>"       
         type=int, 
         default=10000, 
         help="Maximum number of reads to buffer (default: 10000)"
     )
-    return parser
+    
+    return subparser
 
-def setup_logging():
-    """Configure logging."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    return logging.getLogger(__name__)
+def validate_samtag_args(parser, args):
+    run_samtag(fastq_file=args.fastq, sam_file=args.sam, out_file=args.out, max_read_buffer = args.max_read_buffer)
+
+@log_errors
+def run_samtag(fastq_file: str = None, sam_file: str = None, out_file: str = None, max_read_buffer: int = None) -> None:
+    """
+    Multiprocessing function to process SAM tags efficiently
+    """
+    # Setup logging
+    logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"logfile: '{logfile}'")
+
+    try:
+        # Determine output path
+        if not out_file:
+            base, ext = os.path.splitext(sam_file)
+            out_file = f"{base}.tagged{ext}"
+        
+        # Stream tags from FASTQ
+        tag_generator = stream_fastq_tags(fastq_file)
+        
+        # Process SAM/BAM with tags
+        process_sam_with_tags(
+            sam_file, 
+            out_file, 
+            tag_generator,
+            max_read_buffer = max_read_buffer
+        )
+        
+        logger.info("Processing completed successfully.")
+    
+    except Exception as e:
+        logger.error(f"Error processing files: {e}")
+        sys.exit(1)
+
+
 
 def stream_fastq_tags(fastq_path: str) -> Generator[Dict[str, Optional[str]], None, None]:
     """
@@ -141,37 +191,3 @@ def process_sam_with_tags(
         
         logger.info(f"Completed processing: {output_path}")
 
-def main():
-    """Main execution function."""
-    # Parse arguments
-    parser = create_argument_parser()
-    args = parser.parse_args()
-    
-    # Setup logging
-    logger = setup_logging()
-    
-    try:
-        # Determine output path
-        if not args.output:
-            base, ext = os.path.splitext(args.sam)
-            args.output = f"{base}.tagged{ext}"
-        
-        # Stream tags from FASTQ
-        tag_generator = stream_fastq_tags(args.fastq)
-        
-        # Process SAM/BAM with tags
-        process_sam_with_tags(
-            args.sam, 
-            args.output, 
-            tag_generator,
-            max_read_buffer=args.max_read_buffer
-        )
-        
-        logger.info("Processing completed successfully.")
-    
-    except Exception as e:
-        logger.error(f"Error processing files: {e}")
-        sys.exit(1)
-
-if __name__ == '__main__':
-    main()
