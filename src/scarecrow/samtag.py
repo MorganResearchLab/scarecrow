@@ -82,9 +82,20 @@ def preprocess_fastq_headers(fastq_file):
                 attributes = {item.split("=")[0]: item.split("=")[1] for item in fastq_header.split() if "=" in item}
                 
                 # Store barcodes and UMI if they exist
-                barcodes = attributes.get("barcodes", None)
-                umi = attributes.get("UMI", None)
-                read_tags[read_name] = {"CB": barcodes, "ZU": umi}
+                original_barcodes = attributes.get("CR", None)
+                barcode_qualities = attributes.get("CY", None)
+                corrected_barcodes = attributes.get("CB", None)
+                barcode_positions = attributes.get("XP", None)
+                barcode_mismatches = attributes.get("XM", None)
+                umi = attributes.get("UR", None)
+                umi_quality = attributes.get("UY", None)
+                read_tags[read_name] = {"CR": original_barcodes, 
+                                        "CY": barcode_qualities, 
+                                        "CB": corrected_barcodes, 
+                                        "XP": barcode_positions, 
+                                        "XM": barcode_mismatches, 
+                                        "UR": umi, 
+                                        "UY": umi_quality}
 
     return read_tags
 
@@ -95,12 +106,19 @@ def add_tags_to_sam(input_sam, output_sam, read_tags):
     with pysam.AlignmentFile(input_sam, "r") as infile, pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
         for read in infile:
             if read.query_name in read_tags:
-                #logger.info(f"{read.query_name} in read_tags")
                 tags = read_tags[read.query_name]
+                if tags["CR"]:
+                    read.set_tag("CR", tags["CR"], value_type="Z")
+                if tags["CY"]:
+                    read.set_tag("CY", tags["CY"], value_type="Z")
                 if tags["CB"]:
                     read.set_tag("CB", tags["CB"], value_type="Z")
+                if tags["XP"]:
+                    read.set_tag("XP", tags["XP"], value_type="Z")
+                if tags["XM"]:
+                    read.set_tag("XM", tags["XM"], value_type="Z")
                 if tags["UR"]:
                     read.set_tag("UR", tags["UR"], value_type="Z")
-            #else:
-                #logger.info(f"{read.query_name} not in in read_tags")
+                if tags["UY"]:
+                    read.set_tag("UY", tags["UY"], value_type="Z")
             outfile.write(read)
