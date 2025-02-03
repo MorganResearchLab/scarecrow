@@ -18,6 +18,7 @@ from scarecrow.reap import parser_reap, validate_reap_args
 from scarecrow.harvest import parser_harvest, validate_harvest_args
 from scarecrow.tally import parser_tally, validate_tally_args
 from scarecrow.rake import parser_rake, validate_rake_args
+from scarecrow.samtag import parser_samtag, validate_samtag_args
 
 def main():
     warnings.simplefilter("default", DeprecationWarning)
@@ -52,7 +53,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "reap": parser_reap(subparsers),
         "harvest": parser_harvest(subparsers),
         "tally": parser_tally(subparsers),
-        "rake": parser_rake(subparsers)
+        "rake": parser_rake(subparsers),
+        "samtag": parser_samtag(subparsers)
     }
     
     # Show help when no arguments are given
@@ -76,7 +78,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "reap": validate_reap_args,
         "harvest": validate_harvest_args,
         "tally": validate_tally_args,
-        "rake": validate_rake_args
+        "rake": validate_rake_args,
+        "samtag": validate_samtag_args
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 

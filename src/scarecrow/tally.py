@@ -148,9 +148,9 @@ def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, 
             header = entry.comment
 
             # Check if the header contains 'barcodes='
-            if 'barcodes=' in header:
+            if 'CB=' in header:
                 # Extract the barcodes substring
-                barcodes_str = re.search(r'barcodes=([\w_]+)', header).group(1)
+                barcodes_str = re.search(r'CB=([\w_]+)', header).group(1)
                 cell_barcodes[barcodes_str] += 1
                 
                 # Split the barcodes string by underscore
@@ -187,8 +187,8 @@ def count_mismatch_sums(file_path: str) -> dict:
                 sequences += 1
                 if 'null' not in header:
                     valid_barcodes += 1
-                    if 'mismatches=' in header:
-                        mismatches_str = re.search(r'mismatches=([\d_]+)', header).group(1)
+                    if 'XM=' in header:
+                        mismatches_str = re.search(r'XM=([\d_]+)', header).group(1)
                         mismatch_sum = 0
                         for x in mismatches_str.split('_'):
                             mismatch_sum += int(x)
@@ -213,8 +213,8 @@ def count_position_occurrences(file_path: str) -> List[dict]:
     with pysam.FastxFile(file_path) as fastq_file:
         for entry in fastq_file:
             header = entry.comment
-            if 'positions=' in header:
-                positions_str = re.search(r'positions=([\d_]+)', header).group(1)
+            if 'XP=' in header:
+                positions_str = re.search(r'XP=([\d_]+)', header).group(1)
                 positions = positions_str.split('_')
                 
                 # Ensure we have enough dictionaries for all positions
