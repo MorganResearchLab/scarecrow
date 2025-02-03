@@ -257,18 +257,23 @@ def deserialize_read(
     read_name, read_data = serialized_read
     
     # Recreate the AlignedSegment
-    read = pysam.AlignedSegment(header)
-    read.query_name = read_name
-    read.query_sequence = read_data[0]
-    read.qual = read_data[1]
-    read.flag = read_data[2]
-    read.reference_name = read_data[3]
-    read.reference_start = read_data[4]
-    read.mapping_quality = read_data[5]
+    try:
+        read = pysam.AlignedSegment(header)
+        read.query_name = read_name
+        read.query_sequence = read_data[0]
+        read.qual = read_data[1]
+        read.flag = read_data[2]
+        read.reference_name = read_data[3]
+        read.reference_start = read_data[4]
+        read.mapping_quality = read_data[5]
+        # Restore tags
+        for tag in read_data[6]:
+            read.set_tag(tag[0], tag[1], tag[2])
     
-    # Restore tags
-    for tag in read_data[6]:
-        read.set_tag(tag[0], tag[1], tag[2])
+    except IndexError:
+        print(f"Index error for {serialized_read}")
+        print("Returning read as None")
+        read = None
     
     return read
 
@@ -395,7 +400,6 @@ def process_sam_multiprocessing(
                         # Write processed reads to thread-specific files
                         for process_idx, processed_batch in enumerate(processed_batches):
                             for processed_read_data in processed_batch:
-                                print(f"{process_idx} : {processed_batch}")
                                 processed_read = deserialize_read(infile.header, processed_read_data)
                                 if processed_read:
                                     temp_outfiles[process_idx].write(processed_read)
