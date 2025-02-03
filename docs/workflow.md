@@ -10,7 +10,10 @@ The toolkit comprises several tools: `seed`, `harvest`, `reap`, `tally`, each of
 Using a small subset of paired-end sequencing reads (e.g. 1M ), `seed` identifies barcode seeds within reads. It returns a CSV file of barcode alignments, a TSV file of nucleotide frequencies for each fastq file, and a TSV file of conserved sequence runs. This step should be repeated for each barcode whitelist. The barcode whitelist is a text file with one barcode sequence per line.
 
 ```bash
-scarecrow seed --fastqs <fastq_R1> <fastq_R2> --strands pos neg --out <BC1_counts.csv> --barcodes BC1:v1:<v1_whitelist.txt> 
+scarecrow seed --fastqs <fastq_R1> <fastq_R2> \
+    --strands pos neg \
+    --out <BC1_counts.csv> \
+    --barcodes BC1:v1:<v1_whitelist.txt> 
 ```
 
 The `--out` file has the below format. The `read` column indicates the read on which a barcode match was found, `name` is the name retrieved from sequencing read, `barcode_whitelist` contains the first two elements of the string passed to `--barcdoes`, `barcode` is the sequence of the matched barcode, `orientation` is the orientation in which the sequence was found on the read, `start` and `end` are the positions of the alignment, `mismatches` is the number of mismatching bases between the fastq sequence and barcode.
@@ -44,7 +47,9 @@ The CSV file from each barcode whitelist are processed with `harvest` to identif
 
 ```bash
 scarecrow harvest <BC1_counts.csv> <BC2_counts.csv> <BC3_counts.csv> \
-    --barcode_count 3 --min_distance 10 --conserved <BC1_conserved.tsv> \
+    --barcode_count 3 \
+    --min_distance 10 \
+    --conserved <BC1_conserved.tsv> \
     --out <barcode_positions.csv>
 ```
 
@@ -62,10 +67,18 @@ The `reap` tool extracts a specified target sequence (e.g. cDNA) and its associa
 
 ```bash
 # Reap target sequence from fastqs (TBC)
-scarecrow reap --fastqs <paired_fastq_R1> <paired_fastq_R2> --barcode_positions <barcode_positions.csv> \
+scarecrow reap --fastqs <paired_fastq_R1> <paired_fastq_R2> \
+    --barcode_positions <barcode_positions.csv> \
     --barcodes BC1:v1:<v1_whitelist.txt> BC2:v1:<v1_whitelist.txt> BC3:n198:<n198_whitelist.txt> \
-    -j 2 -m 2 -q 30 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 4
-    --jitter 2 --mismatches 2 --base_quality 10 --extract 1:1-64 --out cDNA.fastq
+    --barcodes ${BARCODES[@]} \
+    --extract 1:1-64 \
+    --umi 2:1-10 \
+    --out ./cDNA.fq \
+    --threads 4
+    --jitter 2 \
+    --mismatches 2 \
+    --base_quality 10 \
+    --out cDNA.fastq
 ```
 
 Below is an example read written to the output fastq file. Here a `null` barcode has been recorded at barcode index `79` with a mismatch count of `-1`. This is due to the sequence at the barcode index not matching any of the barcodes on the whitelist after accounting for the number of permitted mismatches.
