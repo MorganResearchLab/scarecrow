@@ -360,7 +360,6 @@ def process_sam_multiprocessing(
     with pysam.AlignmentFile(input_path, 'rb') as infile:
         # Convert header to dictionary for serialization
         header_dict = infile.header.to_dict()
-        print(f"\nheader_dict:\n{header_dict}")
         
         # Create process pool
         with mp.Pool(processes=num_processes) as pool:
@@ -379,7 +378,6 @@ def process_sam_multiprocessing(
                     # Serialize read to make it picklable
                     serialized_read = serialize_read(read)
                     batch.append(serialized_read)
-                    print(f"\nserialized_read:\n{serialized_read}")
                     
                     # Process batch when it reaches the specified size
                     if len(batch) >= batch_size:
@@ -393,6 +391,7 @@ def process_sam_multiprocessing(
                         
                         # Distribute batch processing
                         processed_batches = pool.map(process_batch_func, [batch])
+                        print(f"processed_batches ran")
                         
                         # Write processed reads to thread-specific files
                         for process_idx, processed_batch in enumerate(processed_batches):
