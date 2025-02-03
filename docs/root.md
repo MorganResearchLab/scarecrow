@@ -3,4 +3,4 @@
 # scarecrow docs
 * [Installation](installation.md)
 * [Introduction](introduction.md)
-* [Workflow](workflow.md)
+* [Toolkit](toolkit.md)

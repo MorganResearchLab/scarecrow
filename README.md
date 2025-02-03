@@ -1,6 +1,6 @@
 # scarecrow
 
-![scarecrow](img/scarecrow.png)
+<img style="float:right;width:200px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
 A toolkit for preprocessing single cell sequencing data.
 
