@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md) | [toolkit](root.md)
+[root](root.md)
 
 ## scarecrow seed
 Using a small subset of paired-end sequencing reads (e.g. 1M ), `seed` identifies barcode seeds within reads. It returns a CSV file of barcode alignments, a TSV file of nucleotide frequencies for each fastq file, and a TSV file of conserved sequence runs. This step should be repeated for each barcode whitelist. The barcode whitelist is a text file with one barcode sequence per line.
