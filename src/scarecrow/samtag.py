@@ -301,7 +301,9 @@ def process_read_batch(
     batch_read_names = [read.query_name for read in batch if read is not None]
     
     # Get tags for this batch
+    print(f"\nbatch_read_names:\n{batch_read_names}")
     read_tags = extract_batch_tags(batch_read_names, fastq_path)
+    print(f"\nread_tags:\n{read_tags}")
     
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     processed_batch = []
@@ -377,11 +379,12 @@ def process_sam_multiprocessing(
                     
                     # Process batch when it reaches the specified size
                     if len(batch) >= batch_size:
+
                         # Distribute batches across processes
                         process_batch_func = partial(
                             process_read_batch, 
-                            fastq_path=fastq_path,
-                            header_dict=header_dict
+                            fastq_path = fastq_path,
+                            header_dict = header_dict
                         )
                         
                         # Distribute batch processing
