@@ -141,8 +141,8 @@ def run_samtag(
             out_file, 
             fastq_file,
             temp_dir,
-            num_processes=threads,
-            batch_size=batch_size
+            num_processes = threads,
+            batch_size = batch_size
         )
         
         # Clean up temporary directory
@@ -290,7 +290,8 @@ def process_read_batch(
     """
     # Reconstruct header
     header = pysam.AlignmentHeader.from_dict(header_dict)
-    
+    print(f"\nheader:\n{header}")
+
     # Deserialize batch
     batch = [
         deserialize_read(header, read_data) 
@@ -299,12 +300,13 @@ def process_read_batch(
     
     # Extract read names
     batch_read_names = [read.query_name for read in batch if read is not None]
+    print(f"\nbatch_read_names:\n{batch_read_names}")
     
     # Get tags for this batch
     print(f"\nbatch_read_names:\n{batch_read_names}")
     read_tags = extract_batch_tags(batch_read_names, fastq_path)
     print(f"\nread_tags:\n{read_tags}")
-    
+
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     processed_batch = []
     
@@ -358,6 +360,7 @@ def process_sam_multiprocessing(
     with pysam.AlignmentFile(input_path, 'rb') as infile:
         # Convert header to dictionary for serialization
         header_dict = infile.header.to_dict()
+        print(f"\nheader_dict:\n{header_dict}")
         
         # Create process pool
         with mp.Pool(processes=num_processes) as pool:
@@ -376,6 +379,7 @@ def process_sam_multiprocessing(
                     # Serialize read to make it picklable
                     serialized_read = serialize_read(read)
                     batch.append(serialized_read)
+                    print(f"\nserialized_read:\n{serialized_read}")
                     
                     # Process batch when it reaches the specified size
                     if len(batch) >= batch_size:
