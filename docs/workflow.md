@@ -4,4 +4,4 @@
 
 # Workflow
 
-<img style="float:right;width:200px;" src="../img/tubemap.png" alt="workflow tube map"/>
+<img style="float:right;width:100%" src="../img/tubemap.png" alt="workflow tube map"/>
