@@ -1,14 +1,14 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-#!/usr/bin/env python3
 @author: David Wragg
 """
 
 import logging
 import pysam
 import os
+import tempfile
 from argparse import RawTextHelpFormatter
-from typing import Dict, Generator
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -55,25 +55,42 @@ def run_samtag(fastq_file: str = None, sam_file: str = None) -> None:
     logger = setup_logger(logfile)
     logger.info(f"logfile: '{logfile}'")
     
-    # Preprocess fastq headers
-    if fastq_file and sam_file:
-        logger.info(f"Processing {fastq_file} and {sam_file}")
-        name, _ = os.path.splitext(sam_file)
-        output = name + ".tagged.sam"
+    # Validate inputs
+    if not fastq_file or not sam_file:
+        logger.error("Both FASTQ and SAM files must be provided")
+        return
+    
+    # Prepare output filename
+    name, _ = os.path.splitext(sam_file)
+    output = name + ".tagged.sam"
+    
+    # Create temporary file for read tags
+    with tempfile.NamedTemporaryFile(mode='w+', delete=True) as tag_temp_file:
+        # Step 1: Extract tags from FASTQ file
+        extract_fastq_tags(fastq_file, tag_temp_file)
+        tag_temp_file.flush()
+        tag_temp_file.seek(0)
         
-        # Use a generator to iterate through read tags
-        read_tag_generator = fastq_header_tags(fastq_file)
-        
-        # Process SAM file with minimal memory
-        process_sam_with_tags(sam_file, output, read_tag_generator)
+        # Step 2: Update SAM file with tags
+        process_sam_with_tags(sam_file, output, tag_temp_file)
+    
+    logger.info(f"Processing complete. Output written to {output}")
 
-def fastq_header_tags(fastq_file: str) -> Generator[Dict[str, str], None, None]:
+def extract_fastq_tags(fastq_file: str, tag_temp_file):
     """
-    Generate read tags from FASTQ headers with minimal memory usage.
-    Yields a dictionary of tags for each read.
+    Extract read tags from FASTQ file and write to a temporary file.
+    
+    Temporary file format: 
+    read_name\tCR\tCY\tCB\tXP\tXM\tUR\tUY
     """
+    logger = logging.getLogger('scarecrow')
+    logger.info(f"Extracting tags from {fastq_file}")
+    
+    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
+    
     with open(fastq_file, "r") as fq:
         while True:
+            # Read header line
             header = fq.readline().strip()
             if not header:
                 break
@@ -84,59 +101,53 @@ def fastq_header_tags(fastq_file: str) -> Generator[Dict[str, str], None, None]:
             fq.readline()
             
             if header.startswith("@"):
-                # Extract the read name and tags
-                read_name = header.split(" ")[0][1:]  # Remove "@" and split to get the read name
-                attributes = {item.split("=")[0]: item.split("=")[1] 
-                              for item in header.split() if "=" in item}
+                # Extract read name
+                read_name = header.split(" ")[0][1:]  # Remove "@"
                 
-                # Prepare the tags dictionary
-                tags = {
-                    "read_name": read_name,
-                    "CR": attributes.get("CR"),
-                    "CY": attributes.get("CY"),
-                    "CB": attributes.get("CB"),
-                    "XP": attributes.get("XP"),
-                    "XM": attributes.get("XM"),
-                    "UR": attributes.get("UR"),
-                    "UY": attributes.get("UY")
-                }
+                # Extract tag values
+                tag_dict = {}
+                for item in header.split():
+                    if "=" in item:
+                        key, value = item.split("=")
+                        tag_dict[key] = value
                 
-                yield tags
+                # Prepare tag line
+                tag_values = [tag_dict.get(tag, "") for tag in tag_names]
+                tag_line = f"{read_name}\t{'\t'.join(tag_values)}\n"
+                tag_temp_file.write(tag_line)
 
-def process_sam_with_tags(input_sam: str, output_sam: str, read_tag_generator: Generator):
+def process_sam_with_tags(input_sam: str, output_sam: str, tag_temp_file):
     """
-    Process SAM file and add tags with minimal memory usage.
+    Process SAM file and add tags with absolute minimal memory usage.
     """
     logger = logging.getLogger('scarecrow')
     logger.info(f"Processing SAM file {input_sam}")
     
-    # Create a dictionary to store read tags
-    read_tags = {}
+    # Create tag lookup function
+    def get_read_tags(read_name):
+        tag_temp_file.seek(0)
+        for line in tag_temp_file:
+            parts = line.strip().split('\t')
+            if parts[0] == read_name:
+                return parts[1:]
+        return None
     
-    # Pre-load read tags into memory
-    for tag_dict in read_tag_generator:
-        read_tags[tag_dict['read_name']] = tag_dict
+    # Tag names in order
+    tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     
     # Process SAM file
     with pysam.AlignmentFile(input_sam, "r") as infile, \
          pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
         
         for read in infile:
-            # Check if read name exists in tags
-            if read.query_name in read_tags:
-                tags = read_tags[read.query_name]
-                
+            # Get tags for this read
+            tags = get_read_tags(read.query_name)
+            
+            if tags:
                 # Add tags if they exist
-                tag_mapping = [
-                    ("CR", "Z"), ("CY", "Z"), ("CB", "Z"),
-                    ("XP", "Z"), ("XM", "Z"), 
-                    ("UR", "Z"), ("UY", "Z")
-                ]
-                
-                for tag_name, val_type in tag_mapping:
-                    tag_value = tags.get(tag_name)
+                for tag_name, tag_value in zip(tag_names, tags):
                     if tag_value:
-                        read.set_tag(tag_name, tag_value, value_type=val_type)
+                        read.set_tag(tag_name, tag_value, value_type="Z")
             
             # Write the read to output
             outfile.write(read)
