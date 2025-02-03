@@ -11,7 +11,7 @@ import time
 import logging
 import pysam
 import multiprocessing as mp
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Union
 from functools import partial
 from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
@@ -83,6 +83,24 @@ def validate_samtag_args(parser, args):
         threads=args.threads
     )
 
+def get_total_reads(input_path: str) -> int:
+    """
+    Count total number of reads in the SAM/BAM file.
+    
+    Handles both indexed and non-indexed files.
+    """
+    try:
+        # Try to use indexed counting first
+        with pysam.AlignmentFile(input_path, 'rb') as infile:
+            return infile.count()
+    except ValueError:
+        # If indexing fails, count manually
+        total_reads = 0
+        with pysam.AlignmentFile(input_path, 'rb') as infile:
+            for _ in infile:
+                total_reads += 1
+        return total_reads
+
 @log_errors
 def run_samtag(
     fastq_file: str = None, 
@@ -114,7 +132,7 @@ def run_samtag(
 
         # Create temporary directory for intermediate files
         temp_dir = f"samtag_temp_{generate_random_string()}"
-        os.makedirs(temp_dir, exist_ok = True)
+        os.makedirs(temp_dir, exist_ok=True)
         logger.info(f"Using temporary directory: {temp_dir}")
 
         # Process SAM/BAM with multiprocessing
@@ -123,8 +141,8 @@ def run_samtag(
             out_file, 
             fastq_file,
             temp_dir,
-            num_processes = threads,
-            batch_size = batch_size
+            num_processes=threads,
+            batch_size=batch_size
         )
         
         # Clean up temporary directory
@@ -137,33 +155,15 @@ def run_samtag(
         logger.error(f"Error processing files: {e}")
         sys.exit(1)
 
-def get_total_reads(input_path: str) -> int:
-    """
-    Count total number of reads in the SAM/BAM file.
-    
-    Handles both indexed and non-indexed files.
-    """
-    try:
-        # Try to use indexed counting first
-        with pysam.AlignmentFile(input_path, 'rb') as infile:
-            return infile.count()
-    except ValueError:
-        # If indexing fails, count manually
-        total_reads = 0
-        with pysam.AlignmentFile(input_path, 'rb') as infile:
-            for _ in infile:
-                total_reads += 1
-        return total_reads
-
 def extract_batch_tags(
-    batch_reads: List[str], 
+    batch_read_names: List[str], 
     fastq_path: str
 ) -> Dict[str, Dict[str, Optional[str]]]:
     """
     Extract tags for a specific batch of reads from FASTQ file.
     
     Args:
-    batch_reads: List of read names to extract tags for
+    batch_read_names: List of read names to extract tags for
     fastq_path: Path to FASTQ file
     
     Returns:
@@ -171,7 +171,7 @@ def extract_batch_tags(
     """
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     read_tags = {}
-    read_names_set = set(batch_reads)
+    read_names_set = set(batch_read_names)
     
     with open(fastq_path, 'r') as fq:
         while True:
@@ -213,22 +213,92 @@ def extract_batch_tags(
     
     return read_tags
 
+def serialize_read(read: Union[pysam.AlignedSegment, None]) -> Tuple[Optional[str], Optional[List]]:
+    """
+    Convert a pysam AlignedSegment to a picklable representation.
+    
+    Args:
+    read: A pysam AlignedSegment or None
+    
+    Returns:
+    A tuple of (read name, [serialized read data])
+    """
+    if read is None:
+        return None, None
+    
+    # Extract core read information
+    return read.query_name, [
+        read.query_sequence,
+        read.qual,
+        read.flag,
+        read.reference_name,
+        read.reference_start,
+        read.mapping_quality,
+        list(read.get_tags())
+    ]
+
+def deserialize_read(
+    header: pysam.AlignmentHeader, 
+    serialized_read: Tuple[Optional[str], Optional[List]]
+) -> Optional[pysam.AlignedSegment]:
+    """
+    Reconstruct a pysam AlignedSegment from its serialized representation.
+    
+    Args:
+    header: The AlignmentHeader from the original file
+    serialized_read: Tuple of (read name, [serialized read data])
+    
+    Returns:
+    A reconstructed pysam AlignedSegment
+    """
+    if serialized_read is None or serialized_read[0] is None:
+        return None
+    
+    read_name, read_data = serialized_read
+    
+    # Recreate the AlignedSegment
+    read = pysam.AlignedSegment(header)
+    read.query_name = read_name
+    read.query_sequence = read_data[0]
+    read.qual = read_data[1]
+    read.flag = read_data[2]
+    read.reference_name = read_data[3]
+    read.reference_start = read_data[4]
+    read.mapping_quality = read_data[5]
+    
+    # Restore tags
+    for tag in read_data[6]:
+        read.set_tag(tag[0], tag[1], tag[2])
+    
+    return read
+
 def process_read_batch(
-    batch: List[Tuple], 
-    fastq_path: str
-) -> List[Tuple]:
+    serialized_batch: List[Tuple[Optional[str], Optional[List]]], 
+    fastq_path: str,
+    header_dict: Dict[str, Union[str, int]]
+) -> List[Tuple[Optional[str], Optional[List]]]:
     """
     Process a batch of reads by extracting and adding tags from FASTQ.
     
     Args:
-    batch: List of reads to process
+    serialized_batch: List of serialized reads
     fastq_path: Path to FASTQ file
+    header_dict: Dictionary representation of the BAM header
     
     Returns:
-    List of processed reads with tags added
+    List of processed serialized reads with tags added
     """
-    # Extract read names for this batch
-    batch_read_names = [read.query_name for read in batch]
+    # Reconstruct header
+    header = pysam.AlignmentHeader.from_dict(header_dict)
+    
+    # Deserialize batch
+    batch = [
+        deserialize_read(header, read_data) 
+        for read_data in serialized_batch
+    ]
+    
+    # Extract read names
+    batch_read_names = [read.query_name for read in batch if read is not None]
     
     # Get tags for this batch
     read_tags = extract_batch_tags(batch_read_names, fastq_path)
@@ -237,17 +307,19 @@ def process_read_batch(
     processed_batch = []
     
     for read in batch:
-        # Check if read name exists in tags
-        if read.query_name in read_tags:
-            tags = read_tags[read.query_name]
+        if read is not None:
+            # Check if read name exists in tags
+            if read.query_name in read_tags:
+                tags = read_tags[read.query_name]
+                
+                # Add tags if they exist
+                for tag_name in tag_names:
+                    tag_value = tags.get(tag_name)
+                    if tag_value:
+                        read.set_tag(tag_name, tag_value, value_type='Z')
             
-            # Add tags if they exist
-            for tag_name in tag_names:
-                tag_value = tags.get(tag_name)
-                if tag_value:
-                    read.set_tag(tag_name, tag_value, value_type='Z')
-        
-        processed_batch.append(read)
+            # Serialize processed read
+            processed_batch.append(serialize_read(read))
     
     return processed_batch
 
@@ -280,8 +352,11 @@ def process_sam_multiprocessing(
     # Prepare multiprocessing pool and intermediate files
     temp_files = [os.path.join(temp_dir, f"batch_{i}.sam") for i in range(num_processes)]
     
-    # Open input file
+    # Open input file and get header
     with pysam.AlignmentFile(input_path, 'rb') as infile:
+        # Convert header to dictionary for serialization
+        header_dict = infile.header.to_dict()
+        
         # Create process pool
         with mp.Pool(processes=num_processes) as pool:
             # Create temporary output files for each process
@@ -296,14 +371,17 @@ def process_sam_multiprocessing(
                 processed_reads = 0
                 
                 for i, read in enumerate(infile):
-                    batch.append(read)
+                    # Serialize read to make it picklable
+                    serialized_read = serialize_read(read)
+                    batch.append(serialized_read)
                     
                     # Process batch when it reaches the specified size
                     if len(batch) >= batch_size:
                         # Distribute batches across processes
                         process_batch_func = partial(
                             process_read_batch, 
-                            fastq_path=fastq_path
+                            fastq_path=fastq_path,
+                            header_dict=header_dict
                         )
                         
                         # Distribute batch processing
@@ -311,8 +389,10 @@ def process_sam_multiprocessing(
                         
                         # Write processed reads to thread-specific files
                         for process_idx, processed_batch in enumerate(processed_batches):
-                            for processed_read in processed_batch:
-                                temp_outfiles[process_idx].write(processed_read)
+                            for processed_read_data in processed_batch:
+                                processed_read = deserialize_read(infile.header, processed_read_data)
+                                if processed_read:
+                                    temp_outfiles[process_idx].write(processed_read)
                         
                         # Update progress
                         processed_reads += len(batch)
@@ -332,28 +412,33 @@ def process_sam_multiprocessing(
                 if batch:
                     process_batch_func = partial(
                         process_read_batch, 
-                        fastq_path=fastq_path
+                        fastq_path=fastq_path,
+                        header_dict=header_dict
                     )
                     processed_batches = pool.map(process_batch_func, [batch])
                     
                     # Write processed reads to thread-specific files
                     for process_idx, processed_batch in enumerate(processed_batches):
-                        for processed_read in processed_batch:
-                            temp_outfiles[process_idx].write(processed_read)
+                        for processed_read_data in processed_batch:
+                            processed_read = deserialize_read(infile.header, processed_read_data)
+                            if processed_read:
+                                temp_outfiles[process_idx].write(processed_read)
                     
                     processed_reads += len(batch)
-                
+                    elapsed_time = time.time() - start_time
+                    reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
+
                 # Close temporary output files
                 for outfile in temp_outfiles:
                     outfile.close()
-                
+                    
                 # Concatenate temporary files
                 with pysam.AlignmentFile(output_path, 'w', header=infile.header) as final_outfile:
                     for temp_file in temp_files:
                         with pysam.AlignmentFile(temp_file, 'r') as temp_infile:
                             for temp_read in temp_infile:
                                 final_outfile.write(temp_read)
-                
+                    
                 # Log final progress
                 elapsed_time = time.time() - start_time
                 logger.info(f"Processed {processed_reads}/{total_reads} reads "
