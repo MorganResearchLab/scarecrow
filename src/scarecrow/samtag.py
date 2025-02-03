@@ -114,7 +114,7 @@ def run_samtag(
 
         # Create temporary directory for intermediate files
         temp_dir = f"samtag_temp_{generate_random_string()}"
-        os.makedirs(temp_dir, exist_ok=True)
+        os.makedirs(temp_dir, exist_ok = True)
         logger.info(f"Using temporary directory: {temp_dir}")
 
         # Process SAM/BAM with multiprocessing
@@ -123,8 +123,8 @@ def run_samtag(
             out_file, 
             fastq_file,
             temp_dir,
-            num_processes=threads,
-            batch_size=batch_size
+            num_processes = threads,
+            batch_size = batch_size
         )
         
         # Clean up temporary directory
@@ -140,9 +140,20 @@ def run_samtag(
 def get_total_reads(input_path: str) -> int:
     """
     Count total number of reads in the SAM/BAM file.
+    
+    Handles both indexed and non-indexed files.
     """
-    with pysam.AlignmentFile(input_path, 'rb') as infile:
-        return infile.count()
+    try:
+        # Try to use indexed counting first
+        with pysam.AlignmentFile(input_path, 'rb') as infile:
+            return infile.count()
+    except ValueError:
+        # If indexing fails, count manually
+        total_reads = 0
+        with pysam.AlignmentFile(input_path, 'rb') as infile:
+            for _ in infile:
+                total_reads += 1
+        return total_reads
 
 def extract_batch_tags(
     batch_reads: List[str], 
