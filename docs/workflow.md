@@ -4,4 +4,4 @@
 
 # Workflow
 
-$${\color{lightgreen}`seed`}$$ -> `harvest` -> `reap` -> `tally` -> cutadapt -> align -> `samtag`
+<img style="float:right;width:200px;" src="../img/tubemap.png" alt="workflow tube map"/>

@@ -9,3 +9,4 @@
     * [`reap`](toolkit_reap.md)
     * [`tally`](toolkit_tally.md)
     * [`samtag`](toolkit_samtag.md)
+* [Workflow](workflow.md)
