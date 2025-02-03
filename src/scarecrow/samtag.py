@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: David Wragg
-Refactored for multiprocessing batch processing
+Refactored for on-demand FASTQ tag extraction and multiprocessing
 """
 
 import os
@@ -11,20 +11,22 @@ import time
 import logging
 import pysam
 import multiprocessing as mp
-from typing import Dict, Generator, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple
 from functools import partial
 from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
 def parser_samtag(parser):
+    """
+    Add samtag subparser with command-line arguments
+    """
     subparser = parser.add_parser(
         "samtag",
         description="""
 Update SAM file with barcode and UMI tags from scarecrow reap fastq header.
 
 Example:
-
 scarecrow samtag --fastq in.fastq --sam in.sam
 ---
 """,
@@ -36,14 +38,14 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         metavar="<file>",
         help=("Path to scarecrow reap fastq file"),
         type=str,
-        default=None,
+        required=True,
     )
     subparser.add_argument(
         "-s", "--sam",
         metavar="<file>",
         help=("Path to SAM file to update tags"),
         type=str,
-        default=None,
+        required=True,
     )
     subparser.add_argument(
         "-o", "--out",
@@ -70,10 +72,25 @@ scarecrow samtag --fastq in.fastq --sam in.sam
     return subparser
 
 def validate_samtag_args(parser, args):
-    run_samtag(fastq_file=args.fastq, sam_file=args.sam, out_file=args.out, batch_size = args.batch_size)
+    """
+    Validate and run samtag processing
+    """
+    run_samtag(
+        fastq_file=args.fastq, 
+        sam_file=args.sam, 
+        out_file=args.out, 
+        batch_size=args.batch_size,
+        threads=args.threads
+    )
 
 @log_errors
-def run_samtag(fastq_file: str = None, sam_file: str = None, out_file: str = None, batch_size: int = None) -> None:
+def run_samtag(
+    fastq_file: str = None, 
+    sam_file: str = None, 
+    out_file: str = None, 
+    batch_size: int = 10000,
+    threads: Optional[int] = None
+) -> None:
     """
     Multiprocessing function to process SAM tags efficiently
     """
@@ -88,24 +105,31 @@ def run_samtag(fastq_file: str = None, sam_file: str = None, out_file: str = Non
             base, ext = os.path.splitext(sam_file)
             out_file = f"{base}.tagged{ext}"
         
-        # Extract tags from FASTQ (in a memory-efficient manner)
-        read_tags = stream_fastq_tags(fastq_file)
-        
-        # Process files with minimal overhead
+        # Determine number of threads
         if threads is None:
             threads = min(mp.cpu_count() - 1, 8)
         else:
             threads = min(threads, mp.cpu_count())
         logger.info(f"Using {threads} threads")
 
+        # Create temporary directory for intermediate files
+        temp_dir = f"samtag_temp_{generate_random_string()}"
+        os.makedirs(temp_dir, exist_ok=True)
+        logger.info(f"Using temporary directory: {temp_dir}")
+
         # Process SAM/BAM with multiprocessing
         process_sam_multiprocessing(
             sam_file, 
             out_file, 
-            read_tags,
-            num_processes = threads,
-            batch_size = batch_size
+            fastq_file,
+            temp_dir,
+            num_processes=threads,
+            batch_size=batch_size
         )
+        
+        # Clean up temporary directory
+        import shutil
+        shutil.rmtree(temp_dir)
         
         logger.info("Processing completed successfully.")
     
@@ -113,32 +137,30 @@ def run_samtag(fastq_file: str = None, sam_file: str = None, out_file: str = Non
         logger.error(f"Error processing files: {e}")
         sys.exit(1)
 
-
-
 def get_total_reads(input_path: str) -> int:
     """
     Count total number of reads in the SAM/BAM file.
-    
-    Args:
-    input_path: Path to input SAM/BAM file
-    
-    Returns:
-    Total number of reads in the file
     """
     with pysam.AlignmentFile(input_path, 'rb') as infile:
         return infile.count()
 
-def stream_fastq_tags(fastq_path: str) -> Dict[str, Dict[str, Optional[str]]]:
+def extract_batch_tags(
+    batch_reads: List[str], 
+    fastq_path: str
+) -> Dict[str, Dict[str, Optional[str]]]:
     """
-    Extract all tags from FASTQ file with minimal memory usage.
+    Extract tags for a specific batch of reads from FASTQ file.
     
-    Returns a dictionary of read tags.
+    Args:
+    batch_reads: List of read names to extract tags for
+    fastq_path: Path to FASTQ file
+    
+    Returns:
+    Dictionary of read tags for the requested reads
     """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Extracting tags from FASTQ: {fastq_path}")
-    
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     read_tags = {}
+    read_names_set = set(batch_reads)
     
     with open(fastq_path, 'r') as fq:
         while True:
@@ -148,44 +170,58 @@ def stream_fastq_tags(fastq_path: str) -> Dict[str, Dict[str, Optional[str]]]:
                 break
             
             # Skip sequence, '+', and quality lines
-            fq.readline()
-            fq.readline()
-            fq.readline()
+            seq_line = fq.readline()
+            plus_line = fq.readline()
+            qual_line = fq.readline()
             
             # Process only FASTQ headers starting with '@'
             if header.startswith('@'):
                 # Extract read name (first part of header)
                 read_name = header.split()[0][1:]
                 
-                # Extract tags
-                tags = {}
-                for item in header.split():
-                    if '=' in item:
-                        key, value = item.split('=')
-                        tags[key] = value
-                
-                # Store tags for the read
-                read_tags[read_name] = {
-                    tag: tags.get(tag) for tag in tag_names
-                }
+                # Check if this read is in the current batch
+                if read_name in read_names_set:
+                    # Extract tags
+                    tags = {}
+                    for item in header.split():
+                        if '=' in item:
+                            key, value = item.split('=')
+                            tags[key] = value
+                    
+                    # Store tags for the read
+                    read_tags[read_name] = {
+                        tag: tags.get(tag) for tag in tag_names
+                    }
+                    
+                    # Remove from set to reduce iteration time
+                    read_names_set.remove(read_name)
+                    
+                    # Exit early if all batch reads processed
+                    if not read_names_set:
+                        break
     
-    logger.info(f"Extracted tags for {len(read_tags)} reads")
     return read_tags
 
 def process_read_batch(
     batch: List[Tuple], 
-    read_tags: Dict[str, Dict[str, Optional[str]]]
+    fastq_path: str
 ) -> List[Tuple]:
     """
-    Process a batch of reads, adding tags from the read_tags dictionary.
+    Process a batch of reads by extracting and adding tags from FASTQ.
     
     Args:
     batch: List of reads to process
-    read_tags: Dictionary of read tags
+    fastq_path: Path to FASTQ file
     
     Returns:
     List of processed reads with tags added
     """
+    # Extract read names for this batch
+    batch_read_names = [read.query_name for read in batch]
+    
+    # Get tags for this batch
+    read_tags = extract_batch_tags(batch_read_names, fastq_path)
+    
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     processed_batch = []
     
@@ -207,19 +243,13 @@ def process_read_batch(
 def process_sam_multiprocessing(
     input_path: str, 
     output_path: str, 
-    read_tags: Dict[str, Dict[str, Optional[str]]],
+    fastq_path: str,
+    temp_dir: str,
     num_processes: Optional[int] = None,
     batch_size: int = 10000
 ):
     """
-    Process SAM/BAM file using multiprocessing with low memory overhead.
-    
-    Args:
-    input_path: Path to input SAM/BAM file
-    output_path: Path to output SAM/BAM file
-    read_tags: Dictionary of read tags
-    num_processes: Number of processes to use (defaults to CPU count)
-    batch_size: Number of reads to process in each batch
+    Process SAM/BAM file using multiprocessing with on-demand FASTQ tag extraction.
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Processing SAM/BAM: {input_path}")
@@ -236,57 +266,93 @@ def process_sam_multiprocessing(
     # Start time for performance tracking
     start_time = time.time()
     
-    # Open input and output files
-    with pysam.AlignmentFile(input_path, 'rb') as infile, \
-         pysam.AlignmentFile(output_path, 'wb', header=infile.header) as outfile:
-        
+    # Prepare multiprocessing pool and intermediate files
+    temp_files = [os.path.join(temp_dir, f"batch_{i}.sam") for i in range(num_processes)]
+    
+    # Open input file
+    with pysam.AlignmentFile(input_path, 'rb') as infile:
         # Create process pool
         with mp.Pool(processes=num_processes) as pool:
-            # Partial function for batch processing
-            process_batch_func = partial(process_read_batch, read_tags=read_tags)
+            # Create temporary output files for each process
+            temp_outfiles = [
+                pysam.AlignmentFile(temp_file, 'w', header=infile.header) 
+                for temp_file in temp_files
+            ]
             
-            # Process reads in batches
-            batch = []
-            processed_reads = 0
-            for read in infile:
-                batch.append(read)
+            try:
+                # Process reads in batches
+                batch = []
+                processed_reads = 0
                 
-                # Process batch when it reaches the specified size
-                if len(batch) >= batch_size:
-                    # Process batch in parallel
+                for i, read in enumerate(infile):
+                    batch.append(read)
+                    
+                    # Process batch when it reaches the specified size
+                    if len(batch) >= batch_size:
+                        # Distribute batches across processes
+                        process_batch_func = partial(
+                            process_read_batch, 
+                            fastq_path=fastq_path
+                        )
+                        
+                        # Distribute batch processing
+                        processed_batches = pool.map(process_batch_func, [batch])
+                        
+                        # Write processed reads to thread-specific files
+                        for process_idx, processed_batch in enumerate(processed_batches):
+                            for processed_read in processed_batch:
+                                temp_outfiles[process_idx].write(processed_read)
+                        
+                        # Update progress
+                        processed_reads += len(batch)
+                        elapsed_time = time.time() - start_time
+                        reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
+                        estimated_remaining = (total_reads - processed_reads) / reads_per_sec if reads_per_sec > 0 else 0
+                        
+                        logger.info(f"Processed {processed_reads}/{total_reads} reads "
+                                    f"({processed_reads/total_reads*100:.2f}%) "
+                                    f"| Speed: {reads_per_sec:.2f} reads/sec "
+                                    f"| Est. remaining: {estimated_remaining:.2f} sec")
+                        
+                        # Reset batch
+                        batch = []
+                
+                # Process any remaining reads
+                if batch:
+                    process_batch_func = partial(
+                        process_read_batch, 
+                        fastq_path=fastq_path
+                    )
                     processed_batches = pool.map(process_batch_func, [batch])
                     
-                    # Write processed reads
-                    for processed_batch in processed_batches:
+                    # Write processed reads to thread-specific files
+                    for process_idx, processed_batch in enumerate(processed_batches):
                         for processed_read in processed_batch:
-                            outfile.write(processed_read)
+                            temp_outfiles[process_idx].write(processed_read)
                     
-                    # Update progress
                     processed_reads += len(batch)
-                    elapsed_time = time.time() - start_time
-                    reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
-                    estimated_remaining = (total_reads - processed_reads) / reads_per_sec if reads_per_sec > 0 else 0
-                    
-                    logger.info(f"Processed {processed_reads}/{total_reads} reads "
-                                f"({processed_reads/total_reads*100:.2f}%) "
-                                f"| Speed: {reads_per_sec:.2f} reads/sec "
-                                f"| Est. remaining: {estimated_remaining:.2f} sec")
-                    
-                    # Reset batch
-                    batch = []
-            
-            # Process any remaining reads
-            if batch:
-                processed_batches = pool.map(process_batch_func, [batch])
-                for processed_batch in processed_batches:
-                    for processed_read in processed_batch:
-                        outfile.write(processed_read)
                 
-                # Update final progress
-                processed_reads += len(batch)
+                # Close temporary output files
+                for outfile in temp_outfiles:
+                    outfile.close()
+                
+                # Concatenate temporary files
+                with pysam.AlignmentFile(output_path, 'w', header=infile.header) as final_outfile:
+                    for temp_file in temp_files:
+                        with pysam.AlignmentFile(temp_file, 'r') as temp_infile:
+                            for temp_read in temp_infile:
+                                final_outfile.write(temp_read)
+                
+                # Log final progress
                 elapsed_time = time.time() - start_time
                 logger.info(f"Processed {processed_reads}/{total_reads} reads "
                             f"({processed_reads/total_reads*100:.2f}%) "
                             f"| Total time: {elapsed_time:.2f} sec")
+            
+            finally:
+                # Ensure files are closed
+                for outfile in temp_outfiles:
+                    if not outfile.is_closed:
+                        outfile.close()
     
     logger.info("Multiprocessing complete")
