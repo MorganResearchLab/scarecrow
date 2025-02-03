@@ -391,11 +391,11 @@ def process_sam_multiprocessing(
                         
                         # Distribute batch processing
                         processed_batches = pool.map(process_batch_func, [batch])
-                        print(f"processed_batches ran")
                         
                         # Write processed reads to thread-specific files
                         for process_idx, processed_batch in enumerate(processed_batches):
                             for processed_read_data in processed_batch:
+                                print(f"{process_idx} : {processed_batch}")
                                 processed_read = deserialize_read(infile.header, processed_read_data)
                                 if processed_read:
                                     temp_outfiles[process_idx].write(processed_read)
