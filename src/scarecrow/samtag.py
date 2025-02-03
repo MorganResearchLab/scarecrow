@@ -11,7 +11,7 @@ import os
 import multiprocessing as mp
 from functools import partial
 from argparse import RawTextHelpFormatter
-from typing import List, Dict, Tuple
+from typing import List, Dict, Generator, Optional
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
