@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+#!/usr/bin/env python3
 @author: David Wragg
 """
 
@@ -8,10 +8,9 @@ import logging
 import pysam
 import os
 from argparse import RawTextHelpFormatter
-from typing import List, Dict
+from typing import Dict, Generator
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
-
 
 def parser_samtag(parser):
     subparser = parser.add_parser(
@@ -44,14 +43,12 @@ scarecrow samtag --fastq in.fastq --sam in.sam
     return subparser
 
 def validate_samtag_args(parser, args):
-    run_samtag(fastq_file = args.fastq,
-               sam_file = args.sam)
+    run_samtag(fastq_file=args.fastq, sam_file=args.sam)
     
 @log_errors
-def run_samtag(fastq_file: str = None,
-               sam_file: str = None) -> None:
+def run_samtag(fastq_file: str = None, sam_file: str = None) -> None:
     """
-    Function to rake barcodes for mismatches
+    Function to process barcodes with minimal memory usage
     """
     # Setup logging
     logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
@@ -59,66 +56,89 @@ def run_samtag(fastq_file: str = None,
     logger.info(f"logfile: '{logfile}'")
     
     # Preprocess fastq headers
-    if fastq_file:
-        logger.info(f"Pre-processing {fastq_file}")
-        read_tags = preprocess_fastq_headers(fastq_file)    
-
-    # Add tags to SAM file
-    if sam_file:
-        name, _ = os.path.splitext(fastq_file)
+    if fastq_file and sam_file:
+        logger.info(f"Processing {fastq_file} and {sam_file}")
+        name, _ = os.path.splitext(sam_file)
         output = name + ".tagged.sam"
-        logger.info(f"Adding tags and writing to {output}")
-        add_tags_to_sam(sam_file, output, read_tags)
+        
+        # Use a generator to iterate through read tags
+        read_tag_generator = fastq_header_tags(fastq_file)
+        
+        # Process SAM file with minimal memory
+        process_sam_with_tags(sam_file, output, read_tag_generator)
 
-def preprocess_fastq_headers(fastq_file):
-    """Preprocess FASTQ headers to create a mapping of read names to tags."""
-    read_tags = {}
+def fastq_header_tags(fastq_file: str) -> Generator[Dict[str, str], None, None]:
+    """
+    Generate read tags from FASTQ headers with minimal memory usage.
+    Yields a dictionary of tags for each read.
+    """
     with open(fastq_file, "r") as fq:
-        for line in fq:
-            if line.startswith("@"):
+        while True:
+            header = fq.readline().strip()
+            if not header:
+                break
+            
+            # Skip the next 3 lines (sequence, '+', quality)
+            fq.readline()
+            fq.readline()
+            fq.readline()
+            
+            if header.startswith("@"):
                 # Extract the read name and tags
-                fastq_header = line.strip()
-                read_name = fastq_header.split(" ")[0][1:]  # Remove "@" and split to get the read name
-                attributes = {item.split("=")[0]: item.split("=")[1] for item in fastq_header.split() if "=" in item}
+                read_name = header.split(" ")[0][1:]  # Remove "@" and split to get the read name
+                attributes = {item.split("=")[0]: item.split("=")[1] 
+                              for item in header.split() if "=" in item}
                 
-                # Store barcodes and UMI if they exist
-                original_barcodes = attributes.get("CR", None)
-                barcode_qualities = attributes.get("CY", None)
-                corrected_barcodes = attributes.get("CB", None)
-                barcode_positions = attributes.get("XP", None)
-                barcode_mismatches = attributes.get("XM", None)
-                umi = attributes.get("UR", None)
-                umi_quality = attributes.get("UY", None)
-                read_tags[read_name] = {"CR": original_barcodes, 
-                                        "CY": barcode_qualities, 
-                                        "CB": corrected_barcodes, 
-                                        "XP": barcode_positions, 
-                                        "XM": barcode_mismatches, 
-                                        "UR": umi, 
-                                        "UY": umi_quality}
+                # Prepare the tags dictionary
+                tags = {
+                    "read_name": read_name,
+                    "CR": attributes.get("CR"),
+                    "CY": attributes.get("CY"),
+                    "CB": attributes.get("CB"),
+                    "XP": attributes.get("XP"),
+                    "XM": attributes.get("XM"),
+                    "UR": attributes.get("UR"),
+                    "UY": attributes.get("UY")
+                }
+                
+                yield tags
 
-    return read_tags
-
-@log_errors
-def add_tags_to_sam(input_sam, output_sam, read_tags):
-    """Add tags to SAM file based on the preprocessed FASTQ headers."""
+def process_sam_with_tags(input_sam: str, output_sam: str, read_tag_generator: Generator):
+    """
+    Process SAM file and add tags with minimal memory usage.
+    """
     logger = logging.getLogger('scarecrow')
-    with pysam.AlignmentFile(input_sam, "r") as infile, pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+    logger.info(f"Processing SAM file {input_sam}")
+    
+    # Create a dictionary to store read tags
+    read_tags = {}
+    
+    # Pre-load read tags into memory
+    for tag_dict in read_tag_generator:
+        read_tags[tag_dict['read_name']] = tag_dict
+    
+    # Process SAM file
+    with pysam.AlignmentFile(input_sam, "r") as infile, \
+         pysam.AlignmentFile(output_sam, "w", header=infile.header) as outfile:
+        
         for read in infile:
+            # Check if read name exists in tags
             if read.query_name in read_tags:
                 tags = read_tags[read.query_name]
-                if tags["CR"]:
-                    read.set_tag("CR", tags["CR"], value_type="Z")
-                if tags["CY"]:
-                    read.set_tag("CY", tags["CY"], value_type="Z")
-                if tags["CB"]:
-                    read.set_tag("CB", tags["CB"], value_type="Z")
-                if tags["XP"]:
-                    read.set_tag("XP", tags["XP"], value_type="Z")
-                if tags["XM"]:
-                    read.set_tag("XM", tags["XM"], value_type="Z")
-                if tags["UR"]:
-                    read.set_tag("UR", tags["UR"], value_type="Z")
-                if tags["UY"]:
-                    read.set_tag("UY", tags["UY"], value_type="Z")
+                
+                # Add tags if they exist
+                tag_mapping = [
+                    ("CR", "Z"), ("CY", "Z"), ("CB", "Z"),
+                    ("XP", "Z"), ("XM", "Z"), 
+                    ("UR", "Z"), ("UY", "Z")
+                ]
+                
+                for tag_name, val_type in tag_mapping:
+                    tag_value = tags.get(tag_name)
+                    if tag_value:
+                        read.set_tag(tag_name, tag_value, value_type=val_type)
+            
+            # Write the read to output
             outfile.write(read)
+    
+    logger.info(f"Completed processing. Output written to {output_sam}")
