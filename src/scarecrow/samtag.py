@@ -85,30 +85,12 @@ def validate_samtag_args(parser, args):
         threads=args.threads
     )
 
-def get_total_reads(input_path: str) -> int:
-    """
-    Count total number of reads in the SAM/BAM file.
-    
-    Handles both indexed and non-indexed files.
-    """
-    try:
-        # Try to use indexed counting first
-        with pysam.AlignmentFile(input_path, 'rb') as infile:
-            return infile.count()
-    except ValueError:
-        # If indexing fails, count manually
-        total_reads = 0
-        with pysam.AlignmentFile(input_path, 'rb') as infile:
-            for _ in infile:
-                total_reads += 1
-        return total_reads
-
 @log_errors
 def run_samtag(
     fastq_file: str = None, 
     sam_file: str = None, 
     out_file: str = None, 
-    batch_size: int = 20000,
+    batch_size: int = 200000,
     threads: Optional[int] = None
 ) -> None:
     """
@@ -138,8 +120,16 @@ def run_samtag(
         os.makedirs(temp_dir, exist_ok=True)
         logger.info(f"Using temporary directory: {temp_dir}")
 
-        process_sam_multiprocessing(sam_file, out_file, fastq_file, temp_dir, threads)
-
+        # Process SAM/BAM with multiprocessing
+        process_sam_multiprocessing(
+            sam_file, 
+            out_file, 
+            fastq_file,
+            temp_dir,
+            num_processes = threads,
+            chunk_size = batch_size
+        )
+        
         # Clean up temporary directory
         import shutil
         shutil.rmtree(temp_dir)
@@ -150,24 +140,32 @@ def run_samtag(
         logger.error(f"Error processing files: {e}")
         sys.exit(1)
 
-def index_fastq(fastq_path: str) -> Dict[str, Dict[str, str]]:
+
+
+
+def extract_tags_from_fastq(fastq_path: str, read_names: List[str]) -> Dict[str, Dict[str, str]]:
     """
-    Index the FASTQ file to create a dictionary of read names and their tags.
+    Extract tags for a specific set of read names from the FASTQ file.
     """
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
-    fastq_index = {}
+    read_tags = {}
+    read_names_set = set(read_names)
 
     with pysam.FastxFile(fastq_path) as fastq:
         for entry in fastq:
             read_name = entry.name.split()[0]  # Extract read name from header
-            tags = {}
-            for item in entry.comment.split():  # Extract tags from the comment field
-                if '=' in item:
-                    key, value = item.split('=')
-                    tags[key] = value
-            fastq_index[read_name] = {tag: tags.get(tag) for tag in tag_names}
+            if read_name in read_names_set:
+                tags = {}
+                for item in entry.comment.split():  # Extract tags from the comment field
+                    if '=' in item:
+                        key, value = item.split('=')
+                        tags[key] = value
+                read_tags[read_name] = {tag: tags.get(tag) for tag in tag_names}
+                read_names_set.remove(read_name)
+                if not read_names_set:
+                    break  # Stop once all required reads are found
 
-    return fastq_index
+    return read_tags
 
 @log_errors
 def process_chunk(args: Tuple) -> Tuple[bool, str]:
@@ -175,18 +173,27 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
     logger = logging.getLogger('scarecrow')
-
-    input_path, fastq_index, header_dict, start, end, temp_file = args
+    
+    input_path, fastq_path, header_dict, start, end, temp_file = args
 
     try:
         with pysam.AlignmentFile(input_path, 'rb') as infile, \
              pysam.AlignmentFile(temp_file, 'wb', header=header_dict) as outfile:
 
-            # Fetch reads in the chunk range
+            # Collect read names in the chunk
+            read_names = []
+            for read in infile.fetch(start=start, end=end):
+                read_names.append(read.query_name)
+
+            # Extract tags for these reads from the FASTQ file
+            read_tags = extract_tags_from_fastq(fastq_path, read_names)
+
+            # Rewind the BAM file and process the chunk again
+            infile.reset()
             for read in infile.fetch(start=start, end=end):
                 read_name = read.query_name
-                if read_name in fastq_index:
-                    tags = fastq_index[read_name]
+                if read_name in read_tags:
+                    tags = read_tags[read_name]
                     for tag_name, tag_value in tags.items():
                         if tag_value:
                             read.set_tag(tag_name, tag_value, value_type='Z')
@@ -211,11 +218,6 @@ def process_sam_multiprocessing(
     Process the BAM file in parallel using multiprocessing.
     """
     logger = logging.getLogger('scarecrow')
-    logger.info(f"Processing {input_path} with {num_processes} processes")
-
-    # Index the FASTQ file
-    logger.info("Indexing FASTQ file...")
-    fastq_index = index_fastq(fastq_path)
 
     # Get BAM file header and total reads
     with pysam.AlignmentFile(input_path, 'rb') as infile:
@@ -231,7 +233,7 @@ def process_sam_multiprocessing(
 
     # Prepare arguments for each chunk
     process_args = [
-        (input_path, fastq_index, header_dict, start, end, os.path.join(temp_dir, f"temp_{i}.bam"))
+        (input_path, fastq_path, header_dict, start, end, os.path.join(temp_dir, f"temp_{i}.bam"))
         for i, (start, end) in enumerate(chunk_ranges)
     ]
 
@@ -251,3 +253,4 @@ def process_sam_multiprocessing(
                 os.remove(temp_file)  # Clean up temporary file
 
     logger.info(f"Processing complete. Output written to {output_path}")
+
