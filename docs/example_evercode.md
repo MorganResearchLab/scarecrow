@@ -4,7 +4,7 @@
 
 # Example: Parse Evercode WTv2
 
-<img style="float:right;width:100px;" src="../img/WTv2.JPG" alt="scarecrow"/>
+<img style="float:right;width:400px;" src="../img/WTv2.png" alt="scarecrow"/>
 
 Stay organised - create a folder for the project to keep things tidy.
 

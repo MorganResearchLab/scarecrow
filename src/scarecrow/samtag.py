@@ -315,7 +315,7 @@ def process_chunk(args: tuple) -> tuple:
         
         with pysam.AlignmentFile(input_path, 'rb', check_sq=False, require_index=False) as infile:
             header = pysam.AlignmentHeader.from_dict(header_dict)
-            with pysam.AlignmentFile(temp_file, 'wb', header=header) as outfile:
+            with pysam.AlignmentFile(temp_file, 'w', header=header) as outfile:
                 try:
                     batch_reads = []
                     batch_positions = []
@@ -474,7 +474,7 @@ def process_sam_multiprocessing(
             header_dict,
             start_read,
             end_read,
-            os.path.join(temp_dir, f"temp_{i}.bam"),
+            os.path.join(temp_dir, f"temp_{i}.sam"),
             batch_size
         ))
     

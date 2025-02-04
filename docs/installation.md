@@ -8,6 +8,7 @@
 mamba create --name scarecrow python=3.12
 mamba activate scarecrow
 mamba install git pip
+pip install pyfastx
 pip install git+https://github.com/MorganResearchLab/scarecrow.git
 mamba install numpy, scipy, pandas, seaborn
 ```
