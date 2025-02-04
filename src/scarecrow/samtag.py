@@ -57,9 +57,9 @@ scarecrow samtag --fastq in.fastq --sam in.sam
     subparser.add_argument(
         "-b", "--batch_size",
         metavar="<int>",
-        help=("Number of read pairs per batch to process at a time [10000]"),
+        help=("Number of read pairs per batch to process at a time [20000]"),
         type=int,
-        default=10000,
+        default=20000,
     )
     subparser.add_argument(
         "-@", "--threads",
@@ -106,7 +106,7 @@ def run_samtag(
     fastq_file: str = None, 
     sam_file: str = None, 
     out_file: str = None, 
-    batch_size: int = 10000,
+    batch_size: int = 20000,
     threads: Optional[int] = None
 ) -> None:
     """
@@ -234,7 +234,7 @@ def serialize_read(read: Union[pysam.AlignedSegment, None]) -> Tuple[Optional[st
         read.reference_name,
         read.reference_start,
         read.mapping_quality,
-        list(read.get_tags())
+        list(read.get_tags(with_value_type=True))
     ]
 
 def deserialize_read(
@@ -255,9 +255,7 @@ def deserialize_read(
         return None
     
     read_name, read_data = serialized_read
-    
-    # Problem with tuple indexing needs resolving
-
+        
     # Recreate the AlignedSegment
     try:
         read = pysam.AlignedSegment(header)
@@ -270,7 +268,7 @@ def deserialize_read(
         read.mapping_quality = read_data[5]
         # Restore tags
         for tag in read_data[6]:
-            read.set_tag(tag[0], tag[1])
+            read.set_tag(tag[0], tag[1], tag[3])
     
     except IndexError:
         print(f"Index error for {read_data}")
@@ -340,127 +338,106 @@ def process_sam_multiprocessing(
     fastq_path: str,
     temp_dir: str,
     num_processes: Optional[int] = None,
-    batch_size: int = 10000
+    batch_size: int = 20000
 ):
     """
     Process SAM/BAM file using multiprocessing with on-demand FASTQ tag extraction.
+    Optimized for parallel processing with reduced I/O and memory usage.
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Processing SAM/BAM: {input_path}")
     
-    # Determine number of processes
     if num_processes is None:
         num_processes = mp.cpu_count()
     logger.info(f"Using {num_processes} processes")
     
-    # Get total number of reads for progress tracking
     total_reads = get_total_reads(input_path)
     logger.info(f"Total reads to process: {total_reads}")
     
-    # Start time for performance tracking
     start_time = time.time()
+    processed_reads = 0
     
-    # Prepare multiprocessing pool and intermediate files
-    temp_files = [os.path.join(temp_dir, f"batch_{i}.sam") for i in range(num_processes)]
+    # Create a single output file for atomic writes
+    temp_output = os.path.join(temp_dir, "merged_output.bam")
     
-    # Open input file and get header
     with pysam.AlignmentFile(input_path, 'rb') as infile:
-        # Convert header to dictionary for serialization
         header_dict = infile.header.to_dict()
         
-        # Create process pool
+        # Create process pool and output file
         with mp.Pool(processes=num_processes) as pool:
-            # Create temporary output files for each process
-            temp_outfiles = [
-                pysam.AlignmentFile(temp_file, 'w', header=infile.header) 
-                for temp_file in temp_files
-            ]
-            
-            try:
-                # Process reads in batches
-                batch = []
-                processed_reads = 0
-                
-                for i, read in enumerate(infile):
-                    # Serialize read to make it picklable
-                    serialized_read = serialize_read(read)
-                    batch.append(serialized_read)
+            with pysam.AlignmentFile(temp_output, 'wb', header=infile.header) as outfile:
+                try:
+                    # Collect batches
+                    batches = []
+                    current_batch = []
                     
-                    # Process batch when it reaches the specified size
-                    if len(batch) >= batch_size:
-
-                        # Distribute batches across processes
+                    for read in infile:
+                        current_batch.append(serialize_read(read))
+                        
+                        if len(current_batch) >= batch_size:
+                            batches.append(current_batch)
+                            current_batch = []
+                            
+                            # Process multiple batches in parallel when we have enough
+                            if len(batches) >= num_processes:
+                                process_batch_func = partial(
+                                    process_read_batch,
+                                    fastq_path=fastq_path,
+                                    header_dict=header_dict
+                                )
+                                
+                                # Process batches in parallel
+                                processed_batches = pool.map(process_batch_func, batches)
+                                
+                                # Write results
+                                for processed_batch in processed_batches:
+                                    for processed_read_data in processed_batch:
+                                        if processed_read_data and processed_read_data[0]:
+                                            processed_read = deserialize_read(infile.header, processed_read_data)
+                                            if processed_read:
+                                                outfile.write(processed_read)
+                                                processed_reads += 1
+                                
+                                # Log progress
+                                elapsed_time = time.time() - start_time
+                                reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
+                                estimated_remaining = (total_reads - processed_reads) / reads_per_sec if reads_per_sec > 0 else 0
+                                
+                                logger.info(f"Processed {processed_reads}/{total_reads} reads "
+                                          f"({processed_reads/total_reads*100:.2f}%) "
+                                          f"| Speed: {reads_per_sec:.2f} reads/sec "
+                                          f"| Est. remaining: {estimated_remaining:.2f} sec")
+                                
+                                # Clear processed batches
+                                batches = []
+                    
+                    # Process remaining reads
+                    if current_batch:
+                        batches.append(current_batch)
+                    
+                    if batches:
                         process_batch_func = partial(
-                            process_read_batch, 
-                            fastq_path = fastq_path,
-                            header_dict = header_dict
+                            process_read_batch,
+                            fastq_path=fastq_path,
+                            header_dict=header_dict
                         )
                         
-                        # Distribute batch processing
-                        processed_batches = pool.map(process_batch_func, [batch])
+                        processed_batches = pool.map(process_batch_func, batches)
                         
-                        # Write processed reads to thread-specific files
-                        for process_idx, processed_batch in enumerate(processed_batches):
+                        for processed_batch in processed_batches:
                             for processed_read_data in processed_batch:
-                                processed_read = deserialize_read(infile.header, processed_read_data)
-                                if processed_read:
-                                    temp_outfiles[process_idx].write(processed_read)
-                        
-                        # Update progress
-                        processed_reads += len(batch)
-                        elapsed_time = time.time() - start_time
-                        reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
-                        estimated_remaining = (total_reads - processed_reads) / reads_per_sec if reads_per_sec > 0 else 0
-                        
-                        logger.info(f"Processed {processed_reads}/{total_reads} reads "
-                                    f"({processed_reads/total_reads*100:.2f}%) "
-                                    f"| Speed: {reads_per_sec:.2f} reads/sec "
-                                    f"| Est. remaining: {estimated_remaining:.2f} sec")
-                        
-                        # Reset batch
-                        batch = []
+                                if processed_read_data and processed_read_data[0]:
+                                    processed_read = deserialize_read(infile.header, processed_read_data)
+                                    if processed_read:
+                                        outfile.write(processed_read)
+                                        processed_reads += 1
                 
-                # Process any remaining reads
-                if batch:
-                    process_batch_func = partial(
-                        process_read_batch, 
-                        fastq_path=fastq_path,
-                        header_dict=header_dict
-                    )
-                    processed_batches = pool.map(process_batch_func, [batch])
-                    
-                    # Write processed reads to thread-specific files
-                    for process_idx, processed_batch in enumerate(processed_batches):
-                        for processed_read_data in processed_batch:
-                            processed_read = deserialize_read(infile.header, processed_read_data)
-                            if processed_read:
-                                temp_outfiles[process_idx].write(processed_read)
-                    
-                    processed_reads += len(batch)
+                finally:
                     elapsed_time = time.time() - start_time
-                    reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
-
-                # Close temporary output files
-                for outfile in temp_outfiles:
-                    outfile.close()
-                    
-                # Concatenate temporary files
-                with pysam.AlignmentFile(output_path, 'w', header=infile.header) as final_outfile:
-                    for temp_file in temp_files:
-                        with pysam.AlignmentFile(temp_file, 'r') as temp_infile:
-                            for temp_read in temp_infile:
-                                final_outfile.write(temp_read)
-                    
-                # Log final progress
-                elapsed_time = time.time() - start_time
-                logger.info(f"Processed {processed_reads}/{total_reads} reads "
-                            f"({processed_reads/total_reads*100:.2f}%) "
-                            f"| Total time: {elapsed_time:.2f} sec")
-            
-            finally:
-                # Ensure files are closed
-                for outfile in temp_outfiles:
-                    if not outfile.is_closed:
-                        outfile.close()
+                    logger.info(f"Processed {processed_reads}/{total_reads} reads "
+                              f"({processed_reads/total_reads*100:.2f}%) "
+                              f"| Total time: {elapsed_time:.2f} sec")
     
+    # Atomic rename of the temporary file to the final output
+    os.rename(temp_output, output_path)
     logger.info("Multiprocessing complete")
