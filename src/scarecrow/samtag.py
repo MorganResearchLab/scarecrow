@@ -317,7 +317,7 @@ def process_chunk(args: tuple) -> str:
     try:
         input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
         
-        logging.debug(f"Processing chunk: start={chunk_start}, end={chunk_end}, temp_file={temp_file}")
+        print(f"Processing chunk: start={chunk_start}, end={chunk_end}, temp_file={temp_file}")
         
         # Validate input file
         if not os.path.exists(input_path):
@@ -349,7 +349,7 @@ def process_chunk(args: tuple) -> str:
                             
                             # Validate current position
                             if current_pos <= chunk_start:
-                                logging.warning(f"File position not advancing: current={current_pos}, start={chunk_start}")
+                                print(f"File position not advancing: current={current_pos}, start={chunk_start}")
                                 break
                                 
                             batch_reads.append(read.query_name)
@@ -372,7 +372,7 @@ def process_chunk(args: tuple) -> str:
                         except StopIteration:
                             break
                         except OSError as e:
-                            logging.error(f"Error reading file within chunk: {e}")
+                            print(f"Error reading file within chunk: {e}")
                             raise
                     
                     # Process remaining reads in last batch
@@ -387,7 +387,7 @@ def process_chunk(args: tuple) -> str:
                             outfile.write(read)
                 
                 except Exception as e:
-                    logging.error(f"Error processing chunk: {e}")
+                    print(f"Error processing chunk: {e}")
                     if os.path.exists(temp_file):
                         os.remove(temp_file)
                     raise
@@ -477,10 +477,6 @@ def process_sam_multiprocessing(
     os.makedirs(temp_dir, exist_ok=True)
     if not os.path.isdir(temp_dir):
         raise NotADirectoryError(f"Temporary directory is not valid: {temp_dir}")
-    
-    if num_processes is None:
-        num_processes = max(1, mp.cpu_count() - 1)
-    logger.info(f"Using {num_processes} processes")
     
     try:
         # Verify we can open and read the input file
