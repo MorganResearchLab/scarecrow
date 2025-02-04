@@ -173,7 +173,7 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
     logger = logging.getLogger('scarecrow')
-    
+
     input_path, fastq_path, header_dict, start, end, temp_file = args
 
     try:
@@ -184,9 +184,15 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
             read_names = []
             for read in infile.fetch(start=start, end=end):
                 read_names.append(read.query_name)
+            
+            logger.info(f"SAM read names: \n{read_names}")
+            print(f"SAM read names: \n{read_names}")
 
             # Extract tags for these reads from the FASTQ file
             read_tags = extract_tags_from_fastq(fastq_path, read_names)
+
+            logger.info(f"FASTQ read tags: \n{read_tags}")
+            print(f"FASTQ read tags: \n{read_tags}")
 
             # Rewind the BAM file and process the chunk again
             infile.reset()
