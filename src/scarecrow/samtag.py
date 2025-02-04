@@ -322,81 +322,69 @@ def chunk_iterator(file_path: str, chunk_size: int, num_chunks: int):
 
 def process_chunk(args: tuple) -> tuple:
     """
-    Process a chunk of SAM/BAM file with improved chunk boundary handling and error reporting.
+    Process a chunk of SAM/BAM file with improved large file handling.
     Returns tuple of (success, result/error_message)
     """
-    input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
+    input_path, fastq_path, header_dict, start_read_num, end_read_num, temp_file, batch_size = args
     
     try:
         if not os.path.exists(input_path) or not os.path.exists(fastq_path):
             return (False, f"Input files not found: {input_path} or {fastq_path}")
             
-        print(f"Processing chunk: start={chunk_start}, end={chunk_end}", file=sys.stderr)
+        print(f"Processing chunk: reads {start_read_num} to {end_read_num}", file=sys.stderr)
         
         with pysam.AlignmentFile(input_path, 'rb', check_sq=False, require_index=False) as infile:
             header = pysam.AlignmentHeader.from_dict(header_dict)
             with pysam.AlignmentFile(temp_file, 'wb', header=header) as outfile:
-                if chunk_start >= chunk_end:
-                    return (False, f"Invalid chunk positions: start={chunk_start}, end={chunk_end}")
-                
                 try:
-                    infile.seek(chunk_start)
                     batch_reads = []
                     batch_positions = []
-                    current_pos = chunk_start
                     reads_processed = 0
-                    last_read = None
+                    current_read_num = 0
                     
-                    while True:
-                        try:
-                            read = next(infile)
-                            current_pos = infile.tell()
+                    for read in infile:
+                        # Skip reads until we reach our chunk's starting point
+                        if current_read_num < start_read_num:
+                            current_read_num += 1
+                            continue
                             
-                            # Break if we've exceeded chunk boundary and read is different from last
-                            if current_pos > chunk_end and (not last_read or read.query_name != last_read.query_name):
-                                break
-                                
-                            reads_processed += 1
-                            last_read = read
-                            
-                            if reads_processed % 1000 == 0:
-                                print(f"Chunk progress: {reads_processed} reads, pos={current_pos}/{chunk_end}", 
-                                      file=sys.stderr)
-                            
-                            batch_reads.append(read.query_name)
-                            batch_positions.append((read, current_pos))
-                            
-                            # Process batch when full or at chunk boundary
-                            if len(batch_reads) >= chunk_size or current_pos >= chunk_end:
-                                if batch_reads:
-                                    read_tags = extract_batch_tags(batch_reads, fastq_path)
-                                    for read, _ in batch_positions:
-                                        if read.query_name in read_tags:
-                                            tags = read_tags[read.query_name]
-                                            for tag_name, tag_value in tags.items():
-                                                if tag_value:
-                                                    read.set_tag(tag_name, tag_value, value_type='Z')
-                                        outfile.write(read)
-                                
-                                batch_reads = []
-                                batch_positions = []
-                                
-                                # Break if we're past chunk boundary
-                                if current_pos >= chunk_end:
-                                    break
-                        
-                        except StopIteration:
-                            # Process any remaining reads in the last batch
-                            if batch_reads:
-                                read_tags = extract_batch_tags(batch_reads, fastq_path)
-                                for read, _ in batch_positions:
-                                    if read.query_name in read_tags:
-                                        tags = read_tags[read.query_name]
-                                        for tag_name, tag_value in tags.items():
-                                            if tag_value:
-                                                read.set_tag(tag_name, tag_value, value_type='Z')
-                                    outfile.write(read)
+                        # Break if we've processed all reads in our chunk
+                        if current_read_num >= end_read_num:
                             break
+                            
+                        reads_processed += 1
+                        current_read_num += 1
+                        
+                        if reads_processed % 1000 == 0:
+                            print(f"Chunk progress: {reads_processed} reads processed", file=sys.stderr)
+                        
+                        batch_reads.append(read.query_name)
+                        batch_positions.append((read, current_read_num))
+                        
+                        # Process batch when full
+                        if len(batch_reads) >= batch_size:
+                            read_tags = extract_batch_tags(batch_reads, fastq_path)
+                            for read, _ in batch_positions:
+                                if read.query_name in read_tags:
+                                    tags = read_tags[read.query_name]
+                                    for tag_name, tag_value in tags.items():
+                                        if tag_value:
+                                            read.set_tag(tag_name, tag_value, value_type='Z')
+                                outfile.write(read)
+                            
+                            batch_reads = []
+                            batch_positions = []
+                    
+                    # Process remaining reads in the last batch
+                    if batch_reads:
+                        read_tags = extract_batch_tags(batch_reads, fastq_path)
+                        for read, _ in batch_positions:
+                            if read.query_name in read_tags:
+                                tags = read_tags[read.query_name]
+                                for tag_name, tag_value in tags.items():
+                                    if tag_value:
+                                        read.set_tag(tag_name, tag_value, value_type='Z')
+                            outfile.write(read)
                 
                 except Exception as e:
                     return (False, f"Error in processing loop: {str(e)}")
@@ -415,6 +403,7 @@ def process_chunk(args: tuple) -> tuple:
             except:
                 pass
         return (False, error_msg)
+
 
 
 def process_read_batch(
@@ -481,7 +470,7 @@ def process_sam_multiprocessing(
     batch_size: int = 200000
 ):
     """
-    High-performance SAM/BAM processing with improved error handling and progress tracking.
+    High-performance SAM/BAM processing using read count based chunking.
     """
     print(f"Processing SAM/BAM: {input_path}", file=sys.stderr)
     
@@ -497,52 +486,60 @@ def process_sam_multiprocessing(
     print(f"Using {num_processes} processes", file=sys.stderr)
     
     try:
+        # Count total reads first
+        print("Counting total reads...", file=sys.stderr)
         with pysam.AlignmentFile(input_path, 'rb', check_sq=False, require_index=False) as infile:
-            print("Counting total reads...", file=sys.stderr)
             total_reads = sum(1 for _ in infile)
             header_dict = infile.header.to_dict()
         
         print(f"Total reads to process: {total_reads}", file=sys.stderr)
-        processed_reads = 0
-        start_time = time.time()
+        
+        # Calculate chunk sizes based on read count
+        reads_per_process = total_reads // num_processes
+        if reads_per_process < batch_size:
+            reads_per_process = batch_size
+            num_processes = max(1, total_reads // batch_size)
+            print(f"Adjusted to {num_processes} processes based on batch size", file=sys.stderr)
+        
         successful_temp_files = []
         failed_chunks = []
+        start_time = time.time()
         
         with mp.Pool(processes=num_processes) as pool:
             try:
-                chunk_groups = list(chunk_iterator(input_path, batch_size, num_processes))
-                
-                for group_idx, chunk_group in enumerate(chunk_groups):
-                    process_args = [
-                        (
-                            input_path,
-                            fastq_path,
-                            header_dict,
-                            chunk_start,
-                            chunk_end,
-                            os.path.join(temp_dir, f"temp_{group_idx}_{i}.bam"),
-                            batch_size
-                        )
-                        for i, (chunk_start, chunk_end) in enumerate(chunk_group)
-                    ]
-                    
-                    # Process chunks and collect results
-                    results = []
-                    for arg in process_args:
-                        result = process_chunk(arg)
-                        results.append(result)
+                # Create chunks based on read numbers rather than file positions
+                process_args = []
+                for i in range(num_processes):
+                    start_read = i * reads_per_process
+                    end_read = start_read + reads_per_process
+                    if i == num_processes - 1:
+                        end_read = total_reads  # Make sure last chunk gets remaining reads
                         
-                        # Handle result immediately
-                        success, result_data = result
-                        if success:
-                            successful_temp_files.append(result_data)
-                        else:
-                            failed_chunks.append((arg, result_data))
-                            print(f"Warning: Chunk processing failed: {result_data}", file=sys.stderr)
+                    process_args.append((
+                        input_path,
+                        fastq_path,
+                        header_dict,
+                        start_read,
+                        end_read,
+                        os.path.join(temp_dir, f"temp_{i}.bam"),
+                        batch_size
+                    ))
+                
+                # Process chunks and collect results
+                for i, arg in enumerate(process_args):
+                    result = process_chunk(arg)
+                    success, result_data = result
+                    
+                    if success:
+                        successful_temp_files.append(result_data)
+                        print(f"Successfully processed chunk {i+1}/{num_processes}", file=sys.stderr)
+                    else:
+                        failed_chunks.append((arg, result_data))
+                        print(f"Warning: Chunk {i+1} processing failed: {result_data}", file=sys.stderr)
                     
                     # Update progress
-                    processed_reads += batch_size * len(chunk_group)
                     elapsed_time = time.time() - start_time
+                    processed_reads = (i + 1) * reads_per_process
                     reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
                     
                     print(f"Processed approximately {processed_reads}/{total_reads} reads "

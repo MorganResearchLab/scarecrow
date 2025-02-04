@@ -4,6 +4,8 @@
 
 # Example: Parse Evercode WTv2
 
+<img style="float:right;width:100px;" src="../img/WTv2.JPG" alt="scarecrow"/>
+
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash
