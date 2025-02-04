@@ -303,7 +303,7 @@ def process_chunk(args: tuple) -> str:
     Process a chunk of SAM/BAM file and return path to temporary output.
     """
     input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
-    
+    print(f"{args}")
     # Create temporary output file
     with pysam.AlignmentFile(input_path, 'rb') as infile:
         header = pysam.AlignmentHeader.from_dict(header_dict)
@@ -424,10 +424,6 @@ def process_sam_multiprocessing(
     logger = logging.getLogger(__name__)
     logger.info(f"Processing SAM/BAM: {input_path}")
     
-    if num_processes is None:
-        num_processes = mp.cpu_count()
-    logger.info(f"Using {num_processes} processes")
-    
     total_reads = get_total_reads(input_path)
     logger.info(f"Total reads to process: {total_reads}")
     processed_reads = 0
@@ -442,7 +438,7 @@ def process_sam_multiprocessing(
             temp_files = []
             
             # Generate chunk iterator
-            for chunk_group in chunk_iterator(input_path, batch_size, num_processes * 2):
+            for chunk_group in chunk_iterator(input_path, batch_size, num_processes):
                 process_args = [
                     (
                         input_path,
