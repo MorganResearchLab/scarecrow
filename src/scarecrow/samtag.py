@@ -270,10 +270,10 @@ def deserialize_read(
         read.mapping_quality = read_data[5]
         # Restore tags
         for tag in read_data[6]:
-            read.set_tag(tag[0], tag[1], tag[2])
+            read.set_tag(tag[0], tag[1])
     
     except IndexError:
-        print(f"Index error for {serialized_read}")
+        print(f"Index error for {read_data}")
         print("Returning read as None")
         read = None
     
