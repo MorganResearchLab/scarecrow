@@ -140,9 +140,6 @@ def run_samtag(
         logger.error(f"Error processing files: {e}")
         sys.exit(1)
 
-
-
-
 def extract_tags_from_fastq(fastq_path: str, read_names: List[str]) -> Dict[str, Dict[str, str]]:
     """
     Extract tags for a specific set of read names from the FASTQ file.
@@ -172,7 +169,8 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
     """
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
-    logger = logging.getLogger('scarecrow')
+    #logger = logging.getLogger('scarecrow')
+    logger = setup_worker_logger()
     input_path, fastq_path, header_dict, chunk_reads, temp_file = args
 
     try:
@@ -194,7 +192,7 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
         return True, temp_file
 
     except Exception as e:
-        logger.error(f"Error processing chunk {temp_file}: {e}")
+        logger.warning(f"Error processing chunk {temp_file}: {e}")
         return False, str(e)
 
 @log_errors
@@ -209,7 +207,8 @@ def process_sam_multiprocessing(
     """
     Process the BAM file in parallel using multiprocessing.
     """
-    logger = logging.getLogger('scarecrow')
+    logger = setup_worker_logger()
+    logger.info("Starting sequence extraction")
 
     # Get BAM file header
     with pysam.AlignmentFile(input_path, 'rb') as infile:
@@ -257,3 +256,24 @@ def process_sam_multiprocessing(
                 logger.error(f"Failed to process temporary file: {temp_file}")
 
     logger.info(f"Processing complete. Output written to {output_path}")
+
+def setup_worker_logger(log_file: str = None):
+    """Configure logger for worker processes with file output"""
+    logger = logging.getLogger('scarecrow')
+    if not logger.handlers:  # Only add handlers if none exist
+        # Create formatters
+        formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # File handler if log_file provided
+        if log_file:
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        
+        logger.setLevel(logging.INFO)
+    return logger
