@@ -165,7 +165,7 @@ def extract_tags_from_fastq(fastq_path: str, read_names: List[str]) -> Dict[str,
                 if not read_names_set:
                     break  # Stop once all required reads are found
 
-    return read_tags
+    return
 
 @log_errors
 def process_chunk(args: Tuple) -> Tuple[bool, str]:
@@ -173,24 +173,16 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
     logger = logging.getLogger('scarecrow')
-
-    input_path, fastq_path, header_dict, start, end, temp_file = args
+    input_path, fastq_path, header_dict, chunk_reads, temp_file = args
 
     try:
-        with pysam.AlignmentFile(input_path, 'rb') as infile, \
-             pysam.AlignmentFile(temp_file, 'wb', header=header_dict) as outfile:
+        # Extract tags for the reads in this chunk
+        read_names = [read.query_name for read in chunk_reads]
+        read_tags = extract_tags_from_fastq(fastq_path, read_names)
 
-            # Collect read names in the chunk
-            read_names = []
-            for read in infile.fetch(start=start, end=end):
-                read_names.append(read.query_name)
-            
-            # Extract tags for these reads from the FASTQ file
-            read_tags = extract_tags_from_fastq(fastq_path, read_names)
-
-            # Rewind the BAM file and process the chunk again
-            infile.reset()
-            for read in infile.fetch(start=start, end=end):
+        # Write tagged reads to the temporary file
+        with pysam.AlignmentFile(temp_file, 'wb', header=header_dict) as outfile:
+            for read in chunk_reads:
                 read_name = read.query_name
                 if read_name in read_tags:
                     tags = read_tags[read_name]
@@ -199,7 +191,7 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
                             read.set_tag(tag_name, tag_value, value_type='Z')
                 outfile.write(read)
 
-        return True, temp_file, read_tags
+        return True, temp_file
 
     except Exception as e:
         logger.error(f"Error processing chunk {temp_file}: {e}")
@@ -212,49 +204,56 @@ def process_sam_multiprocessing(
     fastq_path: str,
     temp_dir: str,
     num_processes: int = 4,
-    chunk_size: int = 1000000
+    chunk_size: int = 100000
 ):
     """
     Process the BAM file in parallel using multiprocessing.
     """
     logger = logging.getLogger('scarecrow')
 
-    # Get BAM file header and total reads
+    # Get BAM file header
     with pysam.AlignmentFile(input_path, 'rb') as infile:
         header_dict = infile.header.to_dict()
-        total_reads = infile.count()
 
     # Create temporary directory
     os.makedirs(temp_dir, exist_ok=True)
 
-    # Divide the BAM file into chunks
-    chunk_ranges = [(i * chunk_size, min((i + 1) * chunk_size, total_reads))
-                    for i in range((total_reads + chunk_size - 1) // chunk_size)]
+    # Read the entire BAM file and split into chunks
+    logger.info("Reading BAM file and splitting into chunks...")
+    chunks = []
+    current_chunk = []
+    with pysam.AlignmentFile(input_path, 'rb') as infile:
+        for read in infile:
+            current_chunk.append(read)
+            if len(current_chunk) >= chunk_size:
+                chunks.append(current_chunk)
+                current_chunk = []
+        if current_chunk:  # Add the last chunk
+            chunks.append(current_chunk)
+
+    logger.info(f"Split into {len(chunks)} chunks")
 
     # Prepare arguments for each chunk
     process_args = [
-        (input_path, fastq_path, header_dict, start, end, os.path.join(temp_dir, f"temp_{i}.bam"))
-        for i, (start, end) in enumerate(chunk_ranges)
+        (input_path, fastq_path, header_dict, chunk, os.path.join(temp_dir, f"temp_{i}.bam"))
+        for i, chunk in enumerate(chunks)
     ]
 
     # Process chunks in parallel
-    logger.info(f"Processing {len(chunk_ranges)} chunks...")
+    logger.info(f"Processing {len(chunks)} chunks...")
     with mp.Pool(processes=num_processes) as pool:
         results = pool.map(process_chunk, process_args)
-
-    # Debug read_tags, suspect no matching between read names in SAM and FASTQ resulting in no tags
-    for success, temp_file, read_tags in results:
-        logger.info(f"{read_tags}")
 
     # Merge temporary files
     logger.info("Merging temporary files...")
     with pysam.AlignmentFile(output_path, 'wb', header=header_dict) as outfile:
-        for success, temp_file, read_tags in results:
+        for success, temp_file in results:
             if success:
                 with pysam.AlignmentFile(temp_file, 'rb') as infile:
                     for read in infile:
                         outfile.write(read)
                 os.remove(temp_file)  # Clean up temporary file
+            else:
+                logger.error(f"Failed to process temporary file: {temp_file}")
 
     logger.info(f"Processing complete. Output written to {output_path}")
-

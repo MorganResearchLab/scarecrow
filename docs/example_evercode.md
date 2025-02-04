@@ -70,7 +70,9 @@ The resulting barcode profiles are gathered together with `scarecrow harvest` to
 ```bash
 BARCODE_FILES=(${PROJECT}/barcode_profiles/Parse/barcodes.*.csv)
 sbatch --ntasks 1 --mem 16G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err \
-    scarecrow harvest ${BARCODE_FILES[@]} --barcode_count 1 --min_distance 10 \
+    scarecrow harvest ${BARCODE_FILES[@]} \
+        --barcode_count 1 \
+        --min_distance 10 \
         --conserved ${PROJECT}/barcode_profiles/Parse/barcodes.${BARCODES[0]%%:*}_conserved.tsv \
         --out ${PROJECT}/barcode_profiles/Parse/barcode_positions.csv
 ```
@@ -92,9 +94,10 @@ MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.gz})
 sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
-    scarecrow reap --threads ${THREADS} --batch_size 20000 \
+    scarecrow reap --threads ${THREADS} \
+        --batch_size 20000 \
         --fastqs ${FASTQS[@]} \
-        -p ${PROJECT}/barcode_profiles/barcode_positions.csv \
+        --barcode_positions ${PROJECT}/barcode_profiles/barcode_positions.csv \
         --barcode_reverse_order \
         --barcodes ${BARCODES[@]} \
         --extract 1:1-74 --umi 2:1-10 \
