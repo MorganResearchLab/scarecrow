@@ -10,3 +10,5 @@
     * [`tally`](toolkit_tally.md)
     * [`samtag`](toolkit_samtag.md)
 * [Workflow](workflow.md)
+* Examples
+    * [Parse Evercode WTv2](example_evercode.md)

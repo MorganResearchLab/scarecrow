@@ -156,42 +156,35 @@ def run_samtag(
         logger.error(f"Error processing files: {e}")
         sys.exit(1)
 
-def extract_batch_tags(
-    batch_read_names: List[str], 
-    fastq_path: str
-) -> Dict[str, Dict[str, Optional[str]]]:
+def extract_batch_tags(batch_read_names: List[str], fastq_path: str) -> Dict[str, Dict[str, str]]:
     """
-    Extract tags for a specific batch of reads from FASTQ file.
-    
-    Args:
-    batch_read_names: List of read names to extract tags for
-    fastq_path: Path to FASTQ file
-    
-    Returns:
-    Dictionary of read tags for the requested reads
+    Optimized tag extraction using memory mapping and set lookups.
     """
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     read_tags = {}
     read_names_set = set(batch_read_names)
     
-    with open(fastq_path, 'r') as fq:
-        while True:
+    # Memory map the FASTQ file
+    with open(fastq_path, 'rb') as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        
+        current_pos = 0
+        while current_pos < mm.size():
             # Read header line
-            header = fq.readline().strip()
-            if not header:
+            header_end = mm.find(b'\n', current_pos)
+            if header_end == -1:
                 break
-            
-            # Skip sequence, '+', and quality lines
-            seq_line = fq.readline()
-            plus_line = fq.readline()
-            qual_line = fq.readline()
-            
-            # Process only FASTQ headers starting with '@'
-            if header.startswith('@'):
-                # Extract read name (first part of header)
-                read_name = header.split()[0][1:]
                 
-                # Check if this read is in the current batch
+            header = mm[current_pos:header_end].decode('utf-8')
+            
+            # Skip to next record
+            for _ in range(3):  # Skip sequence, '+', and quality lines
+                current_pos = mm.find(b'\n', current_pos) + 1
+                if current_pos == 0:  # Not found
+                    break
+            
+            if header.startswith('@'):
+                read_name = header.split()[0][1:]
                 if read_name in read_names_set:
                     # Extract tags
                     tags = {}
@@ -200,17 +193,17 @@ def extract_batch_tags(
                             key, value = item.split('=')
                             tags[key] = value
                     
-                    # Store tags for the read
                     read_tags[read_name] = {
                         tag: tags.get(tag) for tag in tag_names
                     }
                     
-                    # Remove from set to reduce iteration time
                     read_names_set.remove(read_name)
-                    
-                    # Exit early if all batch reads processed
                     if not read_names_set:
                         break
+            
+            current_pos = header_end + 1
+        
+        mm.close()
     
     return read_tags
 
@@ -278,6 +271,90 @@ def deserialize_read(
     
     return read
 
+def chunk_iterator(file_path: str, chunk_size: int, num_chunks: int):
+    """
+    Memory-efficient iterator that yields chunks of file positions for parallel processing.
+    """
+    file_size = os.path.getsize(file_path)
+    chunk_positions = []
+    current_pos = 0
+    reads_in_chunk = 0
+    
+    with pysam.AlignmentFile(file_path, 'rb') as infile:
+        for read in infile:
+            reads_in_chunk += 1
+            if reads_in_chunk >= chunk_size:
+                chunk_positions.append((current_pos, infile.tell()))
+                current_pos = infile.tell()
+                reads_in_chunk = 0
+                
+                if len(chunk_positions) >= num_chunks:
+                    yield chunk_positions
+                    chunk_positions = []
+        
+        # Handle remaining portion
+        if current_pos < file_size:
+            chunk_positions.append((current_pos, file_size))
+            if chunk_positions:
+                yield chunk_positions
+
+def process_chunk(args: tuple) -> str:
+    """
+    Process a chunk of SAM/BAM file and return path to temporary output.
+    """
+    input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
+    
+    # Create temporary output file
+    with pysam.AlignmentFile(input_path, 'rb') as infile:
+        header = pysam.AlignmentHeader.from_dict(header_dict)
+        with pysam.AlignmentFile(temp_file, 'wb', header=header) as outfile:
+            # Seek to chunk start
+            infile.seek(chunk_start)
+            
+            # Process reads in chunk
+            batch_reads = []
+            batch_positions = []
+            current_pos = chunk_start
+            
+            while current_pos < chunk_end:
+                try:
+                    read = next(infile)
+                    current_pos = infile.tell()
+                    batch_reads.append(read.query_name)
+                    batch_positions.append((read, current_pos))
+                    
+                    if len(batch_reads) >= chunk_size:  # Use chunk_size for sub-batches
+                        # Extract tags for batch
+                        read_tags = extract_batch_tags(batch_reads, fastq_path)
+                        
+                        # Process and write reads
+                        for read, _ in batch_positions:
+                            if read.query_name in read_tags:
+                                tags = read_tags[read.query_name]
+                                for tag_name, tag_value in tags.items():
+                                    if tag_value:
+                                        read.set_tag(tag_name, tag_value, value_type='Z')
+                            outfile.write(read)
+                        
+                        batch_reads = []
+                        batch_positions = []
+                
+                except StopIteration:
+                    break
+            
+            # Process remaining reads in last batch
+            if batch_reads:
+                read_tags = extract_batch_tags(batch_reads, fastq_path)
+                for read, _ in batch_positions:
+                    if read.query_name in read_tags:
+                        tags = read_tags[read.query_name]
+                        for tag_name, tag_value in tags.items():
+                            if tag_value:
+                                read.set_tag(tag_name, tag_value, value_type='Z')
+                    outfile.write(read)
+    
+    return temp_file
+
 def process_read_batch(
     serialized_batch: List[Tuple[Optional[str], Optional[List]]], 
     fastq_path: str,
@@ -342,99 +419,65 @@ def process_sam_multiprocessing(
     batch_size: int = 20000
 ):
     """
-    Process SAM/BAM file using multiprocessing with on-demand FASTQ tag extraction.
-    Optimized for parallel processing with reduced I/O and memory usage.
+    High-performance SAM/BAM processing using parallel chunks and efficient I/O.
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Processing SAM/BAM: {input_path}")
     
+    if num_processes is None:
+        num_processes = mp.cpu_count()
+    logger.info(f"Using {num_processes} processes")
+    
     total_reads = get_total_reads(input_path)
     logger.info(f"Total reads to process: {total_reads}")
-    
-    start_time = time.time()
     processed_reads = 0
+    start_time = time.time()
     
-    # Create a single output file for atomic writes
-    temp_output = os.path.join(temp_dir, "merged_output.bam")
-    
-    with pysam.AlignmentFile(input_path, 'rb') as infile:
-        header_dict = infile.header.to_dict()
-        
-        # Create process pool and output file
-        with mp.Pool(processes=num_processes) as pool:
-            with pysam.AlignmentFile(temp_output, 'wb', header=infile.header) as outfile:
-                try:
-                    # Collect batches
-                    batches = []
-                    current_batch = []
-                    
-                    for read in infile:
-                        current_batch.append(serialize_read(read))
-                        
-                        if len(current_batch) >= batch_size:
-                            batches.append(current_batch)
-                            current_batch = []
-                            
-                            # Process multiple batches in parallel when we have enough
-                            if len(batches) >= num_processes:
-                                process_batch_func = partial(
-                                    process_read_batch,
-                                    fastq_path=fastq_path,
-                                    header_dict=header_dict
-                                )
-                                
-                                # Process batches in parallel
-                                processed_batches = pool.map(process_batch_func, batches)
-                                
-                                # Write results
-                                for processed_batch in processed_batches:
-                                    for processed_read_data in processed_batch:
-                                        if processed_read_data and processed_read_data[0]:
-                                            processed_read = deserialize_read(infile.header, processed_read_data)
-                                            if processed_read:
-                                                outfile.write(processed_read)
-                                                processed_reads += 1
-                                
-                                # Log progress
-                                elapsed_time = time.time() - start_time
-                                reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
-                                estimated_remaining = (total_reads - processed_reads) / reads_per_sec if reads_per_sec > 0 else 0
-                                
-                                logger.info(f"Processed {processed_reads}/{total_reads} reads "
-                                          f"({processed_reads/total_reads*100:.2f}%) "
-                                          f"| Speed: {reads_per_sec:.2f} reads/sec "
-                                          f"| Est. remaining: {estimated_remaining:.2f} sec")
-                                
-                                # Clear processed batches
-                                batches = []
-                    
-                    # Process remaining reads
-                    if current_batch:
-                        batches.append(current_batch)
-                    
-                    if batches:
-                        process_batch_func = partial(
-                            process_read_batch,
-                            fastq_path=fastq_path,
-                            header_dict=header_dict
-                        )
-                        
-                        processed_batches = pool.map(process_batch_func, batches)
-                        
-                        for processed_batch in processed_batches:
-                            for processed_read_data in processed_batch:
-                                if processed_read_data and processed_read_data[0]:
-                                    processed_read = deserialize_read(infile.header, processed_read_data)
-                                    if processed_read:
-                                        outfile.write(processed_read)
-                                        processed_reads += 1
+    # Create process pool
+    with mp.Pool(processes=num_processes) as pool:
+        with pysam.AlignmentFile(input_path, 'rb') as infile:
+            header_dict = infile.header.to_dict()
+            
+            # Process chunks in parallel
+            temp_files = []
+            
+            # Generate chunk iterator
+            for chunk_group in chunk_iterator(input_path, batch_size, num_processes * 2):
+                process_args = [
+                    (
+                        input_path,
+                        fastq_path,
+                        header_dict,
+                        chunk_start,
+                        chunk_end,
+                        os.path.join(temp_dir, f"temp_{i}.bam"),
+                        batch_size  # Pass batch_size to process_chunk
+                    )
+                    for i, (chunk_start, chunk_end) in enumerate(chunk_group)
+                ]
                 
-                finally:
-                    elapsed_time = time.time() - start_time
-                    logger.info(f"Processed {processed_reads}/{total_reads} reads "
-                              f"({processed_reads/total_reads*100:.2f}%) "
-                              f"| Total time: {elapsed_time:.2f} sec")
+                # Process chunks in parallel
+                temp_chunk_files = pool.map(process_chunk, process_args)
+                temp_files.extend(temp_chunk_files)
+                
+                # Update progress
+                processed_reads += batch_size * len(chunk_group)
+                elapsed_time = time.time() - start_time
+                reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
+                
+                logger.info(f"Processed approximately {processed_reads}/{total_reads} reads "
+                          f"({processed_reads/total_reads*100:.2f}%) "
+                          f"| Speed: {reads_per_sec:.2f} reads/sec")
+        
+        # Merge all temporary files at the end
+        logger.info("Merging output files...")
+        with pysam.AlignmentFile(output_path, 'wb', header=header_dict) as final_out:
+            for temp_file in temp_files:
+                with pysam.AlignmentFile(temp_file, 'rb') as temp_in:
+                    for read in temp_in:
+                        final_out.write(read)
+                os.remove(temp_file)  # Clean up temp file immediately after use
     
-    # Atomic rename of the temporary file to the final output
-    os.rename(temp_output, output_path)
-    logger.info("Multiprocessing complete")
+    elapsed_time = time.time() - start_time
+    logger.info(f"Processing complete. Total time: {elapsed_time:.2f} sec "
+                f"| Average speed: {total_reads/elapsed_time:.2f} reads/sec")
