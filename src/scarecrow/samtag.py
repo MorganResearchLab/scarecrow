@@ -8,6 +8,7 @@ Refactored for on-demand FASTQ tag extraction and multiprocessing
 import pysam
 import multiprocessing as mp
 import os
+import heapq
 import bisect
 from typing import Optional
 from argparse import RawTextHelpFormatter
@@ -52,11 +53,11 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         default=None,
     )
     subparser.add_argument(
-        "-b", "--batch_size",
+        "-x", "--index_chunk_size",
         metavar="<int>",
-        help=("Number of read pairs per batch to process at a time [20000]"),
+        help=("Number of reads to process at a time when indexing FASTQ [1000000]"),
         type=int,
-        default=20000,
+        default=1000000,
     )
     subparser.add_argument(
         "-@", "--threads",
@@ -76,7 +77,7 @@ def validate_samtag_args(parser, args):
         fastq_file = args.fastq, 
         bam_file = args.sam, 
         out_file = args.out, 
-        batch_size = args.batch_size,
+        idx_chunks = args.index_chunk_size,
         threads = args.threads
     )
 
@@ -85,7 +86,7 @@ def run_samtag(
     fastq_file: str = None, 
     bam_file: str = None, 
     out_file: str = None, 
-    batch_size: int = 200000,
+    idx_chunks: int = 1000000,
     threads: Optional[int] = None
 ) -> None:
     """
@@ -100,7 +101,7 @@ def run_samtag(
     index_file = f'{fastq_file}.idx'
     if not os.path.exists(index_file):
         print("Creating FASTQ index...")
-        create_fastq_index(fastq_file, index_file)
+        create_fastq_index(fastq_file, index_file, idx_chunks)
     print("Loading FASTQ index...")
     fastq_index = load_fastq_index(index_file)
 
@@ -148,27 +149,63 @@ def parse_fastq_header(header):
         tags[key] = value
     return tags
 
-def create_fastq_index(fastq_file, index_file):
-    """Create an index file mapping read names to file offsets."""
-    index = []
+def create_fastq_index(fastq_file, index_file, chunk_size=1000000):
+    """Create an index file mapping read names to file offsets, using external sorting."""
+    temp_files = []
+    chunk = []
+    offset = 0
+
+    # Step 1: Read the FASTQ file in chunks and write to temporary files
     with open(fastq_file, "r") as f:
         while True:
-            offset = f.tell()
             header = f.readline()
             if not header:
                 break
             read_name = header.split()[0][1:]  # Remove '@' and take the first part
-            index.append((read_name, offset))
+            chunk.append((read_name, offset))
+            offset = f.tell()  # Save the current file offset
             # Skip the next 3 lines (sequence, '+', quality)
             f.readline()
             f.readline()
             f.readline()
-    # Sort the index by read name for efficient lookup
-    index.sort(key=lambda x: x[0])
-    # Write the index to a file
+            # If the chunk is full, write it to a temporary file
+            if len(chunk) >= chunk_size:
+                temp_file = f"temp_index_{len(temp_files)}.txt"
+                with open(temp_file, "w") as temp:
+                    for entry in sorted(chunk, key=lambda x: x[0]):
+                        temp.write(f"{entry[0]}\t{entry[1]}\n")
+                temp_files.append(temp_file)
+                chunk = []
+
+    # Write the remaining entries in the last chunk
+    if chunk:
+        temp_file = f"temp_index_{len(temp_files)}.txt"
+        with open(temp_file, "w") as temp:
+            for entry in sorted(chunk, key=lambda x: x[0]):
+                temp.write(f"{entry[0]}\t{entry[1]}\n")
+        temp_files.append(temp_file)
+
+    # Step 2: Merge the temporary files using a heap
     with open(index_file, "w") as idx:
-        for read_name, offset in index:
+        heap = []
+        # Open all temporary files and initialize the heap
+        for temp_file in temp_files:
+            temp_fd = open(temp_file, "r")
+            line = temp_fd.readline()
+            if line:
+                read_name, offset = line.strip().split("\t")
+                heapq.heappush(heap, (read_name, int(offset), temp_fd))
+        # Merge the sorted chunks
+        while heap:
+            read_name, offset, temp_fd = heapq.heappop(heap)
             idx.write(f"{read_name}\t{offset}\n")
+            next_line = temp_fd.readline()
+            if next_line:
+                next_read_name, next_offset = next_line.strip().split("\t")
+                heapq.heappush(heap, (next_read_name, int(next_offset), temp_fd))
+            else:
+                temp_fd.close()
+                os.remove(temp_fd.name)
 
 def load_fastq_index(index_file):
     """Load the FASTQ index into memory."""
