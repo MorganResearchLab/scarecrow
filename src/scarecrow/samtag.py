@@ -11,6 +11,7 @@ import os
 import heapq
 import bisect
 from typing import Optional
+from multiprocessing import Manager
 from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
@@ -134,14 +135,18 @@ def run_samtag(
     print("Splitting BAM file into chunks...")
     bam_chunks = split_bam_file(bam_file, threads)
 
-    # Process each chunk in parallel
-    pool = mp.Pool(processes=threads)
-    results = []
-    for i, chunk in enumerate(bam_chunks):
-        output_sam = f"chunk_{i}.sam"
-        results.append(pool.apply_async(process_chunk, args=(chunk, fastq_file, fastq_index, output_sam)))
-    pool.close()
-    pool.join()
+    # Use a multiprocessing Manager to share the FASTQ index
+    with Manager() as manager:
+        shared_fastq_index = manager.list(fastq_index)
+
+        # Process each chunk in parallel
+        pool = mp.Pool(processes = threads)
+        results = []
+        for i, chunk in enumerate(bam_chunks):
+            output_sam = f"chunk_{i}.sam"
+            results.append(pool.apply_async(process_chunk, args=(chunk, fastq_file, shared_fastq_index, output_sam)))
+        pool.close()
+        pool.join()
 
     # Combine the processed SAM files into a single BAM file
     with pysam.AlignmentFile(out_file, "wb", template=pysam.AlignmentFile(bam_file, "rb")) as out_bam:
