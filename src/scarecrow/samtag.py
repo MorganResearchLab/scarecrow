@@ -169,10 +169,13 @@ def index_fastq(fastq_path: str) -> Dict[str, Dict[str, str]]:
 
     return fastq_index
 
+@log_errors
 def process_chunk(args: Tuple) -> Tuple[bool, str]:
     """
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
+    logger = logging.getLogger('scarecrow')
+
     input_path, fastq_index, header_dict, start, end, temp_file = args
 
     try:
@@ -207,6 +210,7 @@ def process_sam_multiprocessing(
     """
     Process the BAM file in parallel using multiprocessing.
     """
+    logger = logging.getLogger('scarecrow')
     logger.info(f"Processing {input_path} with {num_processes} processes")
 
     # Index the FASTQ file
