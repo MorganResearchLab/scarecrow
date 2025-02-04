@@ -54,7 +54,8 @@ FASTQS=(${PROJECT}/fastq/subset/*.fastq.gz)
 for BARCODE in ${BARCODES[@]}
 do
     sbatch --ntasks ${THREADS} --mem 4G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
-        scarecrow seed --threads ${THREADS} \
+        scarecrow seed \
+            --threads ${THREADS} \
             --fastqs ${FASTQS[@]} --strands pos neg \
             --barcodes ${BARCODE} \
             --out ${PROJECT}/barcode_profiles/barcodes.${BARCODE%%:*}.csv
@@ -70,7 +71,8 @@ The resulting barcode profiles are gathered together with `scarecrow harvest` to
 ```bash
 BARCODE_FILES=(${PROJECT}/barcode_profiles/Parse/barcodes.*.csv)
 sbatch --ntasks 1 --mem 16G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err \
-    scarecrow harvest ${BARCODE_FILES[@]} \
+    scarecrow harvest \
+        ${BARCODE_FILES[@]} \
         --barcode_count 1 \
         --min_distance 10 \
         --conserved ${PROJECT}/barcode_profiles/Parse/barcodes.${BARCODES[0]%%:*}_conserved.tsv \
@@ -94,7 +96,8 @@ MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.gz})
 sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
-    scarecrow reap --threads ${THREADS} \
+    scarecrow reap \
+        --threads ${THREADS} \
         --batch_size 20000 \
         --fastqs ${FASTQS[@]} \
         --barcode_positions ${PROJECT}/barcode_profiles/barcode_positions.csv \
@@ -112,20 +115,28 @@ sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.er
 ```bash
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.gz})
+MISMATCH=2
 sbatch --ntasks 1 --mem 1G --time=12:00:00 -o tally.%j.out -e tally.%j.err \
-    scarecrow tally --fastq ${PROJECT}/extracted/Parse/${OUT} \
+    scarecrow tally \
+        --fastq ${PROJECT}/extracted/Parse/${OUT} \
         --mismatches ${MISMATCH}
 ```
 
 
 #### 6. Trim adapter 5' sequence
 
+Some reads include a template switching oligo (TSO) sequence which if not trimmed will impact alignment. The optimal approach is to trim this sequence and any preceding bases with `cutadapt`. We can also trim tailing `N`s and ensure that only reads of a minimum length are retained.
+
 ```bash
-# Trim upstream of and inlcuding TSO before aligning
+FASTQS=(${PROJECT}/fastq/*.fastq.gz)
+OUT=$(basename ${FASTQS[0]%.gz})
 sbatch --ntasks 1 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \ 
-    cutadapt --trim-n --minimum-length 30 -g AACGCAGAGTGAATGGG \
-        -o ./extracted/Parse/${OUT%.fastq}.trimmed.fastq \
-        ./extracted/Parse/${OUT}
+    cutadapt \
+        --trim-n \
+        --minimum-length 30 \
+        -g AACGCAGAGTGAATGGG \
+        -o ${PROJECT}/extracted/${OUT%.fastq}.trimmed.fastq \
+        ${PROJECT}/extracted/${OUT}
 ```
 
 

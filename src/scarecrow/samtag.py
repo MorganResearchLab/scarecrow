@@ -127,7 +127,8 @@ def run_samtag(
             fastq_file,
             temp_dir,
             num_processes = threads,
-            chunk_size = batch_size
+            chunk_size = batch_size,
+            logger = logger
         )
         
         # Clean up temporary directory
@@ -164,11 +165,12 @@ def extract_tags_from_fastq(fastq_path: str, read_names: List[str]) -> Dict[str,
 
     return
 
+@log_errors
 def process_chunk(args: Tuple) -> Tuple[bool, str]:
     """
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
-    input_path, fastq_path, header_dict, chunk_reads, temp_file = args
+    input_path, fastq_path, header_dict, chunk_reads, temp_file, logger = args
 
     try:
         # Extract tags for the reads in this chunk
@@ -189,6 +191,7 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
         return True, temp_file
 
     except Exception as e:
+        logger.error(f"Error processing chunk: {e}")  # Use logger here
         return False, str(e)
 
 @log_errors
@@ -198,12 +201,14 @@ def process_sam_multiprocessing(
     fastq_path: str,
     temp_dir: str,
     num_processes: int = 4,
-    chunk_size: int = 100000
+    chunk_size: int = 100000,
+    logger: Optional[logging.Logger] = None
 ):
     """
     Process the BAM file in parallel using multiprocessing.
     """
-    logger = logging.getLogger('scarecrow')
+    if logger is None:
+        logger = logging.getLogger('scarecrow')  # Fallback to default logger if not provided
     logger.info("Starting sequence extraction")
 
     # Get BAM file header
@@ -230,7 +235,7 @@ def process_sam_multiprocessing(
 
     # Prepare arguments for each chunk
     process_args = [
-        (input_path, fastq_path, header_dict, chunk, os.path.join(temp_dir, f"temp_{i}.bam"))
+        (input_path, fastq_path, header_dict, chunk, os.path.join(temp_dir, f"temp_{i}.bam", logger))
         for i, chunk in enumerate(chunks)
     ]
 
