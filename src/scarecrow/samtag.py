@@ -256,6 +256,8 @@ def deserialize_read(
     
     read_name, read_data = serialized_read
     
+    # Problem with tuple indexing needs resolving
+
     # Recreate the AlignedSegment
     try:
         read = pysam.AlignedSegment(header)
