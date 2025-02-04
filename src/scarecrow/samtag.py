@@ -509,7 +509,7 @@ def process_sam_multiprocessing(
                             header_dict,
                             chunk_start,
                             chunk_end,
-                            os.path.join(temp_dir, f"temp_{group_idx}_{i}.bam"),
+                            os.path.join(temp_dir, f"temp_{group_idx}_{i}.sam"),
                             batch_size
                         )
                         for i, (chunk_start, chunk_end) in enumerate(chunk_group)

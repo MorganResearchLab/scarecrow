@@ -75,6 +75,30 @@ sbatch --ntasks 1 --mem 16G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err 
 
 ### 4. Extract target sequence to fastq ###
 
+Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will store barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and [optionally] UMI data (sequence, quailties) in the fastq sequence header. The `--barcode_reverse_order` flag simply determines the order of barcode sequences in the header. The range to `--extract` includes the read (`1` or `2`) followed by the range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting fastq if required.
+
+***does barcode_reverse_order update the other barcode metadata order?***
+
+***UMI sequence position is more complicated in other libraries and may need to account for jitter***
+
+```bash
+mkdir -p ${PROJECT}/extracted
+THREADS=16
+BQ=10
+JITTER=2
+MISMATCH=2
+FASTQS=(${PROJECT}/fastq/*.fastq.gz)
+OUT=$(basename ${FASTQS[0]%.gz})
+sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
+    scarecrow reap --threads ${THREADS} --batch_size 20000 \
+        --fastqs ${FASTQS[@]} \
+        -p ${PROJECT}/barcode_profiles/barcode_positions.csv \
+        --barcode_reverse_order \
+        --barcodes ${BARCODES[@]} \
+        --extract 1:1-74 --umi 2:1-10 \
+        --jitter ${JITTER} --mismatch ${MISMATCH} --base_quality ${BQ} \
+        --out ${PROJECT}/extracted/${OUT} 
+```                
 
 
 
