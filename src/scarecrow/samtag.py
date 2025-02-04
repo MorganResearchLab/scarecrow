@@ -310,30 +310,31 @@ def chunk_iterator(file_path: str, chunk_size: int, num_chunks: int):
         logging.error(f"Error accessing file {file_path}: {e}")
         raise
 
-def process_chunk(args: tuple) -> str:
+def process_chunk(args: tuple) -> tuple:
     """
-    Process a chunk of SAM/BAM file with improved error handling.
+    Process a chunk of SAM/BAM file with improved error reporting.
+    Returns tuple of (success, result/error_message)
     """
+    input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
+    
     try:
-        input_path, fastq_path, header_dict, chunk_start, chunk_end, temp_file, chunk_size = args
-        
-        print(f"Processing chunk: start={chunk_start}, end={chunk_end}, temp_file={temp_file}")
-        
-        # Validate input file
+        # Validate input files
         if not os.path.exists(input_path):
-            raise FileNotFoundError(f"Input file not found: {input_path}")
+            return (False, f"Input file not found: {input_path}")
         if not os.path.exists(fastq_path):
-            raise FileNotFoundError(f"FASTQ file not found: {fastq_path}")
+            return (False, f"FASTQ file not found: {fastq_path}")
+            
+        print(f"Processing chunk: start={chunk_start}, end={chunk_end}", file=sys.stderr)
         
         # Create temporary output file
-        with pysam.AlignmentFile(input_path, 'rb', check_sq=False) as infile:
+        with pysam.AlignmentFile(input_path, 'rb', check_sq=False, require_index=False) as infile:
             header = pysam.AlignmentHeader.from_dict(header_dict)
             with pysam.AlignmentFile(temp_file, 'wb', header=header) as outfile:
+                # Validate chunk positions
+                if chunk_start >= chunk_end:
+                    return (False, f"Invalid chunk positions: start={chunk_start}, end={chunk_end}")
+                
                 try:
-                    # Validate chunk positions
-                    if chunk_start >= chunk_end:
-                        raise ValueError(f"Invalid chunk positions: start={chunk_start}, end={chunk_end}")
-                    
                     # Seek to chunk start
                     infile.seek(chunk_start)
                     
@@ -341,17 +342,17 @@ def process_chunk(args: tuple) -> str:
                     batch_reads = []
                     batch_positions = []
                     current_pos = chunk_start
+                    reads_processed = 0
                     
                     while current_pos < chunk_end:
                         try:
                             read = next(infile)
                             current_pos = infile.tell()
+                            reads_processed += 1
                             
-                            # Validate current position
-                            if current_pos <= chunk_start:
-                                print(f"File position not advancing: current={current_pos}, start={chunk_start}")
-                                break
-                                
+                            if reads_processed % 1000 == 0:
+                                print(f"Chunk progress: {reads_processed} reads processed", file=sys.stderr)
+                            
                             batch_reads.append(read.query_name)
                             batch_positions.append((read, current_pos))
                             
@@ -371,32 +372,37 @@ def process_chunk(args: tuple) -> str:
                         
                         except StopIteration:
                             break
-                        except OSError as e:
-                            print(f"Error reading file within chunk: {e}")
-                            raise
+                        except Exception as e:
+                            return (False, f"Error processing read at position {current_pos}: {str(e)}")
                     
                     # Process remaining reads in last batch
                     if batch_reads:
-                        read_tags = extract_batch_tags(batch_reads, fastq_path)
-                        for read, _ in batch_positions:
-                            if read.query_name in read_tags:
-                                tags = read_tags[read.query_name]
-                                for tag_name, tag_value in tags.items():
-                                    if tag_value:
-                                        read.set_tag(tag_name, tag_value, value_type='Z')
-                            outfile.write(read)
+                        try:
+                            read_tags = extract_batch_tags(batch_reads, fastq_path)
+                            for read, _ in batch_positions:
+                                if read.query_name in read_tags:
+                                    tags = read_tags[read.query_name]
+                                    for tag_name, tag_value in tags.items():
+                                        if tag_value:
+                                            read.set_tag(tag_name, tag_value, value_type='Z')
+                                outfile.write(read)
+                        except Exception as e:
+                            return (False, f"Error processing final batch: {str(e)}")
                 
                 except Exception as e:
-                    print(f"Error processing chunk: {e}")
-                    if os.path.exists(temp_file):
-                        os.remove(temp_file)
-                    raise
+                    return (False, f"Error in main processing loop: {str(e)}")
         
-        return temp_file
+        return (True, temp_file)
     
     except Exception as e:
-        logging.error(f"Fatal error in process_chunk: {e}")
-        raise
+        error_msg = f"Fatal error in process_chunk: {str(e)}"
+        print(error_msg, file=sys.stderr)
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+        return (False, error_msg)
 
 def process_read_batch(
     serialized_batch: List[Tuple[Optional[str], Optional[List]]], 
@@ -462,40 +468,40 @@ def process_sam_multiprocessing(
     batch_size: int = 200000
 ):
     """
-    High-performance SAM/BAM processing with improved error handling.
+    High-performance SAM/BAM processing with improved error handling across processes.
     """
-    logger = logging.getLogger(__name__)
-    logger.info(f"Processing SAM/BAM: {input_path}")
+    print(f"Processing SAM/BAM: {input_path}", file=sys.stderr)
     
-    # Validate input files
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
     if not os.path.exists(fastq_path):
         raise FileNotFoundError(f"FASTQ file not found: {fastq_path}")
     
-    # Validate and create temp directory
     os.makedirs(temp_dir, exist_ok=True)
-    if not os.path.isdir(temp_dir):
-        raise NotADirectoryError(f"Temporary directory is not valid: {temp_dir}")
+    
+    if num_processes is None:
+        num_processes = max(1, mp.cpu_count() - 1)
+    print(f"Using {num_processes} processes", file=sys.stderr)
     
     try:
-        # Verify we can open and read the input file
-        with pysam.AlignmentFile(input_path, 'rb', check_sq=False) as infile:
+        # Get total reads and header
+        with pysam.AlignmentFile(input_path, 'rb', check_sq=False, require_index=False) as infile:
+            print("Counting total reads...", file=sys.stderr)
             total_reads = sum(1 for _ in infile)
             header_dict = infile.header.to_dict()
         
-        logger.info(f"Total reads to process: {total_reads}")
+        print(f"Total reads to process: {total_reads}", file=sys.stderr)
         processed_reads = 0
         start_time = time.time()
-        temp_files = []
+        successful_temp_files = []
         
-        # Create process pool
+        # Create process pool with error handling
         with mp.Pool(processes=num_processes) as pool:
             try:
-                # Generate chunk iterator with smaller chunk groups
+                # Process in smaller chunk groups
                 chunk_groups = list(chunk_iterator(input_path, batch_size, num_processes))
                 
-                for chunk_group in chunk_groups:
+                for group_idx, chunk_group in enumerate(chunk_groups):
                     process_args = [
                         (
                             input_path,
@@ -503,60 +509,58 @@ def process_sam_multiprocessing(
                             header_dict,
                             chunk_start,
                             chunk_end,
-                            os.path.join(temp_dir, f"temp_{i}.bam"),
+                            os.path.join(temp_dir, f"temp_{group_idx}_{i}.bam"),
                             batch_size
                         )
                         for i, (chunk_start, chunk_end) in enumerate(chunk_group)
                     ]
                     
-                    # Process chunks in parallel
-                    try:
-                        temp_chunk_files = pool.map(process_chunk, process_args)
-                        temp_files.extend(temp_chunk_files)
-                        
-                        # Update progress
-                        processed_reads += batch_size * len(chunk_group)
-                        elapsed_time = time.time() - start_time
-                        reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
-                        
-                        logger.info(f"Processed approximately {processed_reads}/{total_reads} reads "
-                                  f"({processed_reads/total_reads*100:.2f}%) "
-                                  f"| Speed: {reads_per_sec:.2f} reads/sec")
+                    # Process chunks and handle results
+                    results = pool.map(process_chunk, process_args)
                     
-                    except Exception as e:
-                        logger.error(f"Error processing chunk group: {e}")
-                        raise
+                    # Check results and collect successful files
+                    for success, result in results:
+                        if success:
+                            successful_temp_files.append(result)
+                        else:
+                            print(f"Error in chunk processing: {result}", file=sys.stderr)
+                            raise RuntimeError(f"Chunk processing failed: {result}")
+                    
+                    # Update progress
+                    processed_reads += batch_size * len(chunk_group)
+                    elapsed_time = time.time() - start_time
+                    reads_per_sec = processed_reads / elapsed_time if elapsed_time > 0 else 0
+                    
+                    print(f"Processed approximately {processed_reads}/{total_reads} reads "
+                          f"({processed_reads/total_reads*100:.2f}%) "
+                          f"| Speed: {reads_per_sec:.2f} reads/sec", file=sys.stderr)
                 
-                # Merge all temporary files at the end
-                logger.info("Merging output files...")
+                # Merge successful files
+                print("Merging output files...", file=sys.stderr)
                 with pysam.AlignmentFile(output_path, 'wb', header=header_dict) as final_out:
-                    for temp_file in temp_files:
-                        if os.path.exists(temp_file):
-                            with pysam.AlignmentFile(temp_file, 'rb') as temp_in:
-                                for read in temp_in:
-                                    final_out.write(read)
-                            os.remove(temp_file)
+                    for temp_file in successful_temp_files:
+                        with pysam.AlignmentFile(temp_file, 'rb') as temp_in:
+                            for read in temp_in:
+                                final_out.write(read)
+                        os.remove(temp_file)
+                
+            except Exception as e:
+                print(f"Error in main processing loop: {str(e)}", file=sys.stderr)
+                raise
             
             finally:
-                # Clean up temporary files
-                for temp_file in temp_files:
+                # Clean up temp files
+                for temp_file in successful_temp_files:
                     if os.path.exists(temp_file):
                         try:
                             os.remove(temp_file)
-                        except OSError:
+                        except:
                             pass
         
         elapsed_time = time.time() - start_time
-        logger.info(f"Processing complete. Total time: {elapsed_time:.2f} sec "
-                   f"| Average speed: {total_reads/elapsed_time:.2f} reads/sec")
+        print(f"Processing complete. Total time: {elapsed_time:.2f} sec "
+              f"| Average speed: {total_reads/elapsed_time:.2f} reads/sec", file=sys.stderr)
     
     except Exception as e:
-        logger.error(f"Fatal error in processing: {e}")
-        # Clean up temporary directory
-        if os.path.exists(temp_dir):
-            try:
-                import shutil
-                shutil.rmtree(temp_dir)
-            except OSError:
-                pass
+        print(f"Fatal error in processing: {str(e)}", file=sys.stderr)
         raise
