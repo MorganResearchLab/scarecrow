@@ -297,7 +297,7 @@ def process_read_batch(
     """
     # Reconstruct header
     header = pysam.AlignmentHeader.from_dict(header_dict)
-    print(f"\nheader:\n{header}")
+    #print(f"\nheader:\n{header}")
 
     # Deserialize batch
     batch = [
@@ -307,12 +307,12 @@ def process_read_batch(
     
     # Extract read names
     batch_read_names = [read.query_name for read in batch if read is not None]
-    print(f"\nbatch_read_names:\n{batch_read_names}")
+    #print(f"\nbatch_read_names:\n{batch_read_names}")
     
     # Get tags for this batch
-    print(f"\nbatch_read_names:\n{batch_read_names}")
+    #print(f"\nbatch_read_names:\n{batch_read_names}")
     read_tags = extract_batch_tags(batch_read_names, fastq_path)
-    print(f"\nread_tags:\n{read_tags}")
+    #print(f"\nread_tags:\n{read_tags}")
 
     tag_names = ["CR", "CY", "CB", "XP", "XM", "UR", "UY"]
     processed_batch = []
