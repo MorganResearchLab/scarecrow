@@ -129,6 +129,7 @@ def run_samtag(
         else:
             threads = min(threads, mp.cpu_count())
         logger.info(f"Using {threads} threads")
+        logger.info(f"Processing reads in batches of {batch_size}")
 
         # Create temporary directory for intermediate files
         temp_dir = f"samtag_temp_{generate_random_string()}"
@@ -268,7 +269,7 @@ def deserialize_read(
         read.mapping_quality = read_data[5]
         # Restore tags
         for tag in read_data[6]:
-            read.set_tag(tag[0], tag[1], tag[3])
+            read.set_tag(tag[0], tag[1], tag[2])
     
     except IndexError:
         print(f"Index error for {read_data}")
@@ -346,10 +347,6 @@ def process_sam_multiprocessing(
     """
     logger = logging.getLogger(__name__)
     logger.info(f"Processing SAM/BAM: {input_path}")
-    
-    if num_processes is None:
-        num_processes = mp.cpu_count()
-    logger.info(f"Using {num_processes} processes")
     
     total_reads = get_total_reads(input_path)
     logger.info(f"Total reads to process: {total_reads}")
