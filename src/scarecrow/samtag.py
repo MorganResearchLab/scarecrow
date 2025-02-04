@@ -10,6 +10,7 @@ import sys
 import time
 import logging
 import pysam
+import mmap
 import multiprocessing as mp
 from typing import Dict, Optional, List, Tuple, Union
 from functools import partial
