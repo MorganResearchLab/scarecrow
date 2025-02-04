@@ -185,14 +185,8 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
             for read in infile.fetch(start=start, end=end):
                 read_names.append(read.query_name)
             
-            logger.info(f"SAM read names: \n{read_names}")
-            print(f"SAM read names: \n{read_names}")
-
             # Extract tags for these reads from the FASTQ file
             read_tags = extract_tags_from_fastq(fastq_path, read_names)
-
-            logger.info(f"FASTQ read tags: \n{read_tags}")
-            print(f"FASTQ read tags: \n{read_tags}")
 
             # Rewind the BAM file and process the chunk again
             infile.reset()
@@ -205,7 +199,7 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
                             read.set_tag(tag_name, tag_value, value_type='Z')
                 outfile.write(read)
 
-        return True, temp_file
+        return True, temp_file, read_tags
 
     except Exception as e:
         logger.error(f"Error processing chunk {temp_file}: {e}")
@@ -248,10 +242,14 @@ def process_sam_multiprocessing(
     with mp.Pool(processes=num_processes) as pool:
         results = pool.map(process_chunk, process_args)
 
+    # Debug read_tags, suspect no matching between read names in SAM and FASTQ resulting in no tags
+    for success, temp_file, read_tags in results:
+        logger.info(f"{read_tags}")
+
     # Merge temporary files
     logger.info("Merging temporary files...")
     with pysam.AlignmentFile(output_path, 'wb', header=header_dict) as outfile:
-        for success, temp_file in results:
+        for success, temp_file, read_tags in results:
             if success:
                 with pysam.AlignmentFile(temp_file, 'rb') as infile:
                     for read in infile:
