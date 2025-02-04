@@ -81,6 +81,31 @@ def validate_samtag_args(parser, args):
         threads = args.threads
     )
 
+def split_bam_file(bam_file, num_chunks):
+    """Split the BAM file into chunks, distributing reads evenly."""
+    bam_chunks = [f"chunk_{i}.bam" for i in range(num_chunks)]
+    with pysam.AlignmentFile(bam_file, "rb") as bam:
+        # Count the total number of reads
+        total_reads = sum(1 for _ in bam)
+        reads_per_chunk = total_reads // num_chunks
+
+        # Reset the BAM file iterator
+        bam.reset()
+
+        # Open all chunk files for writing
+        chunk_files = [pysam.AlignmentFile(chunk, "wb", template=bam) for chunk in bam_chunks]
+
+        # Distribute reads across chunks
+        for i, read in enumerate(bam):
+            chunk_idx = min(i // reads_per_chunk, num_chunks - 1)
+            chunk_files[chunk_idx].write(read)
+
+        # Close all chunk files
+        for chunk_file in chunk_files:
+            chunk_file.close()
+
+    return bam_chunks
+
 @log_errors
 def run_samtag(
     fastq_file: str = None, 
@@ -106,17 +131,8 @@ def run_samtag(
     fastq_index = load_fastq_index(index_file)
 
     # Split the BAM file into chunks
-    chunk_size = os.path.getsize(bam_file) // threads
-    bam_chunks = []
-    with pysam.AlignmentFile(bam_file, "rb") as bam:
-        for i in range(threads):
-            chunk_file = f"chunk_{i}.bam"
-            with pysam.AlignmentFile(chunk_file, "wb", template=bam) as chunk:
-                for j, read in enumerate(bam):
-                    if j >= chunk_size:
-                        break
-                    chunk.write(read)
-            bam_chunks.append(chunk_file)
+    print("Splitting BAM file into chunks...")
+    bam_chunks = split_bam_file(bam_file, threads)
 
     # Process each chunk in parallel
     pool = mp.Pool(processes=threads)
