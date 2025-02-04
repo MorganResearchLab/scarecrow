@@ -101,9 +101,32 @@ sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.er
         --barcode_reverse_order \
         --barcodes ${BARCODES[@]} \
         --extract 1:1-74 --umi 2:1-10 \
-        --jitter ${JITTER} --mismatch ${MISMATCH} --base_quality ${BQ} \
+        --jitter ${JITTER} \
+        --mismatch ${MISMATCH} \
+        --base_quality ${BQ} \
         --out ${PROJECT}/extracted/${OUT} 
 ```                
+
+#### 5. Tally barcode counts and index position distributions
+
+```bash
+FASTQS=(${PROJECT}/fastq/*.fastq.gz)
+OUT=$(basename ${FASTQS[0]%.gz})
+sbatch --ntasks 1 --mem 1G --time=12:00:00 -o tally.%j.out -e tally.%j.err \
+    scarecrow tally --fastq ${PROJECT}/extracted/Parse/${OUT} \
+        --mismatches ${MISMATCH}
+```
+
+
+#### 6. Trim adapter 5' sequence
+
+```bash
+# Trim upstream of and inlcuding TSO before aligning
+sbatch --ntasks 1 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \ 
+    cutadapt --trim-n --minimum-length 30 -g AACGCAGAGTGAATGGG \
+        -o ./extracted/Parse/${OUT%.fastq}.trimmed.fastq \
+        ./extracted/Parse/${OUT}
+```
 
 
 

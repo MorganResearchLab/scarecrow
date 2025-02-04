@@ -19,9 +19,6 @@ from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-
 def parser_samtag(parser):
     """
     Add samtag subparser with command-line arguments
@@ -167,13 +164,10 @@ def extract_tags_from_fastq(fastq_path: str, read_names: List[str]) -> Dict[str,
 
     return
 
-@log_errors
 def process_chunk(args: Tuple) -> Tuple[bool, str]:
     """
     Process a chunk of the BAM file and write tagged reads to a temporary file.
     """
-    #logger = logging.getLogger('scarecrow')
-    logger = setup_worker_logger()
     input_path, fastq_path, header_dict, chunk_reads, temp_file = args
 
     try:
@@ -195,7 +189,6 @@ def process_chunk(args: Tuple) -> Tuple[bool, str]:
         return True, temp_file
 
     except Exception as e:
-        logger.warning(f"Error processing chunk {temp_file}: {e}")
         return False, str(e)
 
 @log_errors
@@ -210,7 +203,7 @@ def process_sam_multiprocessing(
     """
     Process the BAM file in parallel using multiprocessing.
     """
-    logger = setup_worker_logger()
+    logger = logging.getLogger('scarecrow')
     logger.info("Starting sequence extraction")
 
     # Get BAM file header
@@ -259,24 +252,3 @@ def process_sam_multiprocessing(
                 logger.error(f"Failed to process temporary file: {temp_file}")
 
     logger.info(f"Processing complete. Output written to {output_path}")
-
-def setup_worker_logger(log_file: str = None):
-    """Configure logger for worker processes with file output"""
-    logger = logging.getLogger('scarecrow')
-    if not logger.handlers:  # Only add handlers if none exist
-        # Create formatters
-        formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-        
-        # File handler if log_file provided
-        if log_file:
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
-        
-        logger.setLevel(logging.INFO)
-    return logger
