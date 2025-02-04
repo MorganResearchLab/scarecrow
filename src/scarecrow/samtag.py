@@ -19,6 +19,9 @@ from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+
 def parser_samtag(parser):
     """
     Add samtag subparser with command-line arguments
