@@ -212,7 +212,7 @@ def get_tags_from_fastq(fastq_file, offset):
     allowed_keys = {"CR", "CY", "CB", "XP", "XM", "UR", "UY"}
 
     with open(fastq_file, "r") as f:
-        f.seek(offset-1)
+        f.seek(offset+1)
         header = f.readline().strip()
         print(f"{header}")
 
