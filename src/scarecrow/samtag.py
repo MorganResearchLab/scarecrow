@@ -130,7 +130,7 @@ def run_samtag(
     result = cursor.fetchone()
     if result:
         logger.info(f"First record in db: ${result}")
-        tags = get_tags_from_fastq(fastq_file, result[1]-1)
+        tags = get_tags_from_fastq(fastq_file, result[1])
         logger.info(f"{tags}")
     else:
         logger.info("No records found.")
@@ -212,7 +212,7 @@ def get_tags_from_fastq(fastq_file, offset):
     allowed_keys = {"CR", "CY", "CB", "XP", "XM", "UR", "UY"}
 
     with open(fastq_file, "r") as f:
-        f.seek(offset)
+        f.seek(offset-1)
         header = f.readline().strip()
         print(f"{header}")
 
