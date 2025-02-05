@@ -130,8 +130,7 @@ def run_samtag(
     result = cursor.fetchone()
     if result:
         logger.info(f"First record in db: ${result}")
-        logger.info(f"result[0]: ${result[0]}")
-        tags = get_tags_from_fastq(fastq_file, result[0])
+        tags = get_tags_from_fastq(fastq_file, result[1])
         for tag, value in tags.items():
             logger.info(f"{tag} : {value}")
     else:
