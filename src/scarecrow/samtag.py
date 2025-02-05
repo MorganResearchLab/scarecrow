@@ -110,16 +110,29 @@ def run_samtag(
     Multiprocessing function to process SAM tags efficiently
     """
     # Setup logging
-    #logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
-    #logger = setup_logger(logfile)
-    #logger.info(f"logfile: '{logfile}'")
+    logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"logfile: '{logfile}'")
 
     # Create or load the FASTQ index
     index_db = f'{fastq_file}.db'
     if not os.path.exists(index_db):
-        print("Creating FASTQ index...")
+        logger.info("Creating FASTQ index...")
         create_fastq_index(fastq_file, index_db)
-    print("FASTQ index created.")
+        logger.info("FASTQ index created.")
+    else:
+        logger.info(f"Using existing FASTQ index db: '{index_db}'")
+
+    # Connect to the SQLite database and output first record
+    conn = sqlite3.connect(index_db)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM fastq_index LIMIT 1")
+    result = cursor.fetchone()
+    if result:
+        logger.info(f"First record in db: ${result}")
+    else:
+        logger.info("No records found.")
+    conn.close()
 
     # Split the BAM file into chunks
     print("Splitting BAM file into chunks...")
