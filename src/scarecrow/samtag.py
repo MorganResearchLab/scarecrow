@@ -208,11 +208,23 @@ def load_fastq_index(index_file):
     return index
 
 def get_tags_from_fastq(fastq_file, offset):
-    """Retrieve tags from the FASTQ file at a specific offset."""
+    """Retrieve specific tags from the FASTQ file at a given offset."""
+    allowed_keys = {"CR", "CY", "CB", "XP", "XM", "UR", "UY"}
+
     with open(fastq_file, "r") as f:
         f.seek(offset)
         header = f.readline().strip()
-        return parse_fastq_header(header)
+
+        if header.startswith('@'):
+            parts = header.split()
+            tags = {
+                key: value for part in parts[1:]
+                if '=' in part and (key := part.split('=', 1)[0]) in allowed_keys
+                for value in [part.split('=', 1)[1]]
+            }
+            return tags
+
+    return {}
 
 def process_chunk(bam_chunk, fastq_file, index_db, output_sam):
     """Process a chunk of the BAM file and add tags from the FASTQ file."""
