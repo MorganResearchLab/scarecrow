@@ -126,7 +126,7 @@ def run_samtag(
     # Connect to the SQLite database and output first record
     conn = sqlite3.connect(index_db)
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM fastq_index LIMIT 1")
+    cursor.execute("SELECT * FROM fastq_index LIMIT 1 OFFSET 1")
     result = cursor.fetchone()
     if result:
         logger.info(f"First record in db: ${result}")
