@@ -214,7 +214,8 @@ def get_tags_from_fastq(fastq_file, offset):
     with open(fastq_file, "r") as f:
         f.seek(offset)
         header = f.readline().strip()
-
+        print(f"{header}")
+        
         if header.startswith('@'):
             parts = header.split()
             tags = {
