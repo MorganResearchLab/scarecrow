@@ -184,13 +184,13 @@ def create_fastq_index(fastq_file, index_db):
     offset = 0
     with open(fastq_file, "rt") as f:
         while True:
+            offset = f.tell()  # Save the current file offset
             header = f.readline()
             if not header:
-                break
+                break # End of file
             read_name = header.split()[0][1:]  # Remove '@' and take the first part
             # Insert the read name and offset into the database
             cursor.execute("INSERT INTO fastq_index (read_name, offset) VALUES (?, ?)", (read_name, offset))
-            offset = f.tell()  # Save the current file offset
             # Skip the next 3 lines (sequence, '+', quality)
             f.readline()
             f.readline()
@@ -212,9 +212,8 @@ def get_tags_from_fastq(fastq_file, offset):
     allowed_keys = {"CR", "CY", "CB", "XP", "XM", "UR", "UY"}
 
     with open(fastq_file, "r") as f:
-        f.seek(offset+1)
+        f.seek(offset)
         header = f.readline().strip()
-        print(f"{header}")
 
         if header.startswith('@'):
             parts = header.split()
