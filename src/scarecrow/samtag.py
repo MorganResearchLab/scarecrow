@@ -126,10 +126,11 @@ def run_samtag(
     # Connect to the SQLite database and output first record
     conn = sqlite3.connect(index_db)
     cursor = conn.cursor()
-    cursor.execute("SELECT offset FROM fastq_index LIMIT 1")
+    cursor.execute("SELECT * FROM fastq_index LIMIT 1")
     result = cursor.fetchone()
     if result:
         logger.info(f"First record in db: ${result}")
+        logger.info(f"result[0]: ${result[0]}")
         tags = get_tags_from_fastq(fastq_file, result[0])
         for tag, value in tags.items():
             logger.info(f"{tag} : {value}")
