@@ -8,11 +8,10 @@ Refactored for on-demand FASTQ tag extraction and multiprocessing
 import pysam
 import multiprocessing as mp
 import os
-import heapq
-import bisect
 import sqlite3
 import logging
 from typing import Optional
+from pathlib import Path
 from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
@@ -130,18 +129,17 @@ def run_samtag(
     cursor.execute("SELECT * FROM fastq_index LIMIT 1 OFFSET 1")
     result = cursor.fetchone()
     if result:
-        logger.info(f"First record in db: ${result}")
         tags = get_tags_from_fastq(fastq_file, result[1])
-        logger.info(f"{tags}")
     else:
         logger.info("No records found.")
     conn.close()
 
     # Split the BAM file into chunks
-    print("Splitting BAM file into chunks...")
+    logger.info("Splitting BAM file into chunks...")
     bam_chunks = split_bam_file(bam_file, threads)
 
     # Process each chunk in parallel
+    logger.info("Processing BAM chunks...")
     pool = mp.Pool(processes = threads)
     results = []
     for i, chunk in enumerate(bam_chunks):
@@ -151,6 +149,7 @@ def run_samtag(
     pool.join()
 
     # Combine the processed SAM files into a single BAM file
+    logger.info(f"Writing SAM chunks to {out_file}...")
     with pysam.AlignmentFile(out_file, "wb", template=pysam.AlignmentFile(bam_file, "rb")) as out_bam:
         for i in range(threads):
             output_sam = f"chunk_{i}.sam"
@@ -158,10 +157,19 @@ def run_samtag(
                 for line in in_sam:
                     out_bam.write(pysam.AlignedSegment.fromstring(line, out_bam.header))
     
+    # Report disk space used
+    bam_size = sum(f.stat().st_size for f in Path(".").glob("chunk*.bam"))
+    sam_size = sum(f.stat().st_size for f in Path(".").glob("chunk*.sam"))
+    logger.info(f"Total BAM chunk disk space used: {bam_size}")
+    logger.info(f"Total SAM chunk disk space used: {sam_size}")
+    
     # Clean up temporary files
+    logger.info("Removing chunks...")
     for i in range(threads):
         os.remove(f"chunk_{i}.bam")
         os.remove(f"chunk_{i}.sam")
+    
+    logger.info("Finished!")
         
 
 def parse_fastq_header(header):

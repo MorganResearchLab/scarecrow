@@ -12,3 +12,6 @@
 * [Workflow](workflow.md)
 * Examples
     * [Parse Evercode WTv2](example_evercode.md)
+    * [Chromium 10X 3'](example_10X3p.md)
+    * [Chromium 10X 5'](example_10X5p.md)
+    * [Chromium 10X Flex (FRP)](example_10Xflex.md)

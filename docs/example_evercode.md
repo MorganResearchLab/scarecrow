@@ -177,7 +177,7 @@ samtools sort \
 
 #### 8. Add barcode and UMI TAGS to BAM file
 
-Adding read-specific TAGS to the BAM file poses some technical challenges given the large number of reads to cross-reference between the BAM and FASTQ file that contains the TAGS. To minimize RAM overhead we create an sqlite index of the FASTQ file. After indexing, the BAM file is split into *n = threads* chunks for parallel processing.
+The sorted BAM file is then passed to `scarecrow samtag` along with its FASTQ file to add read-specific tags for the barcodes and UMIs. This step involves indexing the FASTQ file, chunking the BAM file for parallel processing and writing interim SAM files. It is not memory-intensive (<1 Gb) but can take a few hours to complete and will require sufficient disk space during the operation. Plan for six times input BAM file size (i.e. 3 Gb BAM will require 18 Gb headroom).
 
 ```bash
 FASTQ=${PROJECT}/extracted/*.trimmed.fastq
@@ -185,7 +185,7 @@ ID=$(basename ${FASTQ})
 SAM=${PROJECT}/aligned/${ID%.fastq}.bam
 OUT=${PROJECT}/aligned/${ID%.fastq}.tagged.bam
 THREADS=16
-sbatch --ntasks ${THREADS} --mem 64G --time=12:00:00 -o samtag.%j.out -e samtag.%j.err \
+sbatch --ntasks ${THREADS} --mem 1G --time=06:00:00 -o samtag.%j.out -e samtag.%j.err \
     scarecrow samtag \
         --threads ${THREADS} \
         --fastq ${FASTQ} \
