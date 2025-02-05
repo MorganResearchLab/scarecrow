@@ -180,14 +180,16 @@ def create_fastq_index(fastq_file, index_db):
     cursor.execute("CREATE TABLE IF NOT EXISTS fastq_index (read_name TEXT PRIMARY KEY, offset INTEGER)")
     conn.commit()
 
-    # Read the FASTQ file and populate the database
-    offset = 0
-    with open(fastq_file, "rt") as f:
+    # Read the FASTQ file in binary mode and populate the database
+    with open(fastq_file, "rb") as f:
         while True:
-            offset = f.tell()  # Save the current file offset
+            # Record the offset **before** reading the header line
+            offset = f.tell()
             header = f.readline()
             if not header:
-                break # End of file
+                break  # End of file
+            # Decode the header line from bytes to string
+            header = header.decode("utf-8").strip()
             read_name = header.split()[0][1:]  # Remove '@' and take the first part
             # Insert the read name and offset into the database
             cursor.execute("INSERT INTO fastq_index (read_name, offset) VALUES (?, ?)", (read_name, offset))
@@ -211,10 +213,10 @@ def get_tags_from_fastq(fastq_file, offset):
     """Retrieve specific tags from the FASTQ file at a given offset."""
     allowed_keys = {"CR", "CY", "CB", "XP", "XM", "UR", "UY"}
 
-    with open(fastq_file, "r") as f:
+    with open(fastq_file, "rb") as f:
         f.seek(offset)
-        header = f.readline().strip()
-
+        header = f.readline().decode("utf-8").strip()
+        # The header starts with '@' followed by the read name and then the tags
         if header.startswith('@'):
             parts = header.split()
             tags = {
@@ -223,9 +225,9 @@ def get_tags_from_fastq(fastq_file, offset):
                 for value in [part.split('=', 1)[1]]
             }
             return tags
-
+        
     return {}
-
+        
 def process_chunk(bam_chunk, fastq_file, index_db, output_sam):
     """Process a chunk of the BAM file and add tags from the FASTQ file."""
     # Connect to the SQLite database
