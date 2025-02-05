@@ -201,7 +201,7 @@ def create_fastq_index(fastq_file, index_db):
             f.readline()
             f.readline()
             f.readline()
-            logger.info(f"{read_name}, {offset}")
+            #logger.info(f"{read_name}, {offset}")
     conn.commit()
     conn.close()
 
