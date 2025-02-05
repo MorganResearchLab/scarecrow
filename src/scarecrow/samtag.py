@@ -11,6 +11,7 @@ import os
 import heapq
 import bisect
 import sqlite3
+import logging
 from typing import Optional
 from argparse import RawTextHelpFormatter
 from scarecrow.logger import log_errors, setup_logger
@@ -171,8 +172,11 @@ def parse_fastq_header(header):
         tags[key] = value
     return tags
 
+@log_errors
 def create_fastq_index(fastq_file, index_db):
     """Create an SQLite database mapping read names to file offsets."""
+    logger = logging.getLogger('scarecrow')
+
     # Connect to the SQLite database
     conn = sqlite3.connect(index_db)
     cursor = conn.cursor()
@@ -197,6 +201,7 @@ def create_fastq_index(fastq_file, index_db):
             f.readline()
             f.readline()
             f.readline()
+            logger.info(f"{read_name}, {offset}")
     conn.commit()
     conn.close()
 

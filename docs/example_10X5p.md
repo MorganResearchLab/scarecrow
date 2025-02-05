@@ -9,11 +9,11 @@
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash
-PROJECT=./scarecrow/examples/10X3p
+PROJECT=./scarecrow/examples/10X5p
 mkdir -p ${PROJECT}
 ```
 
-Download Evercode WTv2 data from [https://www.ebi.ac.uk/ena/browser/view/PRJNA1106903](https://www.ebi.ac.uk/ena/browser/view/PRJNA1106903).
+Download 10X 5' data from [https://www.ebi.ac.uk/ena/browser/view/PRJNA1106903](https://www.ebi.ac.uk/ena/browser/view/PRJNA1106903).
 
 ```bash
 mkdir -p ${PROJECT}/fastq
@@ -35,3 +35,4 @@ done
 
 ### 2. Generate barcode match profiles
 
+Chromium barcode whitelists for different chemistry versions are available at [https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium5.html](https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium5.html).
