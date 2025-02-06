@@ -47,14 +47,13 @@ We can now run `scarecrow seed` to process each barcode whitelist. The below exa
 
 ```bash
 mkdir -p ${PROJECT}/barcode_profiles
-THREADS=1
 FASTQS=(${PROJECT}/fastq/subset/*.fastq.gz)
 for BARCODE in ${BARCODES[@]}
 do
-    sbatch --ntasks ${THREADS} --mem 1G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
+    sbatch --ntasks 1 --mem 1G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
         scarecrow seed \
             --threads ${THREADS} \
-            --fastqs ${FASTQS[@]} --strands pos neg \
+            --fastqs ${FASTQS[@]} \
             --barcodes ${BARCODE} \
             --out ${PROJECT}/barcode_profiles/barcodes.${BARCODE%%:*}.csv
 done

@@ -3,11 +3,11 @@
 [root](root.md)
 
 ## scarecrow seed
-Using a small subset of paired-end sequencing reads (e.g. 1M ), `seed` identifies barcode seeds within reads. It returns a CSV file of barcode alignments, a TSV file of nucleotide frequencies for each fastq file, and a TSV file of conserved sequence runs. This step should be repeated for each barcode whitelist. The barcode whitelist is a text file with one barcode sequence per line.
+This tool identifies barcode seed positions and potential linker sequences within reads. It returns a CSV file of barcode alignments, a TSV file of nucleotide frequencies for each fastq file, and a TSV file of conserved sequence runs. This step should be repeated for each barcode whitelist. The barcode whitelist is a text file with one barcode sequence per line and no header. The `--num_reads` option specifies the number of reads to run the analysis on, and defaults to 100000. Using all reads (`--num reads 0`) is neither necessary nor recommended, the tool does not run multiprocessing so will take considerable time to process millions of reads. Subsets of reads are sampled randomly, the random seed can be set by `--random_seed <int>` and defaults to 1234.
 
 ```bash
 scarecrow seed --fastqs <paired_fastq_R1> <paired_fastq_R2> \
-    --strands pos neg \
+    --num_reads 100000 \
     --out <BC1_counts.csv> \
     --barcodes BC1:v1:<v1_whitelist.txt> 
 ```

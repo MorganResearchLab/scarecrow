@@ -7,9 +7,7 @@
 import os
 import pysam
 import logging
-import gzip
 from argparse import RawTextHelpFormatter
-from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict
 from functools import lru_cache
 from typing import List, Dict, Set, Tuple
@@ -222,7 +220,7 @@ Search fastq reads for barcodes in whitelists
 
 Example:
 
-scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
+scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
 ---
 """,
         help="Search fastq reads for barcodes",
@@ -233,11 +231,17 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
         nargs="+", 
         help="Pair of FASTQ files")
     subparser.add_argument(
-        "-s", "--strands", 
-        metavar="<string>",
-        nargs="+", 
-        default=['pos', 'neg'],
-        help="Orientations of FASTQ files (e.g. pos neg)")
+        "-n", "--num_reads", 
+        metavar="<int>",
+        help=("Number of read pairs to sample [100000]"),
+        type=int,
+        default=100000)
+    subparser.add_argument(
+        "-r", "--random_seed", 
+        metavar="<int>",
+        help=("Random seed for sampling read pairs [1234]"),
+        type=int,
+        default=1234)
     subparser.add_argument(
         "-c", "--barcodes",
         metavar="<string>",
@@ -273,13 +277,6 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
         default=10,
     )
     subparser.add_argument(
-        "-@", "--threads",
-        metavar="<int>",
-        help=("Number of processing threads [4]"),
-        type=int,
-        default=4,
-    )
-    subparser.add_argument(
         "-v", "--verbose",
         action='store_true',
         help='Enable verbose output [false]'
@@ -288,13 +285,13 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--strands pos neg\n\t--barcod
 
 def validate_seed_args(parser, args):
     run_seed(fastqs = [f for f in args.fastqs],
-             strands = [s for s in args.strands],
+             num_reads = args.num_reads,
+             random_seed = args.random_seed,
              barcodes = args.barcodes, 
              output_file = args.out, 
              batches = args.batch_size, 
              linker_base_frequency = args.linker_base_frequency,
              linker_min_length = args.linker_min_length,
-             threads = args.threads,
              verbose = args.verbose)
     
 @log_errors
@@ -395,19 +392,22 @@ def process_read_batch(read_batch: List[Tuple],
 
 @log_errors
 def run_seed(
-    fastqs: List[str],
-    strands: List[str],
-    barcodes: List[str],
-    output_file: str,
+    fastqs: List[str] = None,
+    num_reads: int = 0,
+    random_seed: int = 1234,
+    barcodes: List[str] = None,
+    output_file: str = None,
     batches: int = 10000,
     linker_base_frequency: float = 0.75,
     linker_min_length: int = 10,
-    threads: int = 4,
     verbose: bool = False
 ) -> None:
     """
     Optimized implementation of seed functionality
     """
+    import random
+    random.seed(random_seed)
+
     # Setup logging
     logfile = f'./scarecrow_seed_{generate_random_string()}.log'
     logger = setup_logger(logfile)
@@ -426,6 +426,14 @@ def run_seed(
     read1_analyzer = SequenceFrequencyAnalyzer()
     read2_analyzer = SequenceFrequencyAnalyzer()
 
+    # If subsetting FASTQ, first get total read count
+    if num_reads > 0 :
+        logger.info(f"For subsetting, getting total read count to generate random indices for sampling.")
+        total_reads = sum(1 for _ in pysam.FastxFile(fastqs[0]))
+        sample_indices = set(random.sample(range(total_reads), min(num_reads, total_reads)))
+        logger.info(f"Selected {len(sample_indices)} random reads out of {total_reads} total reads")
+        logger.info(f"Random seed used: {random_seed}")
+
     # Process files with minimal overhead
     with pysam.FastxFile(fastqs[0]) as r1, \
          pysam.FastxFile(fastqs[1]) as r2, \
@@ -435,17 +443,16 @@ def run_seed(
         out_csv.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
         
         # Create batches efficiently
-        read_pairs = zip(r1, r2)
-        current_batch = []
-        
-        for reads in read_pairs:
-            read1, read2 = reads
+        current_batch = []        
+        for idx, (read1, read2) in enumerate(zip(r1,r2)):
+            if num_reads > 0 and idx not in sample_indices:
+                continue
 
             # Add sequences to analyzers
             read1_analyzer.add_sequence(read1.sequence)
             read2_analyzer.add_sequence(read2.sequence)
 
-            current_batch.append(reads)
+            current_batch.append((read1, read2))
             
             if len(current_batch) >= batches:
 
