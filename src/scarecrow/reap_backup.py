@@ -407,25 +407,36 @@ def process_read_batch(read_batch: List[Tuple],
                       jitter: int = 5,
                       verbose: bool = False) -> List[str]:
     """
-    Modified process_read_batch to handle jitter and improved matching
+    Modified process_read_batch to handle jitter and improved matching.
+    Now includes original barcodes (CR), barcode qualities (CY), 
+    matched barcodes (CB), UMI sequence (UR), and UMI qualities (UY).
     """
     logger = setup_worker_logger()
     if verbose:
         logger.info(f"Processing batch of {len(read_batch)} reads")
     output_entries = []
-    read_count = len(read_batch) # Count reads in this batch
+    read_count = len(read_batch)
     
     for i, reads in enumerate(read_batch):
-        if i % 1000 == 0:  # Log progress periodically
+        if i % 1000 == 0:
             logger.debug(f"Processing read {i}/{read_count}")
             
-        barcodes = []
+        original_barcodes = []  # CR
+        barcode_qualities = []  # CY
+        matched_barcodes = []  # CB
         positions = []
         mismatches = []
 
         for config in barcode_configs:
             seq = reads[config['file_index']].sequence
-            start, end = config['start'], config['end']            
+            qual = reads[config['file_index']].quality
+            start, end = config['start'], config['end']
+            
+            # Extract original barcode and its quality scores
+            original_barcode = seq[start-1:end]
+            barcode_quality = qual[start-1:end]
+            original_barcodes.append(original_barcode)
+            barcode_qualities.append(barcode_quality)
 
             whitelist = ast.literal_eval(config['whitelist'])[1]
             if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
@@ -444,17 +455,18 @@ def process_read_batch(read_batch: List[Tuple],
                 if verbose:
                     logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
                 
-                barcodes.append(matched_barcode)
-                positions.append(str(adj_position + 1))  # Convert to 1-based position for output
+                matched_barcodes.append(matched_barcode)
+                positions.append(str(adj_position + 1))  # Convert to 1-based position
                 mismatches.append(str(mismatch_count))
             else:
                 logger.warning(f"Whitelist {whitelist} not found in matcher")
-                barcodes.append('null')
+                matched_barcodes.append('null')
                 positions.append(str(start))
                 mismatches.append('NA')
 
         # Create output entry with original and adjusted positions
         source_entry = reads[read_index]
+        
         # Apply base quality filtering to extracted sequence
         if base_quality is not None:
             filtered_seq, filtered_qual = filter_low_quality_bases(
@@ -464,16 +476,21 @@ def process_read_batch(read_batch: List[Tuple],
             filtered_seq = source_entry.sequence[read_range[0]:read_range[1]]
             filtered_qual = source_entry.quality[read_range[0]:read_range[1]]
         
+        # Build the header with all components
         header = f"@{source_entry.name} {source_entry.comment}"
-        header += f" barcodes={('_').join(barcodes)}"
-        header += f" positions={('_').join(positions)}"
-        header += f" mismatches={('_').join(mismatches)}"
+        header += f" CR={('_').join(original_barcodes)}"
+        header += f" CY={('_').join(barcode_qualities)}"
+        header += f" CB={('_').join(matched_barcodes)}"
+        header += f" XP={('_').join(positions)}"
+        header += f" XM={('_').join(mismatches)}"
 
+        # Add UMI information if specified
         if umi_index is not None:
             umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
-            header += f" UMI={umi_seq}"
+            umi_qual = reads[umi_index].quality[umi_range[0]:umi_range[1]]
+            header += f" UR={umi_seq}"
+            header += f" UY={umi_qual}"
 
-        #output_entries.append(f"{header}\n{extract_seq}\n+\n{extract_qual}\n")
         output_entries.append(f"{header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
     if verbose:

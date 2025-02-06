@@ -17,7 +17,7 @@ A toolkit for preprocessing single cell sequencing data.
 *   - alignment (STAR and kallisto)
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
-
+* samtag is a slow process, may be better (?) in reap to write to unaligned BAM rather than fastq
 
 
 
