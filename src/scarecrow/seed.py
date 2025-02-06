@@ -237,6 +237,12 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         type=int,
         default=100000)
     subparser.add_argument(
+        "-u", "--upper_read_count", 
+        metavar="<int>",
+        help=("Upper read count of reads to subsample [10000000]"),
+        type=int,
+        default=10000000)
+    subparser.add_argument(
         "-r", "--random_seed", 
         metavar="<int>",
         help=("Random seed for sampling read pairs [1234]"),
@@ -287,6 +293,7 @@ def validate_seed_args(parser, args):
     run_seed(fastqs = [f for f in args.fastqs],
              num_reads = args.num_reads,
              random_seed = args.random_seed,
+             upper_read_count = args.upper_read_count,
              barcodes = args.barcodes, 
              output_file = args.out, 
              batches = args.batch_size, 
@@ -395,6 +402,7 @@ def run_seed(
     fastqs: List[str] = None,
     num_reads: int = 0,
     random_seed: int = 1234,
+    upper_read_count: int = 10000000,
     barcodes: List[str] = None,
     output_file: str = None,
     batches: int = 10000,
@@ -427,11 +435,12 @@ def run_seed(
     read2_analyzer = SequenceFrequencyAnalyzer()
 
     # If subsetting FASTQ, first get total read count
-    if num_reads > 0 :
-        logger.info(f"For subsetting, getting total read count to generate random indices for sampling.")
-        total_reads = sum(1 for _ in pysam.FastxFile(fastqs[0]))
-        sample_indices = set(random.sample(range(total_reads), min(num_reads, total_reads)))
-        logger.info(f"Selected {len(sample_indices)} random reads out of {total_reads} total reads")
+    if num_reads > 0:
+        if upper_read_count == 0:
+            logger.info(f"For subsetting, getting total read count to generate random indices for sampling.")
+            upper_read_count = sum(1 for _ in pysam.FastxFile(fastqs[0]))
+        sample_indices = set(random.sample(range(upper_read_count), min(num_reads, upper_read_count)))
+        logger.info(f"Selected {len(sample_indices)} random reads out of an upper limit of {upper_read_count} reads")
         logger.info(f"Random seed used: {random_seed}")
 
     # Process files with minimal overhead
