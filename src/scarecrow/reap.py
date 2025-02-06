@@ -12,13 +12,13 @@ import os
 import gc
 import pandas as pd
 import pysam
-import numpy as np
 import shutil
 import multiprocessing as mp
 from argparse import RawTextHelpFormatter
-from collections import defaultdict
+from collections import Counter
+import csv
 from functools import lru_cache
-from typing import List, Tuple, Optional, Dict, Set
+from typing import List, Tuple, Optional, Dict
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -182,6 +182,37 @@ class BarcodeMatcherOptimized:
                 
         return sequences
 
+# Add a new class to track statistics
+class BarcodeStats:
+    def __init__(self):
+        self.mismatch_counts = Counter()
+        self.position_counts = Counter()
+        
+    def update(self, mismatches: List[str], positions: List[str]):
+        # Sum up mismatches across barcodes, excluding 'NA' values
+        total_mismatches = sum(int(m) for m in mismatches if m != 'NA')
+        self.mismatch_counts[total_mismatches] += 1
+        
+        # Track each position
+        for pos in positions:
+            if pos != '0':  # Exclude invalid positions
+                self.position_counts[int(pos)] += 1
+    
+    def write_stats(self, output_prefix: str):
+        # Write mismatch counts
+        with open(f"{output_prefix}_mismatch_stats.csv", 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['mismatches', 'count'])
+            for mismatches, count in sorted(self.mismatch_counts.items()):
+                writer.writerow([mismatches, count])
+                
+        # Write position counts
+        with open(f"{output_prefix}_position_stats.csv", 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['position', 'count'])
+            for position, count in sorted(self.position_counts.items()):
+                writer.writerow([position, count])
+
 def generate_mismatches(sequence: str, max_mismatches: int) -> Dict[int, Dict[str, str]]:
     """Generate all possible sequences with up to max_mismatches mismatches"""
     bases = {'A', 'C', 'G', 'T'}
@@ -261,7 +292,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         metavar="<int>",
         type=int,
         default=5,
-        help='Barcode position jitter [5]',
+        help='Barcode position jitter [3]',
     )
     subparser.add_argument(
         "-m", "--mismatches",
@@ -357,7 +388,7 @@ def run_reap(fastqs: List[str],
              extract: str = None,
              umi: Optional[str] = None,
              barcodes: List[str] = None,
-             jitter: int = 5,
+             jitter: int = 3,
              mismatches: int = 1,
              base_quality: int = None,
              batches: int = 10000,
@@ -425,21 +456,23 @@ def run_reap(fastqs: List[str],
 
 @log_errors
 def process_read_batch(read_batch: List[Tuple], 
-                      barcode_configs: List[Dict],
-                      matcher: BarcodeMatcherOptimized,
-                      read_range: Tuple[int, int],
-                      read_index: int,
-                      umi_index: int,
-                      umi_range: Tuple[int, int],
-                      base_quality: int = None,
-                      jitter: int = 5,
-                      FASTQ: bool = False,
-                      SAM: bool = True,
-                      verbose: bool = False) -> List[str]:
+                       barcode_configs: List[Dict],
+                       matcher: BarcodeMatcherOptimized,
+                       read_range: Tuple[int, int],
+                       read_index: int,
+                       umi_index: int,
+                       umi_range: Tuple[int, int],
+                       stats: BarcodeStats,
+                       base_quality: int = None,
+                       jitter: int = 3,
+                       FASTQ: bool = False,
+                       SAM: bool = True,
+                       verbose: bool = False) -> List[str]:
     """
     Modified process_read_batch to handle jitter and improved matching.
     Now includes original barcodes (CR), barcode qualities (CY), 
     matched barcodes (CB), UMI sequence (UR), and UMI qualities (UY).
+    Now tracks barcode statistics.
     """
     logger = setup_worker_logger()
     if verbose:
@@ -494,7 +527,10 @@ def process_read_batch(read_batch: List[Tuple],
                 positions.append(str(start))
                 mismatches.append('NA')
 
-        # Create output entry with original and adjusted positions
+        # Update statistics
+        stats.update(mismatches, positions)
+
+        # Create output entry
         source_entry = reads[read_index]
         
         # Apply base quality filtering to extracted sequence
@@ -557,7 +593,6 @@ def process_read_batch(read_batch: List[Tuple],
             sam_line = "\t".join([qname, flag, rname, pos, mapq, cigar, rnext, pnext, tlen, seq, qual] + tags) + "\n"
             output_entries.append(sam_line)
 
-
     if verbose:
         logger.info(f"Completed processing batch of {read_count} reads")
     return output_entries, read_count
@@ -571,7 +606,7 @@ def extract_sequences(
     output: str = 'extracted.fastq.gz',
     extract: str = None,
     umi: Optional[str] = None,
-    jitter: int = 5,
+    jitter: int = 3,
     mismatches: int = 1,
     base_quality: int = None,
     batch_size: int = 100000,
@@ -581,10 +616,13 @@ def extract_sequences(
     verbose: bool = False
 ) -> None:
     """
-    Modified to use JSON whitelist files with mismatch parameter
+    Modified to track stats
     """
     logger = setup_worker_logger()
     logger.info("Starting sequence extraction")
+
+    # Initialize master stats tracker
+    master_stats = BarcodeStats()
 
     # Initialize configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
@@ -632,8 +670,16 @@ def extract_sequences(
         """Retrieve results from completed jobs, write to file, and free memory."""
         nonlocal total_reads  # Access the outer scope counter
         for idx, job in enumerate(jobs):
-            results, batch_count = job.get()
-            total_reads += batch_count  # Update total count
+            # Get batch data
+            results, batch_count, batch_stats = job.get()
+            
+            # Update total read count
+            total_reads += batch_count  
+
+            # Update master stats
+            master_stats.mismatch_counts.update(batch_stats.mismatch_counts)
+            master_stats.position_counts.update(batch_stats.position_counts)
+
             outfile = output + "_" + str(idx)
             if outfile not in files:
                 files.append(outfile)
@@ -705,6 +751,9 @@ def extract_sequences(
     # Log final count
     logger.info(f"Total reads processed: {total_reads}")
 
+    # Write final statistics after all processing is complete
+    master_stats.write_stats(output)
+    logger.info(f"Barcode statistics written to {output}_mismatch_stats.csv and {output}_position_stats.csv")
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:
@@ -794,13 +843,18 @@ def worker_task(args):
      extract_range, extract_index, 
      umi_index, umi_range, 
      base_quality, jitter, FASTQ, SAM, verbose) = args
+    
+    stats = BarcodeStats()  # Create stats tracker for this batch
+
     if verbose:
         logger.info(f"Worker process started")
     try:
-        entries, count = process_read_batch(*args)
+        entries, count = process_read_batch(batch, barcode_configs, matcher,
+            extract_range, extract_index, umi_index, umi_range,
+            stats, base_quality, jitter, FASTQ, SAM, verbose)
         if verbose:
             logger.info(f"Processed batch of {count} reads")
-        return entries, count
+        return entries, count, stats
     except Exception as e:
         if verbose:
             logger.error(f"Error processing batch: {str(e)}", exc_info=True)

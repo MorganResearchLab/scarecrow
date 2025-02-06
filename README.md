@@ -17,7 +17,6 @@ A toolkit for preprocessing single cell sequencing data.
 *   - alignment (STAR and kallisto)
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
-* tally needs modifying to work with SAM format as well as FASTQ format
 * Documentation images need light and dark versions
 
 
