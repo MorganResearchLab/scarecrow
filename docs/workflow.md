@@ -3,5 +3,7 @@
 [Back to root](root.md)
 
 # Workflow
-
-<img style="float:right;width:100%" src="../img/tubemap.png" alt="workflow tube map"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/workflow_dark.svg">
+  <img alt="Workflow" src="../img/workflow_light.svg">
+</picture>

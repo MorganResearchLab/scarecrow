@@ -45,15 +45,13 @@ BARCODES=(BC1:n99_v5:${PROJECT}/barcode_whitelists/bc_data_n99_v5.txt
 
 We can now run `scarecrow seed` to process each barcode whitelist. The below example is for a SLURM HPC, but will work on a standard PC by omitting the `sbatch` line.
 
-***check RAM usage before finalising documentation***
-
 ```bash
 mkdir -p ${PROJECT}/barcode_profiles
 THREADS=1
 FASTQS=(${PROJECT}/fastq/subset/*.fastq.gz)
 for BARCODE in ${BARCODES[@]}
 do
-    sbatch --ntasks ${THREADS} --mem 4G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
+    sbatch --ntasks ${THREADS} --mem 1G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
         scarecrow seed \
             --threads ${THREADS} \
             --fastqs ${FASTQS[@]} --strands pos neg \
@@ -66,11 +64,9 @@ done
 
 The resulting barcode profiles are gathered together with `scarecrow harvest` to identify the most likely barcode positions. The `--barcode_count` parameter specifies the number of barcodes to return for **each** barcode index, and should typically be set to `1` unless debugging. The `--min_distance` parameter sets the minimum distance required between the end and start positions of two barcodes. The `--conserved` parameter allows us to mask regions of sequence that are conserved across reads, for instance barcode linker sequences.
 
-***check RAM usage before finalising documentation***
-
 ```bash
 BARCODE_FILES=(${PROJECT}/barcode_profiles/Parse/barcodes.*.csv)
-sbatch --ntasks 1 --mem 16G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err \
+sbatch --ntasks 1 --mem 12G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err \
     scarecrow harvest \
         ${BARCODE_FILES[@]} \
         --barcode_count 1 \
@@ -81,7 +77,7 @@ sbatch --ntasks 1 --mem 16G --time=01:00:00 -o harvest.%j.out -e harvest.%j.err 
 
 ### 4. Extract target sequence to fastq ###
 
-Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will store barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and [optionally] UMI data (sequence, quailties) in the fastq sequence header. The `--barcode_reverse_order` flag simply determines the order of barcode sequences in the header. The range to `--extract` includes the read (`1` or `2`) followed by the range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting fastq if required.
+Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will also record barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and [optionally] UMI data (sequence, quailties). The output can be either SAM format (default) or FASTQ. The `--barcode_reverse_order` flag determines the order of barcode sequences in the tag. The range to `--extract` includes the read (`1` or `2`) followed by the range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting fastq if required.
 
 ***does barcode_reverse_order update the other barcode metadata order?***
 
@@ -94,7 +90,7 @@ BQ=10
 JITTER=2
 MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.gz})
+OUT=$(basename ${FASTQS[0]%.fastq*})
 sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
     scarecrow reap \
         --threads ${THREADS} \
@@ -107,7 +103,8 @@ sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.er
         --jitter ${JITTER} \
         --mismatch ${MISMATCH} \
         --base_quality ${BQ} \
-        --out ${PROJECT}/extracted/${OUT} 
+        --out ${PROJECT}/extracted/${OUT} \
+        --out_sam
 ```                
 
 #### 5. Tally barcode counts and index position distributions
