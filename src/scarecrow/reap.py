@@ -189,8 +189,15 @@ class BarcodeStats:
         self.position_counts = Counter()
         
     def update(self, mismatches: List[str], positions: List[str]):
-        # Sum up mismatches across barcodes, excluding 'NA' values
-        total_mismatches = sum(int(m) for m in mismatches if m != 'NA')
+        # Convert mismatches to integers, handling 'NA' values as -1
+        mismatch_values = [int(m) if m != 'NA' else -1 for m in mismatches]
+        
+        # If any mismatch is negative, sum only the negative values
+        if any(m < 0 for m in mismatch_values):
+            total_mismatches = sum(m for m in mismatch_values if m < 0)
+        else:
+            total_mismatches = sum(mismatch_values)
+            
         self.mismatch_counts[total_mismatches] += 1
         
         # Track each position
@@ -481,7 +488,7 @@ def process_read_batch(read_batch: List[Tuple],
     read_count = len(read_batch)
     
     for i, reads in enumerate(read_batch):
-        if i % 1000 == 0:
+        if i % 100000 == 0:
             logger.debug(f"Processing read {i}/{read_count}")
             
         original_barcodes = []  # CR

@@ -18,6 +18,8 @@ A toolkit for preprocessing single cell sequencing data.
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
 * Documentation images need light and dark versions
+* reap: CSV mismatches needs re-working: (-1,0,1) sums to 0, falsely indicating a perfect match
+* seed: random subsampling should have option to specify upper read limit to avoid having get total read count
 
 
 
