@@ -17,7 +17,8 @@ A toolkit for preprocessing single cell sequencing data.
 *   - alignment (STAR and kallisto)
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
-* samtag is a slow process, may be better (?) in reap to write to unaligned BAM rather than fastq
+* tally needs modifying to work with SAM format as well as FASTQ format
+* Documentation images need light and dark versions
 
 
 
@@ -39,7 +40,7 @@ scarecrow harvest ${FILES[@]} --barcode_count 3 --min_distance 11 \
     --conserved ./results/barcodes_BC1_conserved.tsv --out barcode_positions.csv
 
 time scarecrow reap --fastqs ${R1} ${R2} -p ./barcode_positions.csv --barcode_reverse_order \
-    -j 2 -m 2 -q 30 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA.fq --threads 4
+    -j 2 -m 2 -q 30 --barcodes ${BARCODES[@]} --extract 1:1-64 --umi 2:1-10 --out ./cDNA --threads 4
 
 scarecrow tally -f ./cDNA.fq -m 2
 
