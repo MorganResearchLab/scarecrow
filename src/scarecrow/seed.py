@@ -454,10 +454,13 @@ def run_seed(
         # Create batches efficiently
         current_batch = []        
         for idx, (read1, read2) in enumerate(zip(r1,r2)):
-            if num_reads > 0 and idx not in sample_indices:
-                continue
-            if num_reads > 0 and idx > max(sample_indices):
-                break
+            if num_reads > 0: 
+                # Current read index exceeds max index in subsample so exit
+                if idx > max(sample_indices):
+                    break
+                # Current read index not in subsample index so skip to next read
+                if idx not in sample_indices:
+                    continue
 
             # Add sequences to analyzers
             read1_analyzer.add_sequence(read1.sequence)
