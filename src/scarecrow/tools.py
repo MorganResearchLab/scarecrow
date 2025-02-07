@@ -40,25 +40,3 @@ def reverse_complement(seq):
     """
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', 'N': 'N'}
     return ''.join(complement[base] for base in reversed(seq))
-
-@log_errors
-def region_indices(spec: Assay, fastqs):
-    """
-    Identify library elements contained in sequencing reads
-    """
-    logger = logging.getLogger('scarecrow')
-
-    logger.info(f"Library elements identified by seqspec.get_index_by_primer")
-    indices = []
-    for fastq in fastqs:
-        index = get_index_by_primer(spec, "rna", fastq)
-        indices.append(index)
-    for index in indices:
-        for file, regions in index.items():
-            if file in fastqs:
-                logger.info(f"{file}")                
-                for region in regions:
-                    logger.info(f"{region.region_id}: {region.start}-{region.stop}") 
-
-    return indices
-
