@@ -4,11 +4,13 @@
 
 # Installation
 
+To install `scarecrow` first create a conda/mamba environment. After creating the environment, activate it, and install the dependencies.
+
 ```bash
 mamba create --name scarecrow python=3.12
 mamba activate scarecrow
-mamba install git pip
-pip install pyfastx
+mamba install git pandas pip pysam rich scipy seaborn
 pip install git+https://github.com/MorganResearchLab/scarecrow.git
-mamba install numpy, scipy, pandas, seaborn
 ```
+
+Whenever using `scarecrow` ensure that the environment is first activated (`mamba activate scarecrow`).
