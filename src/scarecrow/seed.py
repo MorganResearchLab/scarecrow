@@ -456,6 +456,8 @@ def run_seed(
         for idx, (read1, read2) in enumerate(zip(r1,r2)):
             if num_reads > 0 and idx not in sample_indices:
                 continue
+            if num_reads > 0 and idx > max(sample_indices):
+                break
 
             # Add sequences to analyzers
             read1_analyzer.add_sequence(read1.sequence)
