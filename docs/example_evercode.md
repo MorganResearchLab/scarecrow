@@ -75,17 +75,18 @@ FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 gunzip -c ${FASTQS[0]} | grep -A1 --no-group-separator "^@" | grep -v "^@" | head
 ```
 
-<pre><code>GNTGCAAAACAATATCCAAAAAGATTTTAAAAAAACAGTAAATTAAAACAAAGTTTTGCTTCTTTTCTCCACCA
-TNGCAGTGGTATC<text style="color:red">AACGCAGAGTGAATGGG</text>ATTACAGGCATGAGCCACTGCGCCTGGCCAAGATAGCAATTTTT
+```bash
+GNTGCAAAACAATATCCAAAAAGATTTTAAAAAAACAGTAAATTAAAACAAAGTTTTGCTTCTTTTCTCCACCA
+TNGCAGTGGTATC'AACGCAGAGTGAATGGG'ATTACAGGCATGAGCCACTGCGCCTGGCCAAGATAGCAATTTTT
 GNCTAATCGAACCATCTAGTAGCTGGTTCCCTCCGAAGTTTCCCTCAGGATAGCTGGCGCTCTCGCAGACCCGA
 GNAAAAAAGAAATAATGAAAATCAAAGCAGAAATAAATGAATTTGAAATGAAGAAATTAATACAAAAGATCAAT
 TNAAAAATGAAAGTGCCACAGTCTCAAGCACGTGGATGACGGATTAGTCTCAAGCACGTGGATGAGCCAATAGT
 GNAAAGATCAACAAAATTGATAGACCGCTAGCAAGACTAATAAAGAAGAAAAGAGAGAAGAATCAAATAGACGC
-TNGCAGTGGTATC<text style="color:red">AACGCAGAGGTGAATGGG</text>GTGGGAAAAGATATTCCATGCAAATGGAAACCAAAAGCAAGCA
-TNC<text style="color:red">AACGCAGAGTGAATGGG</text>AAAAGAGCAATTCTACAATATAACCTTATATGCAAAAGCAACATAACTGTGTGT
-<text style="color:red">GNGTGAATGGG</text>GAACCTGGCTGGGAAAGCCTCCCTGAGAAGGGGAAGTGGGCAGGTTTGAGGGAGAGGAAGTCG
+TNGCAGTGGTATC'AACGCAGAGGTGAATGGG'GTGGGAAAAGATATTCCATGCAAATGGAAACCAAAAGCAAGCA
+TNC'AACGCAGAGTGAATGGG'AAAAGAGCAATTCTACAATATAACCTTATATGCAAAAGCAACATAACTGTGTGT
+'GNGTGAATGGG'GAACCTGGCTGGGAAAGCCTCCCTGAGAAGGGGAAGTGGGCAGGTTTGAGGGAGAGGAAGTCG
 GNCAACTCCCCAACACATTAAACATGGAGTTACCATGTGACCTAGCAATTCCCTTCCTAAGAATCTCCCCAAGA
-</code></pre>
+```
 
 Sequences manually highlighted in red are relatively conserved and correspond with the known TSO sequence. To trim these sequences including any upstream bases, tailing `N`s, and short reads, we can use `cutadapt` as follows:
 
@@ -133,39 +134,39 @@ sbatch --ntasks ${THREADS} --mem 4G --time=12:00:00 -o reap.%j.out -e reap.%j.er
 
 In addition to generating the SAM file, `scarecrow reap` outputs a `_mismatch_stats.csv` and a `_position_stats.csv`. The mismatch_stats CSV has the following format:
 
-<pre><code>
+```bash
 mismatches,count
 -3,5654876
 -2,5249063
 -1,16976272
-<text style="color:red">0,126774904</text>
+0,126774904
 1,11373736
 2,1287519
 3,156456
-</code></pre>
+```
 
-Indicating the number of reads recorded for each sum of mismatches across its barcodes. Negative numbers indicate the number of reads for which no barcode was found (i.e. -1 is one barcode unmatched, -2 is two barcodes unmatched, ...). Although we used `--mismatch 2`, a mismatch count of three is possible if for example each of the three barcodes has one mismatch, or one barcode has two mismatches and another has 1 mismatch. The number of reads with perfect barcodes (zero mismatches) is highlighted in red.
+Indicating the number of reads recorded for each sum of mismatches across its barcodes. Negative numbers indicate the number of reads for which no barcode was found (i.e. -1 is one barcode unmatched, -2 is two barcodes unmatched, ...). Although we used `--mismatch 2`, a mismatch count of three is possible if for example each of the three barcodes has one mismatch, or one barcode has two mismatches and another has 1 mismatch.
 
 The position_stats CSV follows a similar format, indicating the count of barcodes starting at each position within `--jitter 2` :
 
-<pre><code>
+```bash
 position,count
 9,843639
 10,2986137
-<text style="color:red">11,162568743</text>
+11,162568743
 12,792597
 13,281710
 47,1810251
 48,8885605
-<text style="color:red">49,154939989</text>
+49,154939989
 50,1587644
 51,249337
 77,3125647
 78,12576913
-<text style="color:red">79,151770266</text>
-</code></pre>
+79,151770266
+```
 
-This illustrates that millions of reads have barcodes not starting at the expected positions (highlighted in red).
+This illustrates that millions of reads have barcodes not starting at the expected positions.
 
 ### 5. Align with STAR
 
