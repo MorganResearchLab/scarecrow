@@ -10,6 +10,7 @@
     * [`tally`](toolkit_tally.md)
     * [`samtag`](toolkit_samtag.md)
     * [`sam2fastq`](toolkit_sam2fastq.md)
+    * [`rake`](toolkit_rake.md)
 * [Workflow](workflow.md)
 * Examples
     * [Parse Evercode WTv2](example_evercode.md)

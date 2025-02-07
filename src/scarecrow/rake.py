@@ -32,6 +32,7 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         metavar="<file>",
         help=("Path to barcode text file"),
         type=str,
+        required=True,
         default=None,
     )
     subparser.add_argument(
@@ -39,7 +40,7 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         metavar="<file>",
         help=("Path to output barcode mismatch file"),
         type=str,
-        default=None,
+        default=None
     )
     subparser.add_argument(
         "-m", "--max_mismatches",
