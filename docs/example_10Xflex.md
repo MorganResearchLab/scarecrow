@@ -4,7 +4,10 @@
 
 # Example: 10X Flex
 
-<img style="float:right;width:100%;" src="../img/10Xflex.svg" alt="scarecrow"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/10Xflex_dark.svg">
+  <img alt="Chromium 10X Flex library structure" src="../img/10Xflex_light.svg">
+</picture>
 
 Stay organised - create a folder for the project to keep things tidy.
 
@@ -21,17 +24,5 @@ wget -nc -P ${PROJECT}/fastq ftp.sra.ebi.ac.uk/vol1/fastq/SRR288/063/SRR28867563
 wget -nc -P ${PROJECT}/fastq ftp.sra.ebi.ac.uk/vol1/fastq/SRR288/062/SRR28867562/SRR28867562.fastq.gz
 ```
 
-### 1. Extract subset of 1M reads for profiling
-
-```bash
-mkdir -p ${PROJECT}/fastq/subset
-FILES=(${PROJECT}/fastq/*.fastq.gz)
-for FILE in ${FILES[@]}
-do
-    ID=$(basename ${FILE%.fast*})
-    zcat -c ${FILE} | head --l 4000000 | gzip > ${PROJECT}/fastq/subset/${ID}.fastq.gz
-done
-```
-
-### 2. Generate barcode match profiles
+### 1. Generate barcode match profiles
 

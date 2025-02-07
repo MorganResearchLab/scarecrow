@@ -4,7 +4,10 @@
 
 # Example: 10X 3'
 
-<img style="float:right;width:100%;" src="../img/10X3p.svg" alt="scarecrow"/>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../img/10X3p_dark.svg">
+  <img alt="Chromium 10X 3' library structure" src="../img/10X3p_light.svg">
+</picture>
 
 Stay organised - create a folder for the project to keep things tidy.
 
@@ -29,19 +32,7 @@ do
 done
 ```
 
-### 1. Extract subset of 1M reads for profiling
-
-```bash
-mkdir -p ${PROJECT}/fastq/subset
-FILES=(${PROJECT}/fastq/*.fastq.gz)
-for FILE in ${FILES[@]}
-do
-    ID=$(basename ${FILE%.fast*})
-    zcat -c ${FILE} | head --l 4000000 | gzip > ${PROJECT}/fastq/subset/${ID}.fastq.gz
-done
-```
-
-### 2. Generate barcode match profiles
+### 1. Generate barcode match profiles
 
 Chromium barcode whitelists for different chemistry versions are available at [https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium3.html](https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium3.html). The library for this sample used the v3.1 chemistry, so the barcode whitelist to use is 3M-february-2018.txt.gz. The file should be downloaded to `${PROJECT}/barcodes`, unzipped and checked that it contains a single barcode per line with no headers. 
 

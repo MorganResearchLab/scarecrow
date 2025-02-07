@@ -19,7 +19,6 @@ A toolkit for preprocessing single cell sequencing data.
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
 * Documentation images need light and dark versions
 * reap: CSV mismatches needs re-working: (-1,0,1) sums to 0, falsely indicating a perfect match
-* seed: random subsampling needs to exit loop if idx > max(sample_indices) rather than waste time cycling fastq file
 
 
 
