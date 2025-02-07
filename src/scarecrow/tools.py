@@ -5,8 +5,6 @@
 
 import resource
 import gzip
-from seqspec import Assay
-from seqspec.seqspec_index import get_index_by_primer
 import logging
 from scarecrow.logger import log_errors
 from typing import List, Dict, Set
