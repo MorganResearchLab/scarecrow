@@ -3,7 +3,7 @@
 [root](root.md)
 
 ## scarecrow reap
-The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either a FASTQ file or a SAM file (default). If writing to SAM then it the input FASTQ data should be trimmed beforehand to remove any adapter sequences. `jitter` is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence. `base_quality` will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN` in the sequence header. 
+The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either a FASTQ file or a SAM file (default) with the prefix `--out`. If writing to SAM then it the input FASTQ data should be trimmed beforehand to remove any adapter sequences. `jitter` is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence. `base_quality` will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN` in the sequence header. 
 
 ```bash
 # Reap target sequence from fastqs (TBC)
@@ -11,7 +11,7 @@ scarecrow reap --fastqs <paired_fastq_R1> <paired_fastq_R2> \
     --barcode_positions <barcode_positions.csv> \
     --barcodes BC1:v1:<v1_whitelist.txt> BC2:v1:<v1_whitelist.txt> BC3:n198:<n198_whitelist.txt> \
     --barcodes ${BARCODES[@]} \
-    --out cDNA.fastq \
+    --out ./cDNA \
     --extract 1:1-64 \
     --umi 2:1-10 \
     --jitter 2 \

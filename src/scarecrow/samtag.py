@@ -51,7 +51,7 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         metavar="<file>",
         help=("Path to SAM file to output"),
         type=str,
-        default=None,
+        default="samtag.sam",
     )
     subparser.add_argument(
         "-@", "--threads",

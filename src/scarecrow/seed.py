@@ -229,6 +229,7 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
     subparser.add_argument(
         "-f", "--fastqs", 
         nargs="+", 
+        required=True,
         help="Pair of FASTQ files")
     subparser.add_argument(
         "-n", "--num_reads", 
@@ -252,6 +253,7 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         "-c", "--barcodes",
         metavar="<string>",
         nargs='+', 
+        required=True,
         help='Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt BC2:v2:barcodes2.txt ...)',
     )
     subparser.add_argument(

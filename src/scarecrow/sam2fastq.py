@@ -29,6 +29,7 @@ scarecrow sam2fastq --sam cdna.sam
         metavar="<file>",
         help=("SAM file to extract reads from"),
         type=str,
+        required=True,
         default=[],
     )
     return subparser

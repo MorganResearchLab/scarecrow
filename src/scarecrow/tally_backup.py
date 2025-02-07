@@ -28,11 +28,10 @@ scarecrow tally --fastq cdna.fastq.gz
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
-        "-i", "--input",
+        "-f", "--fastq",
         metavar="<file>",
-        help=("In FASTQ or SAM file as output by scarecrow reap"),
+        help=("Fastq file as output by scarecrow reap"),
         type=str,
-        required=True,
         default=[],
     )
     subparser.add_argument(
@@ -53,12 +52,12 @@ def validate_tally_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
-    run_tally(input_file = args.input,
+    run_tally(fastq = args.fastq,
               mismatches = args.mismatches,
               verbose = args.verbose)
 
 @log_errors
-def run_tally(input_file: str = None,
+def run_tally(fastq: str = None,
               mismatches: int = 1,
               verbose: bool = False) -> None:
     """
@@ -69,21 +68,12 @@ def run_tally(input_file: str = None,
     logger = setup_logger(logfile)
     logger.info(f"logfile: '{logfile}'")
 
-    # Determine file type
-    is_fastq = input_file.lower().endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz'))    
-
-    # Process file headers
-    logger.info(f"Processing sequence headers, this may take a while")
-    barcode_counts, cell_barcodes = (process_fastq_headers(input_file) if is_fastq 
-                                     else process_sam_headers(input_file))
+    # Process fastq header
+    logger.info(f"Prcoessing fastq sequence headers, this may take a while")
+    barcode_counts, cell_barcodes = process_fastq_headers(fastq)
 
     # Report barcode metrics summary
-    mismatch_counts, valid_barcodes, sequence_counts, perfect_matches = (
-        count_fastq_mismatch_sums(input_file) if is_fastq 
-        else count_sam_mismatch_sums(input_file)
-    )
-
-    
+    mismatch_counts, valid_barcodes, sequence_counts, perfect_matches = count_mismatch_sums(fastq)
     if verbose:
         for mismatch_sum, count in sorted(mismatch_counts.items()):
             logger.info(f"Mismatch sum: {mismatch_sum}\tCount: {count}")
@@ -95,13 +85,10 @@ def run_tally(input_file: str = None,
     # Save mismatch counts to CSV
     mismatch_df = pd.DataFrame(list(mismatch_counts.items()), 
                               columns=["BarcodeMismatches", "Count"]).sort_values(by="BarcodeMismatches")
-    mismatch_df.to_csv(f"{input_file}.mismatches.csv", index=False)
+    mismatch_df.to_csv(f"{fastq}.mismatches.csv", index=False)
     
-
     # Count position occurrences
-    position_counts = (count_fastq_position_occurrences(input_file) if is_fastq 
-                       else count_sam_position_occurrences(input_file))
-
+    position_counts = count_position_occurrences(fastq)
     if verbose:
         for i, counts in enumerate(position_counts):
             for position, count in sorted(counts.items()):
@@ -113,9 +100,9 @@ def run_tally(input_file: str = None,
                                   columns=["Position", "Count"]).sort_values(by="Position")
         positions_df.insert(0, "Index", i + 1)
         if i == 0:
-            positions_df.to_csv(f"{input_file}.positions.csv", index=False)
+            positions_df.to_csv(f"{fastq}.positions.csv", index=False)
         else:
-            positions_df.to_csv(f"{input_file}.positions.csv", index=False, mode="a", header=False)
+            positions_df.to_csv(f"{fastq}.positions.csv", index=False, mode="a", header=False)
 
     # Original barcode counting logic
     for i, counts in enumerate(barcode_counts):
@@ -126,9 +113,9 @@ def run_tally(input_file: str = None,
                               columns=["Barcode", "Count"]).sort_values(by="Count")
         barcodes.insert(0, "Index", i + 1)
         if i == 0:
-            barcodes.to_csv(f"{input_file}.barcodes.csv", index=False)
+            barcodes.to_csv(f"{fastq}.barcodes.csv", index=False)
         else:
-            barcodes.to_csv(f"{input_file}.barcodes.csv", index=False, mode="a", header=False)
+            barcodes.to_csv(f"{fastq}.barcodes.csv", index=False, mode="a", header=False)
 
     # Log the combined barcode counts
     if verbose:
@@ -136,66 +123,63 @@ def run_tally(input_file: str = None,
             logger.info(f"Barcode combination: {cell}\tCount: {count}")
     barcodes = pd.DataFrame(list(cell_barcodes.items()), 
                            columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
-    barcodes.to_csv(f"{input_file}.barcode.combinations.csv", index=False)
+    barcodes.to_csv(f"{fastq}.barcode.combinations.csv", index=False)
 
-def process_fastq_headers(file_path: str) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
+
+def process_fastq_headers(file_path: str = None) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
     """
     Process fastq header to report on barcode counts
+
+    Args:
+        file_path: fastq file to operate on
+    
+    Returns:
+        (1) list of dictionary of barcode counts, and (2) dictionary of barcode combination counts
     """
+
+    # Create a list of dictionaries, one for each barcode position
     barcode_counts = []
     cell_barcodes = defaultdict(int)
 
+    # Open the FASTQ file using pysam
     with pysam.FastxFile(file_path) as fastq_file:
         for entry in fastq_file:
+            # Extract the header line
             header = entry.comment
+
+            # Check if the header contains 'barcodes='
             if 'CB=' in header:
+                # Extract the barcodes substring
                 barcodes_str = re.search(r'CB=([\w_]+)', header).group(1)
                 cell_barcodes[barcodes_str] += 1
                 
+                # Split the barcodes string by underscore
                 barcodes = barcodes_str.split('_')
                 
+                # Ensure barcode_counts has enough dictionaries for all barcode positions
                 while len(barcode_counts) < len(barcodes):
                     barcode_counts.append(defaultdict(int))
                 
+                # Update counts in the corresponding dictionaries
                 for i, barcode in enumerate(barcodes):
                     barcode_counts[i][barcode] += 1
 
     return barcode_counts, cell_barcodes
 
-def process_sam_headers(file_path: str) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
+def count_mismatch_sums(file_path: str) -> dict:
     """
-    Process SAM header to report on barcode counts
-    """
-    barcode_counts = []
-    cell_barcodes = defaultdict(int)
-
-    with pysam.AlignmentFile(file_path, 'rb', check_sq=False) as sam_file:
-        # Force reading even if header is missing
-        for read in sam_file.fetch(until_eof=True):
-            # Check for cell barcode tag
-            if read.has_tag('CB'):
-                barcodes_str = read.get_tag('CB')
-                cell_barcodes[barcodes_str] += 1
-                
-                barcodes = barcodes_str.split('_')
-                
-                while len(barcode_counts) < len(barcodes):
-                    barcode_counts.append(defaultdict(int))
-                
-                for i, barcode in enumerate(barcodes):
-                    barcode_counts[i][barcode] += 1
-
-    return barcode_counts, cell_barcodes
-
-def count_fastq_mismatch_sums(file_path: str) -> Tuple[dict, int, int, int]:
-    """
-    Count sequences for each sum of mismatch values in FASTQ
+    Count sequences for each sum of mismatch values.
+    
+    Args:
+        file_path: Path to the fastq file
+    
+    Returns:
+        Dictionary with mismatch sums as keys and sequence counts as values
     """
     mismatch_counts = defaultdict(int)
     sequences = 0
     valid_barcodes = 0
     perfect_matches = 0
-    
     with pysam.FastxFile(file_path) as fastq_file:
         for entry in fastq_file:
             header = entry.comment
@@ -214,41 +198,15 @@ def count_fastq_mismatch_sums(file_path: str) -> Tuple[dict, int, int, int]:
                     
     return dict(mismatch_counts), valid_barcodes, sequences, perfect_matches
 
-def count_sam_mismatch_sums(file_path: str) -> Tuple[dict, int, int, int]:
+def count_position_occurrences(file_path: str) -> List[dict]:
     """
-    Count sequences for each sum of mismatch values in SAM
-    """
-    mismatch_counts = defaultdict(int)
-    sequences = 0
-    valid_barcodes = 0
-    perfect_matches = 0
+    Count sequences sharing each reported position for each index.
     
-    with pysam.AlignmentFile(file_path, 'r', check_sq=False) as sam_file:
-        # Force reading even if header is missing
-        for read in sam_file.fetch(until_eof=True):
-            sequences += 1
-            
-            # Check for cell barcode
-            if read.has_tag('CB'):
-                valid_barcodes += 1
-                
-                # Check for mismatch tag
-                if read.has_tag('XM'):
-                    mismatches_str = read.get_tag('XM')
-                    mismatch_sum = 0
-                    for x in mismatches_str.split('_'):
-                        mismatch_val = int(x)
-                        mismatch_sum += mismatch_val
-                        mismatch_counts[mismatch_val] += 1
-                    
-                    if mismatch_sum == 0:
-                        perfect_matches += 1
+    Args:
+        file_path: Path to the fastq file
     
-    return dict(mismatch_counts), valid_barcodes, sequences, perfect_matches
-
-def count_fastq_position_occurrences(file_path: str) -> List[dict]:
-    """
-    Count sequences sharing each reported position in FASTQ
+    Returns:
+        List of dictionaries, one for each position index, containing position counts
     """
     position_counts = []
     
@@ -259,30 +217,11 @@ def count_fastq_position_occurrences(file_path: str) -> List[dict]:
                 positions_str = re.search(r'XP=([\d_]+)', header).group(1)
                 positions = positions_str.split('_')
                 
+                # Ensure we have enough dictionaries for all positions
                 while len(position_counts) < len(positions):
                     position_counts.append(defaultdict(int))
                 
-                for i, pos in enumerate(positions):
-                    position_counts[i][int(pos)] += 1
-                    
-    return [dict(counts) for counts in position_counts]
-
-def count_sam_position_occurrences(file_path: str) -> List[dict]:
-    """
-    Count sequences sharing each reported position in SAM
-    """
-    position_counts = []
-    
-    with pysam.AlignmentFile(file_path, 'r', check_sq=False) as sam_file:
-        # Force reading even if header is missing
-        for read in sam_file.fetch(until_eof=True):
-            if read.has_tag('XP'):
-                positions_str = read.get_tag('XP')
-                positions = positions_str.split('_')
-                
-                while len(position_counts) < len(positions):
-                    position_counts.append(defaultdict(int))
-                
+                # Count occurrences of each position at each index
                 for i, pos in enumerate(positions):
                     position_counts[i][int(pos)] += 1
                     

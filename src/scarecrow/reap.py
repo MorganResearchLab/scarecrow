@@ -267,6 +267,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
     subparser.add_argument(
         "--fastqs", 
         nargs="+", 
+        required=True,
         help="Pair of FASTQ files")
     subparser.add_argument(
         "-o", "--out",
@@ -276,7 +277,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         default='extracted',
     )
     # Add a mutually exclusive group
-    out_format = subparser.add_mutually_exclusive_group(required=False)
+    out_format = subparser.add_mutually_exclusive_group(required = False)
     out_format.add_argument(
         "--out_sam", 
         action='store_true',
@@ -292,6 +293,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         metavar="<file>",
         help=("File containing barcode positions, output by scarecrow harvest"),
         type=str,
+        required=True,
         default=[],
     )
     subparser.add_argument(
@@ -320,6 +322,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         metavar="<range>",
         help=("Sequence range to extract <read>:<range> (e.g. 1:1-64)"),
         type=str,
+        required=True,
         default=None
     )
     subparser.add_argument(
@@ -333,6 +336,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_p
         "-c", "--barcodes",
         metavar="<string>",
         nargs='+', 
+        required=True,
         help='Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt BC2:v2:barcodes2.txt ...)',
     )
     subparser.add_argument(
