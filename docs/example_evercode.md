@@ -88,7 +88,7 @@ TNC'AACGCAGAGTGAATGGG'AAAAGAGCAATTCTACAATATAACCTTATATGCAAAAGCAACATAACTGTGTGT
 GNCAACTCCCCAACACATTAAACATGGAGTTACCATGTGACCTAGCAATTCCCTTCCTAAGAATCTCCCCAAGA
 ```
 
-Sequences manually highlighted in red are relatively conserved and correspond with the known TSO sequence. To trim these sequences including any upstream bases, tailing `N`s, and short reads, we can use `cutadapt` as follows:
+Sequences manually highlighted with quotes are relatively conserved and correspond with the known TSO sequence. To trim these sequences including any upstream bases, tailing `N`s, and short reads, we can use `cutadapt` as follows:
 
 ```bash
 THREADS=4

@@ -70,6 +70,7 @@ def log_errors(func):
     """
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        logger = logging.getLogger('scarecrow')
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -77,6 +78,3 @@ def log_errors(func):
             raise
     return wrapper
 
-
-# Global
-#logger = setup_logger()
