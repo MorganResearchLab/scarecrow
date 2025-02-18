@@ -68,13 +68,46 @@ time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 1 -q 10 \
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.trie.gz
           BC2:v1:./WTv2/bc_data_v1.txt.BC2.trie.gz
           BC3:v1:./WTv2/bc_data_v1.txt.BC3.trie.gz)
-time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
+time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 1 -q 10 \
     -p ./WTv2/barcode_positions_trie.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
     --out ./WTv2/cDNA_trie --threads 4
 
 ```
 
+
+
+
+# Testing on laptop (split-seq)
+```bash
+cd ~/Documents/split-seq
+R1=./r1.fastq
+R2=./r2.fastq
+BARCODES=(BC1:3lvl:./BC1.txt
+          BC2:3lvl_lig:./BC2.txt
+          BC3:P7:./BC3.txt)
+
+# Seed
+for BARCODE in ${BARCODES[@]}
+do
+    ID=${BARCODE%:*:*}
+    WHITELIST=${BARCODE#*:*:}
+    echo ${ID}
+    time scarecrow seed --fastqs ${R1} ${R2} \
+        -o ./barcodes_${ID}.csv --barcodes ${BARCODE} -n 0 -u 0
+done
+
+FILES=(./barcodes_BC*.csv)
+scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
+    --conserved ./barcodes_BC1_conserved.tsv \
+    --out ./barcode_positions.csv
+
+scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
+    -p ./barcode_positions.csv \
+    --barcodes ${BARCODES[@]} --extract 2:11-150 --umi 2:1-10 --base_quality 10 \
+    --out ./cDNA --threads 1 --verbose &> debug.log
+
+```
 
 
 # Debugging notes

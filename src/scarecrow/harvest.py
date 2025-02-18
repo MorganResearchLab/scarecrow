@@ -504,8 +504,8 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
             ]
             
             # Log filtered peaks for debugging
-            logger.info(f"Adding peak annotations for read={read}, orientation={orientation}, whitelist={whitelist}")
-            logger.info(f"Filtered peaks:\n{peaks}")
+            #logger.info(f"Adding peak annotations for read={read}, orientation={orientation}, whitelist={whitelist}")
+            #logger.info(f"Filtered peaks:\n{peaks}")
             
             for _, peak in peaks.iterrows():
                 # Check if the peak's whitelist matches the current whitelist
@@ -516,9 +516,9 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
                             color='blue', 
                             label="Peak")
                     # Log peak positions for debugging
-                    logger.info(f"Added peak annotation: start={peak['start']}, end={peak['end']}")
-                else:
-                    logger.info(f"Skipping peak (whitelist mismatch): start={peak['start']}, end={peak['end']}, whitelist={peak['barcode_whitelist']}")
+                    #logger.info(f"Added peak annotation: start={peak['start']}, end={peak['end']}")
+                #else:
+                    #logger.info(f"Skipping peak (whitelist mismatch): start={peak['start']}, end={peak['end']}, whitelist={peak['barcode_whitelist']}")
     
     def _create_enhanced_facet_plot(data, ylim):
         """Create facet plot with both conserved regions and peak annotations"""

@@ -69,9 +69,9 @@ class BarcodeMatcherOptimized:
                 
                 if self.verbose:
                     self.logger.info(f"Loaded {len(exact_matches)} exact matches and {len(mismatch_lookup)} variants for whitelist '{whitelist}'")
-                    self.logger.info(f"'{whitelist}' exact matches:\n{exact_matches}\n")
-                    self.logger.info(f"'{whitelist}' mismatches:\n{mismatch_lookup}\n")
-                    self.logger.info(f"Matchers: {self.matchers.keys()}")
+                    #self.logger.info(f"'{whitelist}' exact matches:\n{exact_matches}\n")
+                    #self.logger.info(f"'{whitelist}' mismatches:\n{mismatch_lookup}\n")
+                    #self.logger.info(f"Matchers: {self.matchers.keys()}")
             
             elif file.endswith('.trie.gz'):
                 # Initialize the trie matcher only once
@@ -146,6 +146,9 @@ class BarcodeMatcherOptimized:
                 self.logger.warning(f"Whitelist '{whitelist}' not found in available whitelists: {list(self.matchers.keys())}")
                 return 'NNNNNNNN', -1, -1
         
+            #self.logger.info(f"-> start:{original_start} end:{original_end} jitter:{jitter}")
+            #self.logger.info(f"{sub_sequence}")
+
             # First pass: Look for exact matches with best position
             exact_matches = []
             for seq, pos in sub_sequence:
@@ -156,13 +159,14 @@ class BarcodeMatcherOptimized:
             # If we found exact matches, return the one closest to the expected position
             if exact_matches:
                 exact_matches.sort(key=lambda x: x[1]) # Sort by distance from expected start
-                self.logger.info(f"\nExact matches: {exact_matches}")
+                #self.logger.info(f"\nExact matches: {exact_matches}")
                 if len(exact_matches) == 1 or (exact_matches[0][1] < exact_matches[1][1]):
                     # Only one exact match
                     match = exact_matches[0]
                     return match[0], 0, match[2]
                 else:
                     # Multiple exact matches with the same distance
+                    self.logger.info(f"\Multiple matches")
                     return 'NNNNNNNN', -1, -1
             
             # If no exact match was found, check mismatch lookup            
@@ -184,7 +188,7 @@ class BarcodeMatcherOptimized:
                             mismatch_matches.append((barcode, n, pos, pos_distance))
             
                 if mismatch_matches:
-                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    #self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
                     from collections import defaultdict
                     match_groups = defaultdict(list)
@@ -199,18 +203,15 @@ class BarcodeMatcherOptimized:
                     if len(best_matches) == 1:
                         # Only one match in the best group
                         match = best_matches[0]
-                        if self.verbose:
-                            self.logger.debug(f"Selected best mismatch match: {match[0]} at position {match[2]}")
+                        #self.logger.info(f"Selected best mismatch match: {match[0]} at position {match[2]}")
                         return match[0], match[1], match[2]
                     else:
                         # Multiple matches in the best group
-                        if self.verbose:
-                            self.logger.debug("Multiple mismatch matches with the same distance, returning no match")
+                        #self.logger.info("Multiple mismatch matches with the same distance, returning no match")
                         return 'NNNNNNNN', -1, -1
         
             # No match found
-            if self.verbose:
-                self.logger.debug("No match found")
+            #self.logger.info("No match found")
             null_match = "N" * len(next(iter(self.matchers[whitelist]['exact'])))
             return null_match, -1, -1
 

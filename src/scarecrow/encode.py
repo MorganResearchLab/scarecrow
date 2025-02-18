@@ -182,7 +182,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     'whitelist': wl_key,
                     'orientation': orientation,
                     'start': match_start + 1, 
-                    'end': match_start + len(original_seq) - 1,
+                    'end': match_start + len(original_seq), # this was - 1 but removed to get correct end for seed
                     'mismatches': mismatches,
                     'distance': match_dist  
                 })
@@ -203,7 +203,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                             'whitelist': match['whitelist'],
                             'orientation': orientation,
                             'start': match_start, 
-                            'end': match_start + len(match['barcode']) - 1,
+                            'end': match_start + len(match['barcode']), # this was - 1 but removed to get correct end for seed
                             'mismatches': match['mismatches'],
                             'distance': match_dist
                         })
