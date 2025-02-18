@@ -193,7 +193,7 @@ class SequenceFrequencyAnalyzer:
         """Helper to finalize a conserved run with summary statistics"""
         return {
             'start': run['start'] + 1,  # Convert to 1-based position
-            'end': run['start'] + len(run['bases']) + 1,
+            'end': run['start'] + len(run['bases']),
             'length': len(run['bases']),
             'sequence': ''.join(run['bases']),
             'median_freq': sorted(run['freqs'])[len(run['freqs'])//2]

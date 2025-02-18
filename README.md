@@ -59,7 +59,7 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
           BC2:v1:./WTv2/bc_data_v1.txt
           BC3:v1:./WTv2/bc_data_v1.txt)
-time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 1 -q 10 \
+time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_set.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
     --out ./WTv2/cDNA_set --threads 4
@@ -68,7 +68,7 @@ time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 1 -q 10 \
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.trie.gz
           BC2:v1:./WTv2/bc_data_v1.txt.BC2.trie.gz
           BC3:v1:./WTv2/bc_data_v1.txt.BC3.trie.gz)
-time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 1 -q 10 \
+time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_trie.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
     --out ./WTv2/cDNA_trie --threads 4
@@ -107,7 +107,14 @@ scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     --barcodes ${BARCODES[@]} --extract 2:11-150 --umi 2:1-10 --base_quality 10 \
     --out ./cDNA --threads 1 --verbose &> debug.log
 
+
+cut -f15 ./cDNA.sam | sed 's/XP:Z://' | awk -F'_' '{count1[$1]++; count2[$2]++} END {print "Field 1:"; for (i in count1) print i, count1[i]; print "\nField 2:"; for (i in count2) print i, count2[i]}'
+
 ```
+
+# SPLiT-seq
+# - is BC1 or BC2 more affected by 'invalid' barcodes
+# - do invalid BC1 or BC2 barcodes map to particular samples
 
 
 # Debugging notes

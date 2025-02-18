@@ -166,7 +166,7 @@ class BarcodeMatcherOptimized:
                     return match[0], 0, match[2]
                 else:
                     # Multiple exact matches with the same distance
-                    self.logger.info(f"\Multiple matches")
+                    self.logger.info(f"Multiple matches")
                     return 'NNNNNNNN', -1, -1
             
             # If no exact match was found, check mismatch lookup            
@@ -564,7 +564,7 @@ def process_read_batch(read_batch: List[Tuple],
                 logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
                 logger.info(f"Sequence: {seq}")
                 logger.info(f"Looking for barcode in range {start}-{end} with jitter {jitter}")
-            logger.info(f"{reads[config['file_index']].name}")
+            #logger.info(f"{reads[config['file_index']].name}")
             if matcher.trie_matcher or whitelist in matcher.matchers.keys():
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     seq, reads[config['file_index']].quality, whitelist, config['orientation'], 
