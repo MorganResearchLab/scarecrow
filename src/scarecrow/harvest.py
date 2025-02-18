@@ -290,7 +290,7 @@ class HarvestOptimizer:
         dfs = []
         for file in barcode_files:
             df = pd.read_csv(file, sep = '\t', 
-                           usecols=['read', 'name', 'barcode_whitelist', 
+                           usecols=['read', 'name', 'seqlen', 'barcode_whitelist', 
                                   'barcode', 'orientation', 'start', 'end'])
             dfs.append(df)
         
@@ -299,6 +299,8 @@ class HarvestOptimizer:
         # Process peaks efficiently
         peaks_by_group = self._get_barcode_peaks(barcode_data)
         peaks_df = pd.DataFrame(peaks_by_group)
+
+        self.logger.info(f"Top 10 peaks\n{peaks_df.head(10)}")
         
         # Select unique top peaks for each whitelist
         return self._select_top_peaks(peaks_df, num_barcodes, min_distance)
@@ -453,10 +455,10 @@ def run_harvest(barcodes: List[str],
 
 @log_errors
 def plot_peaks_optimized(barcode_data: pd.DataFrame, 
-                        outfile: str = 'plot_faceted.png',
-                        dpi: int = 300,
-                        conserved_regions: Optional[List[ConservedRegion]] = None,
-                        selected_peaks: Optional[pd.DataFrame] = None) -> None:
+                         outfile: str = 'plot_faceted.png',
+                         dpi: int = 300,
+                         conserved_regions: Optional[List[ConservedRegion]] = None,
+                         selected_peaks: Optional[pd.DataFrame] = None) -> None:
     """Optimized plotting function with conserved region highlighting and peak annotations"""
     logger = logging.getLogger('scarecrow')
 
@@ -469,9 +471,11 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
     # Create plots using matplotlib's background renderer
     plt.switch_backend('Agg')
     
-    # Generate plots for forward and reverse orientations
-    forward_data = barcode_data[barcode_data['orientation'] == 'forward']
-    reverse_data = barcode_data[barcode_data['orientation'] == 'reverse']
+    # Separate data into read1 and read2 for forward and reverse orientations
+    read1_forward = barcode_data[(barcode_data['read'] == 'read1') & (barcode_data['orientation'] == 'forward')]
+    read1_reverse = barcode_data[(barcode_data['read'] == 'read1') & (barcode_data['orientation'] == 'reverse')]
+    read2_forward = barcode_data[(barcode_data['read'] == 'read2') & (barcode_data['orientation'] == 'forward')]
+    read2_reverse = barcode_data[(barcode_data['read'] == 'read2') & (barcode_data['orientation'] == 'reverse')]
 
     def _add_conserved_regions(ax, data, ylim):
         """Helper function to add conserved region highlighting"""
@@ -482,9 +486,9 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
                     if region.read == read:  # Only add regions for matching read
                         # Add shaded region for conserved sequence
                         ax.axvspan(region.start, region.end, 
-                                    alpha = 0.2, 
-                                    color = 'red', 
-                                    label = 'Conserved Region')
+                                   alpha=0.2, 
+                                   color='red', 
+                                   label='Conserved Region')
 
     def _add_peak_annotations(ax, data, ylim):
         """Helper function to add peak annotations"""
@@ -493,107 +497,116 @@ def plot_peaks_optimized(barcode_data: pd.DataFrame,
             orientation = data['orientation'].iloc[0]
             whitelist = data['barcode_whitelist'].iloc[0]
             
-            # Filter peaks for this specific read, orientation, AND whitelist
+            # Filter peaks for this specific read and orientation
             peaks = selected_peaks[
                 (selected_peaks['read'] == read) & 
-                (selected_peaks['orientation'] == orientation) &
-                (selected_peaks['barcode_whitelist'] == whitelist)  # Add whitelist filter
+                (selected_peaks['orientation'] == orientation)
             ]
             
-            for _, peak in peaks.iterrows():                
-                # Add shaded region for peak
-                ax.axvspan(peak['start'], peak['end'], 
-                                    alpha = 0.2, 
-                                    color = 'blue', 
-                                    label = "Peak")
+            # Log filtered peaks for debugging
+            logger.info(f"Adding peak annotations for read={read}, orientation={orientation}, whitelist={whitelist}")
+            logger.info(f"Filtered peaks:\n{peaks}")
+            
+            for _, peak in peaks.iterrows():
+                # Check if the peak's whitelist matches the current whitelist
+                if peak['barcode_whitelist'] == whitelist:
+                    # Add shaded region for peak
+                    ax.axvspan(peak['start'], peak['end'], 
+                            alpha=0.2, 
+                            color='blue', 
+                            label="Peak")
+                    # Log peak positions for debugging
+                    logger.info(f"Added peak annotation: start={peak['start']}, end={peak['end']}")
+                else:
+                    logger.info(f"Skipping peak (whitelist mismatch): start={peak['start']}, end={peak['end']}, whitelist={peak['barcode_whitelist']}")
     
     def _create_enhanced_facet_plot(data, ylim):
         """Create facet plot with both conserved regions and peak annotations"""
+        if data.empty:
+            return None
+        
+        # Use `row` for barcode_whitelist to stack facets vertically
         g = sns.FacetGrid(
             data, 
-            col = "read", 
-            row = "barcode_whitelist", 
-            hue = "read",
-            margin_titles = True, 
-            height = 3, 
-            aspect = 3
+            row="barcode_whitelist",  # Facet by whitelist vertically
+            hue="read",
+            margin_titles=True, 
+            height=3, 
+            aspect=3
         )
         
         # Optimize plot rendering
         with plt.style.context('fast'):
-            g.map(sns.histplot, "start", binwidth = 1, kde = False)
+            g.map(sns.histplot, "start", binwidth=1, kde=False)
         
-        g.set_axis_labels("Barcode start position", "Count", fontsize = 20)
-        g.set_titles(col_template = "{col_name}", row_template = "{row_name}", size = 20)
+        g.set_axis_labels("Barcode start position", "Count", fontsize=20)
+        g.set_titles(row_template="{row_name}", size=20)  # Only row titles are needed
         
         if ylim is not None:
-            g.set(ylim = ylim)        
+            g.set(ylim=ylim)        
 
         # Optimize axis rendering and add annotations
-        for i, row_key in enumerate(g.row_names):  # Iterate through rows (whitelists)
-            for j, col_key in enumerate(g.col_names):  # Iterate through columns (reads)
-                ax = g.axes[i, j]
-                
-                # Get the data specific to this subplot using row (whitelist) and column (read)
-                subplot_data = data[
-                    (data['read'] == col_key) & 
-                    (data['barcode_whitelist'] == row_key)
-                ]
-                
-                if not subplot_data.empty:
+        for ax, (whitelist, subplot_data) in zip(g.axes.flat, data.groupby('barcode_whitelist')):
+            if not subplot_data.empty:
                 # Determine per-subplot x-limits    
-                    x_min, x_max = subplot_data['start'].min(), subplot_data['start'].max()
-                    x_end = subplot_data.loc[subplot_data['start'] == x_max, 'end'].values[0]                
-                    ax.set_xlim(x_min, x_end)  # Apply different x-limits per subplot
-                    _add_conserved_regions(ax, subplot_data, ylim)
-                    _add_peak_annotations(ax, subplot_data, ylim)
-                
-                ax.tick_params(axis='x', labelsize = 16)
-                ax.tick_params(axis='y', labelsize = 16)
-                ax.xaxis.set_major_locator(MaxNLocator(nbins = 10))
-                
-                # Update subplot title if needed
-                if ax.texts:
-                    txt = ax.texts[0]
-                    ax.text(
-                        txt.get_unitless_position()[0],
-                        txt.get_unitless_position()[1],
-                        txt.get_text(),
-                        transform = ax.transAxes,
-                        va = 'center',
-                        fontsize = 20
-                    )
-                    ax.texts[0].remove()
+                x_min, x_max = subplot_data['start'].min(), subplot_data['start'].max()
+                x_end = subplot_data.loc[subplot_data['start'] == x_max, 'seqlen'].values[0]                
+                ax.set_xlim(x_min, x_end)  # Apply different x-limits per subplot
+                _add_conserved_regions(ax, subplot_data, ylim)
+                _add_peak_annotations(ax, subplot_data, ylim)
+            
+            ax.tick_params(axis='x', labelsize=16)
+            ax.tick_params(axis='y', labelsize=16)
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=10))
+            
+            # Update subplot title if needed
+            if ax.texts:
+                txt = ax.texts[0]
+                ax.text(
+                    txt.get_unitless_position()[0],
+                    txt.get_unitless_position()[1],
+                    txt.get_text(),
+                    transform=ax.transAxes,
+                    va='center',
+                    fontsize=20
+                )
+                ax.texts[0].remove()
 
         return g
 
-    # Create and save plots
-    g1 = _create_enhanced_facet_plot(forward_data, ylim)
-    g2 = _create_enhanced_facet_plot(reverse_data, ylim)
-    
+    # Create individual plots for each read and orientation
+    g1 = _create_enhanced_facet_plot(read1_forward, ylim)
+    g2 = _create_enhanced_facet_plot(read1_reverse, ylim)
+    g3 = _create_enhanced_facet_plot(read2_forward, ylim)
+    g4 = _create_enhanced_facet_plot(read2_reverse, ylim)
+
     # Save temporary files with optimized compression
-    temp_forward = f'{outfile}.f.png'
-    temp_reverse = f'{outfile}.r.png'
-    
-    g1.savefig(temp_forward, dpi = dpi, bbox_inches = 'tight')
-    g2.savefig(temp_reverse, dpi = dpi, bbox_inches = 'tight')
-    
+    temp_files = []
+    for i, g in enumerate([g1, g2, g3, g4]):
+        if g is not None:
+            temp_file = f'{outfile}.temp_{i}.png'
+            g.savefig(temp_file, dpi=dpi, bbox_inches='tight')
+            temp_files.append(temp_file)
+
     # Create final combined plot
-    fig, axes = plt.subplots(2, 1, figsize = (4, 4))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     
-    # Load and display images efficiently
-    for img_file, ax, title in [
-        (temp_forward, axes[0], "Forward orientation"),
-        (temp_reverse, axes[1], "Reverse orientation")
-    ]:
-        img = plt.imread(img_file)
-        ax.imshow(img)
-        ax.axis('off')
-        ax.set_title(title, fontsize = 4, loc = 'left')
-        os.remove(img_file)
+    # Load and display images in the correct order
+    for i, (img_file, ax, title) in enumerate([
+        (temp_files[0], axes[0, 0], "Read 1: forward"),
+        (temp_files[1], axes[0, 1], "Read 1: reverse"),
+        (temp_files[2], axes[1, 0], "Read 2: forward"),
+        (temp_files[3], axes[1, 1], "Read 2: reverse")
+    ]):
+        if os.path.exists(img_file):
+            img = plt.imread(img_file)
+            ax.imshow(img)
+            ax.axis('off')
+            ax.set_title(title, fontsize=12, loc='left')
+            os.remove(img_file)
     
     # Save final plot efficiently
-    fig.tight_layout(pad = 0)
-    plt.savefig(outfile, dpi = dpi, bbox_inches = 'tight')
+    fig.tight_layout(pad=2.0)
+    plt.savefig(outfile, dpi=dpi, bbox_inches='tight')
     plt.close()
-    logger.info(f"barcode count distribution with annotations: {outfile}")
+    logger.info(f"Barcode count distribution with annotations: {outfile}")

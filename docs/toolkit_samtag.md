@@ -17,11 +17,11 @@ The following TAGS are added if found:
 
 | TAG | Description |
 | --- | ----------- |
-| CR  | Uncorrected barcode sequence |
-| CY  | Barcode base qualities |
-| CB  | Corrected barcode sequence |
-| XP  | Barcode start position |
-| XM  | Barcode pre-correction mismatch count |
+| CR  | Uncorrected barcode sequence at expected position |
+| CY  | Uncorrected barcode base qualities |
+| CB  | Corrected barcode sequence accounting for jitter |
+| XP  | Corrected barcode start position |
+| XM  | Corrected barcode mismatch count |
 | UR  | UMI sequence |
 | UY  | UMI base qualities |
 

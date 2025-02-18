@@ -14,87 +14,78 @@ import pandas as pd
 import pysam
 import shutil
 import multiprocessing as mp
-from argparse import RawTextHelpFormatter
-from collections import Counter
 import csv
+from argparse import RawTextHelpFormatter
+from collections import Counter, defaultdict
 from functools import lru_cache
 from typing import List, Tuple, Optional, Dict
 from scarecrow.logger import log_errors, setup_logger
-from scarecrow.tools import generate_random_string
+from scarecrow.tools import generate_random_string, reverse_complement
+from scarecrow.encode import BarcodeMatcherAhoCorasick
 
 
 class BarcodeMatcherOptimized:
-    def __init__(self, barcode_files: Dict[str, str], mismatches: int = 1, base_quality_threshold: int = None, verbose: bool = False):
+    def __init__(self, barcode_files: Dict[str, str], mismatches: int = 0, base_quality_threshold: int = None, verbose: bool = False):
         """
         Initialize matcher with text files containing barcodes (one per line)
         """
+        self.matchers = {}
         self.mismatches = mismatches
         self.base_quality_threshold = base_quality_threshold
         self.verbose = verbose
-        self.matchers = {}
+        self.trie_matcher = None
         
         # Get logger but ensure it's properly configured first
         self.logger = setup_worker_logger()
-        self.logger.info(f"Initializing matcher with whitelists: {list(barcode_files.keys())}")
-        
-        # Load and process barcode data from text files
-        for whitelist, txt_file in barcode_files.items():
-            self.logger.info(f"Loading whitelist '{whitelist}' from {txt_file}")
-            
-            # Read barcodes and generate mismatch dictionary
-            with open(txt_file, 'r') as f:
-                barcodes = [line.strip() for line in f if line.strip()]
-            
-            # Create exact matches set
-            exact_matches = set(barcodes)
-            
-            # Generate mismatch lookup
-            mismatch_lookup = {}
-            if self.mismatches > 0:
-                for barcode in barcodes:
-                    mismatches = generate_mismatches(barcode, self.mismatches)
-                    # We only use 1-mismatch sequences for now
-                    if 1 in mismatches:
-                        mismatch_lookup.update(mismatches[1])
-            
-            barcode_len = len(next(iter(exact_matches)))
-            self.matchers[whitelist] = {
-                'exact': exact_matches,
-                'mismatches': mismatch_lookup,
-                'length': barcode_len
-            }
-            
-            if self.verbose:
-                self.logger.info(f"Loaded {len(exact_matches)} exact matches and {len(mismatch_lookup)} variants for whitelist '{whitelist}'")
-                self.logger.info(f"{whitelist} exact matches:\n{exact_matches}\n")
-                self.logger.info(f"{whitelist} mismatches:\n{mismatch_lookup}\n")
 
-    def _parse_whitelist_identifier(self, whitelist: str) -> str:
-        """
-        Parse whitelist identifier from various formats
-        """
-        original = whitelist
-        
-        try:
-            if isinstance(whitelist, str):
-                parsed = ast.literal_eval(whitelist)
+        # Load and process barcode data from text files
+        for whitelist, file in barcode_files.items():            
+            
+            if file.endswith('.txt'):
+                self.logger.info(f"Preparing whitelist {whitelist} from '{file}'")
+                # Read barcodes and generate mismatch dictionary
+                with open(file, 'r') as f:
+                    barcodes = [line.strip() for line in f if line.strip()]
                 
-                if isinstance(parsed, list) and len(parsed) == 1:
-                    if isinstance(parsed[0], tuple):
-                        whitelist = parsed[0][0]
+                # Create exact matches set
+                exact_matches = set(barcodes)
+                
+                # Generate mismatch lookup
+                mismatch_lookup = {}
+                if self.mismatches > 0:
+                    for barcode in barcodes:
+                        variants = generate_mismatches(barcode, self.mismatches)
+                        mismatch_lookup[barcode] = {}
+                        for n in range(1, self.mismatches + 1):
+                            if n in variants:
+                                mismatch_lookup[barcode][n] = set(variants[n].keys())  # Store variant sequences
+                
+                barcode_len = len(next(iter(exact_matches)))
+                self.matchers[whitelist] = {
+                    'exact': exact_matches,
+                    'mismatches': mismatch_lookup,
+                    'length': barcode_len
+                }
+                
+                if self.verbose:
+                    self.logger.info(f"Loaded {len(exact_matches)} exact matches and {len(mismatch_lookup)} variants for whitelist '{whitelist}'")
+                    self.logger.info(f"'{whitelist}' exact matches:\n{exact_matches}\n")
+                    self.logger.info(f"'{whitelist}' mismatches:\n{mismatch_lookup}\n")
+                    self.logger.info(f"Matchers: {self.matchers.keys()}")
+            
+            elif file.endswith('.trie.gz'):
+                # Initialize the trie matcher only once
+                if self.trie_matcher is None:
+                    if os.path.exists(file):
+                        self.trie_matcher = BarcodeMatcherAhoCorasick(barcode_sequences = {}, pickle_file = file, mismatches = mismatches)
                     else:
-                        whitelist = parsed[0]
-                elif isinstance(parsed, tuple):
-                    whitelist = parsed[0]
+                        raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
                 else:
-                    whitelist = parsed
-        except (ValueError, SyntaxError) as e:
-            self.logger.debug(f"Could not parse whitelist identifier '{original}': {e}")
-            pass
-        
-        if self.verbose:
-            self.logger.info(f"Parsed whitelist identifier '{original}' -> '{whitelist}'")
-        return whitelist
+                    # Load additional trie files into the existing matcher
+                    if os.path.exists(file):
+                        self.trie_matcher._load_trie(file, mismatches = mismatches)
+                    else:
+                        raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
 
     def find_match(self, sequence: str, quality_scores: str, whitelist: str, orientation: str,
                   original_start: int, original_end: int, jitter: int, base_quality: int) -> Tuple[str, int, int]:
@@ -103,69 +94,125 @@ class BarcodeMatcherOptimized:
         Returns: Tuple of (barcode, mismatch_count, position)
         Always returns a tuple, using 'null' for no match
         """
-        # Parse whitelist identifier
-        whitelist = self._parse_whitelist_identifier(whitelist)
-        
-        # Check if whitelist exists in matchers
-        if whitelist not in self.matchers:
-            self.logger.warning(f"Whitelist '{whitelist}' not found in available whitelists: {list(self.matchers.keys())}")
-            return 'NNNNNNNN', -1, original_start - 1
-            
+
         # Apply quality filtering if needed
         if base_quality is not None:
             sequence = filter_low_quality_bases(sequence, quality_scores, base_quality)[0]
         
-        # Generate string for null match of length equal to exact barcode on whitelist
-        matcher = self.matchers[whitelist]
-        
         # Handle reverse orientation
         if orientation == 'reverse':
-            sequence = self._reverse_complement(sequence)
-        
-        if self.verbose:
-            self.logger.debug(f"Looking for barcode in sequence: {sequence}")
-            self.logger.debug(f"Using whitelist '{whitelist}' with {len(matcher['exact'])} exact matches")
-        
-        # Get possible sequences with jitter
-        possible_sequences = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
-        
-        # First pass: Look for exact matches with best position
-        exact_matches = []
-        for seq, pos in possible_sequences:
-            if seq in matcher['exact']:
-                pos_distance = abs(pos - (original_start - 1))
-                exact_matches.append((seq, pos_distance, pos))
-                if self.verbose:
-                    self.logger.debug(f"Found exact match: {seq} at position {pos}")
-        
-        # If we found exact matches, return the one closest to the expected position
-        if exact_matches:
-            exact_matches.sort(key=lambda x: x[1])
-            match = exact_matches[0]
-            if self.verbose:
-                self.logger.debug(f"Selected best exact match: {match[0]} at position {match[2]}")
-            return match[0], 0, match[2]
-            
-        # If no exact match was found, check mismatch lookup
-        if self.mismatches > 0:
-            for seq, pos in possible_sequences:
-                if seq in matcher['mismatches']:
-                    original = matcher['mismatches'][seq]
-                    if self.verbose:
-                        self.logger.debug(f"Found mismatch variant: {seq} -> {original} at position {pos}")
-                    return original, 1, pos
-        
-        # No match found
-        if self.verbose:
-            self.logger.debug("No match found")
-        null_match = "N" * len(next(iter(matcher['exact'])))
-        return null_match, -1, original_start - 1
+            sequence = reverse_complement(sequence)
 
-    @lru_cache(maxsize=1024)
-    def _reverse_complement(self, sequence: str) -> str:
-        """Cached reverse complement computation"""
-        complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'N': 'N'}
-        return ''.join(complement.get(base, base) for base in reversed(sequence))
+        # Get sub sequence with jitter
+        sub_sequence = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
+
+        if self.trie_matcher:
+            #self.logger.info(f"-> start:{original_start} end:{original_end} jitter:{jitter}")
+
+            # Use the Aho-Corasick trie for matching
+            matches = self.trie_matcher.find_matches(sub_sequence, whitelist, orientation, original_start)
+
+            # Filter matches based on jitter and select best match
+            if matches:  
+                #self.logger.info(f"\n> reap matches: {matches}")              
+                filtered_matches = [
+                    match for match in matches
+                    if abs(match['start'] - original_start) <= jitter
+                ]
+                if filtered_matches:
+                    #self.logger.info(f"\n> reap filtered matches: {filtered_matches}")              
+                    # Sort by number of mismatches and distance from expected start
+                    filtered_matches.sort(key=lambda x: (x['mismatches'], x['distance']))
+                    if len(filtered_matches) == 1 or (filtered_matches[0]['mismatches'] < filtered_matches[1]['mismatches'] or filtered_matches[0]['distance'] < filtered_matches[1]['distance']):
+                        # Only one match or the best match is unique
+                        best_match = filtered_matches[0]
+                        return best_match['barcode'], best_match['mismatches'], best_match['start']
+                    else:
+                        # Multiple matches with the same number of mismatches and distance
+                        #self.logger.info("Multiple equidistant-error matches")
+                        return 'NNNNNNNN', -1, -1
+                else:
+                    # No match found within the jitter range
+                    #self.logger.info("No match found within jitter range")
+                    return 'NNNNNNNN', -1, -1
+            else:
+                # No match found
+                #self.logger.info("No match")
+                return 'NNNNNNNN', -1, -1
+
+        else:
+            # Default to set-based method
+            if whitelist not in self.matchers:
+                self.logger.warning(f"Whitelist '{whitelist}' not found in available whitelists: {list(self.matchers.keys())}")
+                return 'NNNNNNNN', -1, -1
+        
+            # First pass: Look for exact matches with best position
+            exact_matches = []
+            for seq, pos in sub_sequence:
+                if seq in self.matchers[whitelist]['exact']:
+                    pos_distance = abs(pos - original_start)
+                    exact_matches.append((seq, pos_distance, pos))
+        
+            # If we found exact matches, return the one closest to the expected position
+            if exact_matches:
+                exact_matches.sort(key=lambda x: x[1]) # Sort by distance from expected start
+                self.logger.info(f"\nExact matches: {exact_matches}")
+                if len(exact_matches) == 1 or (exact_matches[0][1] < exact_matches[1][1]):
+                    # Only one exact match
+                    match = exact_matches[0]
+                    return match[0], 0, match[2]
+                else:
+                    # Multiple exact matches with the same distance
+                    return 'NNNNNNNN', -1, -1
+            
+            # If no exact match was found, check mismatch lookup            
+            if self.mismatches > 0:
+                mismatch_matches = []
+                for seq, pos in sub_sequence:
+                    # Query mismatch_lookup for all barcodes that match this sequence
+                    matching_barcodes = []
+                    for barcode, variants in self.matchers[whitelist]['mismatches'].items():
+                        for n in range(1, self.mismatches + 1):
+                            if n in variants and seq in variants[n]:
+                                matching_barcodes.append((barcode, n))
+                
+                    if matching_barcodes:
+                        # Calculate distance from expected start
+                        pos_distance = abs(pos - original_start)
+                        # Add all matching barcodes to mismatch_matches
+                        for barcode, n in matching_barcodes:
+                            mismatch_matches.append((barcode, n, pos, pos_distance))
+            
+                if mismatch_matches:
+                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    # Group matches by the number of mismatches and distance
+                    from collections import defaultdict
+                    match_groups = defaultdict(list)
+                    for match in mismatch_matches:
+                        key = (match[1], match[3])  # (mismatch_count, distance)
+                        match_groups[key].append(match)
+
+                    # Find the best group (fewest mismatches, smallest distance)
+                    best_key = min(match_groups.keys(), key=lambda x: (x[0], x[1]))
+                    best_matches = match_groups[best_key]
+                
+                    if len(best_matches) == 1:
+                        # Only one match in the best group
+                        match = best_matches[0]
+                        if self.verbose:
+                            self.logger.debug(f"Selected best mismatch match: {match[0]} at position {match[2]}")
+                        return match[0], match[1], match[2]
+                    else:
+                        # Multiple matches in the best group
+                        if self.verbose:
+                            self.logger.debug("Multiple mismatch matches with the same distance, returning no match")
+                        return 'NNNNNNNN', -1, -1
+        
+            # No match found
+            if self.verbose:
+                self.logger.debug("No match found")
+            null_match = "N" * len(next(iter(self.matchers[whitelist]['exact'])))
+            return null_match, -1, -1
 
     def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> List[Tuple[str, int]]:
         """Generate possible sequences with position jitter"""
@@ -178,7 +225,7 @@ class BarcodeMatcherOptimized:
         for adj_start in range(min_start, max_start):
             seq = full_sequence[adj_start:adj_start + barcode_length]
             if len(seq) == barcode_length:
-                sequences.append((seq, adj_start))
+                sequences.append((seq, adj_start + 1))
                 
         return sequences
 
@@ -202,7 +249,7 @@ class BarcodeStats:
         
         # Track each position
         for pos in positions:
-            if pos != '0':  # Exclude invalid positions
+            if pos > '0':  # Exclude invalid positions
                 self.position_counts[int(pos)] += 1
     
     def write_stats(self, output_prefix: str):
@@ -257,7 +304,7 @@ sequences based on predicted positions generated by scarecrow harvest.
 
 Example:
 
-scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.csv\n\t--barcodes\tBC1:v1_whitelist:bc1_whitelist.txt\n\t\t\tBC2:v2_whitelist:bc2_whitelist.txt\n\t\t\tBC3:v1_whitelist:bc3_whitelist.txt\n\t--read1 0-64 \n\t--out extracted_sequences \n\t--out_sam
+scarecrow reap --threads16\n\t--fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_positions barcode_positions.csv\n\t--barcodes\tBC1:v1_whitelist:bc1_whitelist.txt\n\t\t\tBC2:v2_whitelist:bc2_whitelist.txt\n\t\t\tBC3:v1_whitelist:bc3_whitelist.txt\n\t--read1 0-64\n\t--out extracted_sequences\n\t--out_sam
 ---
 """,
         epilog="The --barcodes <name> must match the barcode_whitelist values in the --barcode_positions file.",
@@ -432,12 +479,11 @@ def run_reap(fastqs: List[str],
         SAM = True
 
     # Append suffix to output prefix
-    logger.info(f"FASTQ = {FASTQ} SAM = {SAM}")
     if FASTQ:
         outfile = f'{output}.fastq'        
     if SAM:
         outfile = f'{output}.sam'
-    logger.info(f"Results will be written to {outfile}")
+    logger.info(f"Results will be written to '{outfile}'")
 
     # Extract sequences
     extract_sequences(
@@ -498,10 +544,11 @@ def process_read_batch(read_batch: List[Tuple],
         original_barcodes = []  # CR
         barcode_qualities = []  # CY
         matched_barcodes = []  # CB
-        positions = []
-        mismatches = []
+        positions = []  # XP
+        mismatches = [] # XM
 
         for config in barcode_configs:
+            whitelist = config['whitelist']
             seq = reads[config['file_index']].sequence
             qual = reads[config['file_index']].quality
             start, end = config['start'], config['end']
@@ -512,16 +559,12 @@ def process_read_batch(read_batch: List[Tuple],
             original_barcodes.append(original_barcode)
             barcode_qualities.append(barcode_quality)
 
-            whitelist = ast.literal_eval(config['whitelist'])[1]
-            if isinstance(whitelist, list) and len(whitelist) == 1 and isinstance(whitelist[0], tuple):
-                whitelist = whitelist[0]
-
             if verbose:
                 logger.info(f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}")
                 logger.info(f"Sequence: {seq}")
                 logger.info(f"Looking for barcode in range {start}-{end} with jitter {jitter}")
-
-            if whitelist in matcher.matchers.keys():                
+            logger.info(f"{reads[config['file_index']].name}")
+            if matcher.trie_matcher or whitelist in matcher.matchers.keys():
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     seq, reads[config['file_index']].quality, whitelist, config['orientation'], 
                     start, end, jitter, base_quality)
@@ -530,10 +573,13 @@ def process_read_batch(read_batch: List[Tuple],
                     logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
                 
                 matched_barcodes.append(matched_barcode)
-                positions.append(str(adj_position + 1))  # Convert to 1-based position
+                if matcher.trie_matcher:
+                    positions.append(str(adj_position))
+                else:
+                    positions.append(str(adj_position))
                 mismatches.append(str(mismatch_count))
             else:
-                logger.warning(f"Whitelist {whitelist} not found in matcher")
+                logger.warning(f"Whitelist {whitelist} not found in matcher {matcher.matchers.keys()}")
                 matched_barcodes.append('null')
                 positions.append(str(start))
                 mismatches.append('NA')
@@ -630,7 +676,6 @@ def extract_sequences(
     Modified to track stats
     """
     logger = setup_worker_logger()
-    logger.info("Starting sequence extraction")
 
     # Initialize master stats tracker
     master_stats = BarcodeStats()
@@ -640,6 +685,7 @@ def extract_sequences(
     if barcode_reverse_order:
         barcode_positions = barcode_positions[::-1].reset_index(drop=True)
     barcode_configs = prepare_barcode_configs(barcode_positions, jitter)
+    logger.info(f"Barcode configs\n{barcode_configs}\n")
 
     # Extract range
     extract_index, extract_range = extract.split(':')
@@ -657,8 +703,7 @@ def extract_sequences(
         umi_index = None
         umi_range = None
 
-    # Create matcher with JSON whitelist files
-    logger.info(f"Generating barcode matcher")
+    # Create matcher
     matcher = BarcodeMatcherOptimized(
         barcode_files = barcode_files,
         mismatches = mismatches,
@@ -739,7 +784,7 @@ def extract_sequences(
                 
                 # Clear the current batch
                 batch = []                
-        
+
         # Process remaining reads
         if batch:
             jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
@@ -777,7 +822,6 @@ def parse_range(range_str: str) -> Tuple[int, int]:
 
 def parse_seed_arguments(barcodes: List[str]) -> Dict[str, str]:
     """
-    Modified to handle JSON whitelist files
     Format: <barcode_name>:<whitelist_name>:<whitelist_file.json>
     Returns: Dict mapping whitelist names to JSON file paths
     """
@@ -786,15 +830,15 @@ def parse_seed_arguments(barcodes: List[str]) -> Dict[str, str]:
     
     if barcodes:
         for barcode in barcodes:
-            name, whitelist, filename = barcode.split(':')
-            logger.info(f"Processing barcode definition: {barcode}")
-            logger.info(f"  Name: {name}")
-            logger.info(f"  Whitelist: {whitelist}")
-            logger.info(f"  File: {filename}")
+            key, label, file = barcode.split(':')
+            logger.info(f"Processing barcode definition: '{barcode}'")
+            logger.info(f"  Name: '{key}'")
+            logger.info(f"  Whitelist: '{label}'")
+            logger.info(f"  File: '{file}'")
             
-            if not os.path.exists(filename):
-                raise FileNotFoundError(f"Barcode whitelist file not found: {filename}")
-            barcode_files[whitelist] = filename
+            if not os.path.exists(file):
+                raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
+            barcode_files[f"{key}:{label}"] = file
     
     logger.info(f"Parsed barcode whitelists: {barcode_files}")
     return barcode_files

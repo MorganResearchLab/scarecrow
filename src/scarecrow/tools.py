@@ -6,8 +6,9 @@
 import resource
 import gzip
 import logging
+import sys
+from functools import lru_cache
 from scarecrow.logger import log_errors
-from typing import List, Dict, Set
 import string, random
 
 class FastqProcessingError(Exception):
@@ -29,14 +30,80 @@ def get_memory_usage() -> float:
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
 
-def count_fastq_reads(filename):
-    opener = gzip.open if filename.endswith('.gz') else open
-    with opener(filename, 'rt') as f:
+def count_fastq_reads(file):
+    opener = gzip.open if file.endswith('.gz') else open
+    with opener(file, 'rt') as f:
         return sum(1 for line in f) // 4
     
+@lru_cache(maxsize=1024)
 def reverse_complement(seq):
     """
     Short function to reverse complement a sequence
     """
     complement = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C', 'N': 'N'}
     return ''.join(complement[base] for base in reversed(seq))
+
+@log_errors
+def read_barcode_file(file):
+    """
+    Read barcode sequences from a text file.
+    
+    Args:
+        file_path (str): Path to the barcode file
+    
+    Returns:
+        List[str]: List of unique barcode sequences
+    """
+    logger = logging.getLogger('scarecrow')
+
+    try:
+        with open(file, 'r') as f:
+            # Read lines, strip whitespace, remove empty lines
+            barcodes = [line.strip() for line in f if line.strip()]
+        
+        # Remove duplicates while preserving order
+        unique_barcodes = list(dict.fromkeys(barcodes))
+        
+        if not unique_barcodes:
+            logger.warning(f"No barcodes found in file: {file}")
+        
+        return unique_barcodes
+    
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
+
+    except Exception as e:
+        logger.error(f"Error reading barcode file {file}: {e}")
+        sys.exit(1)
+
+@log_errors
+def parse_seed_arguments(barcode_args):
+    """
+    Parse seed arguments from command line.
+    
+    Args:
+        barcode_args (List[str]): List of barcode arguments in format 'KEY:WHITELIST:FILE'
+    
+    Returns:
+        Dict[str, List[str]]: Dictionary of barcodes with keys as region identifiers
+    """
+    logger = logging.getLogger('scarecrow')
+
+    expected_barcodes = {}
+    
+    for arg in barcode_args:
+        try:
+            # Split the argument into key, whitelist and file path
+            key, label, file = arg.split(':')
+            
+            # Read barcodes from the file
+            barcodes = read_barcode_file(file)
+
+            # Store barcodes in dict under str(key:label)
+            expected_barcodes[f"{key}:{label}"] = barcodes
+            logger.info(f"Loaded {len(barcodes)} barcodes for barcode '{key}' from whitelist '{label}' file '{file}'")
+                                    
+        except ValueError:
+            logger.error(f"Invalid barcode argument format: {arg}. Use 'INDEX:NAME:FILE'")
+    
+    return expected_barcodes

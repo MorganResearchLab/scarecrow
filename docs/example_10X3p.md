@@ -9,6 +9,10 @@
   <img alt="Chromium 10X 3' library structure" src="../img/10X3p_light.svg">
 </picture>
 
+Library structure
+
+### Prep
+
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash
@@ -36,9 +40,7 @@ done
 
 Chromium barcode whitelists for different chemistry versions are available at [https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium3.html](https://teichlab.github.io/scg_lib_structs/methods_html/10xChromium3.html). The library for this sample used the v3.1 chemistry, so the barcode whitelist to use is 3M-february-2018.txt.gz. The file should be downloaded to `${PROJECT}/barcodes`, unzipped and checked that it contains a single barcode per line with no headers. 
 
-We can now run `scarecrow seed` to process the barcode whitelist. The below example is for a SLURM HPC, but will work on a standard PC by omitting the `sbatch` line.
-
-***There are significantly more barcodes with 10X than Parse. May need to refactor seed to work with a set like reap. Also check if subset of barcodes returns equivalent profile.***
+***There are significantly more barcodes (6.9M) with 10X than Parse. The set-based approach to finding barcodes is unlikely to be the best option. Currently testing Aho-Corasick trie method. Given large number of barcodes, unlikely that accomodating mismatches will be appropriate.***
 
 ```bash
 mkdir -p ${PROJECT}/barcode_profiles

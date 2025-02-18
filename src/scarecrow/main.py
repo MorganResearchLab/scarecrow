@@ -20,6 +20,7 @@ from scarecrow.tally import parser_tally, validate_tally_args
 from scarecrow.rake import parser_rake, validate_rake_args
 from scarecrow.samtag import parser_samtag, validate_samtag_args
 from scarecrow.sam2fastq import parser_sam2fastq, validate_sam2fastq_args
+from scarecrow.encode import parser_encode, validate_encode_args
 
 def main():
     warnings.simplefilter("default", DeprecationWarning)
@@ -56,7 +57,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "tally": parser_tally(subparsers),
         "rake": parser_rake(subparsers),
         "samtag": parser_samtag(subparsers),
-        "sam2fastq": parser_sam2fastq(subparsers)
+        "sam2fastq": parser_sam2fastq(subparsers),
+        "encode": parser_encode(subparsers)
     }
     
     # Show help when no arguments are given
@@ -82,7 +84,8 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "tally": validate_tally_args,
         "rake": validate_rake_args,
         "samtag": validate_samtag_args,
-        "sam2fastq": validate_sam2fastq_args
+        "sam2fastq": validate_sam2fastq_args,
+        "encode": validate_encode_args
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 

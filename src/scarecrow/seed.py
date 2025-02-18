@@ -7,20 +7,39 @@
 import os
 import pysam
 import logging
+from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 from functools import lru_cache
 from typing import List, Dict, Set, Tuple
 from scarecrow.logger import log_errors, setup_logger
-from scarecrow.tools import generate_random_string, reverse_complement
+from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
+from scarecrow.encode import BarcodeMatcherAhoCorasick
 
-class BarcodeMatcherOptimized:
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 1):
+class BarcodeMatcher:
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 0):
         """
-        Initialize optimized barcode matcher with pre-computed lookup tables
+        Base class for barcode matching strategies.
         """
         self.mismatches = mismatches
+        self.barcode_sequences = barcode_sequences
+
+    def find_matches(self, sequence: str) -> List[Dict]:
+        """
+        Find all matching barcodes in a sequence.
+        To be implemented by subclasses.
+        """
+        raise NotImplementedError
+
+class BarcodeMatcherOptimized(BarcodeMatcher):
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 0):
+        """
+        Initialize optimized barcode matcher with pre-computed lookup tables.
+        """
+        super().__init__(barcode_sequences, mismatches)
         self.matchers = {}
+        self.logger = setup_worker_logger()
+        self.logger.info("Initializing set based barcode matcher")
         
         for whitelist_key, sequences in barcode_sequences.items():
             exact_matches = set(sequences)
@@ -32,7 +51,7 @@ class BarcodeMatcherOptimized:
             }
 
     def _create_mismatch_lookup(self, sequences: Set[str]) -> Dict[str, str]:
-        """Create lookup table for sequences with allowed mismatches"""
+        """Create lookup table for sequences with allowed mismatches."""
         lookup = {}
         for seq in sequences:
             lookup[seq] = (seq, 0)  # (original sequence, mismatch count)
@@ -47,17 +66,18 @@ class BarcodeMatcherOptimized:
 
     @lru_cache(maxsize=1024)
     def _reverse_complement(self, sequence: str) -> str:
-        """Cached reverse complement computation"""
+        """Cached reverse complement computation."""
         return reverse_complement(sequence)
 
-    def find_matches(self, sequence: str) -> List[Dict]:
+    def find_matches(self, sequence: List[tuple[str,int]], whitelist_key: str, orientation: str, original_start: int) -> List[Dict]:
         """
-        Find all matching barcodes in a sequence
-        Returns list of matches with positions and orientations
+        Find all matching barcodes in a sequence.
+        Returns list of matches with positions and orientations.
         """
         matches = []
+        sequence, start = sequence[0]
         seq_len = len(sequence)
-        
+
         for whitelist_key, matcher in self.matchers.items():
             barcode_len = matcher['length']
             
@@ -65,35 +85,26 @@ class BarcodeMatcherOptimized:
             for start in range(seq_len - barcode_len + 1):
                 candidate = sequence[start:start + barcode_len]
                 
-                # Check forward orientation
-                match = self._check_match(candidate, matcher, whitelist_key, 'forward')
+                # Reverse sequence if required
+                if orientation == 'reverse':
+                    candidate = self._reverse_complement(candidate)
+
+                # Check for matches
+                match = self._check_match(candidate, matcher)
                 if match:
                     matches.append({
                         'barcode': match[0],
                         'whitelist': whitelist_key,
-                        'orientation': 'forward',
+                        'orientation': orientation,
                         'start': start + 1,  # 1-based position
                         'end': start + barcode_len,
                         'mismatches': match[1]
                     })
-                
-                # Check reverse orientation
-                rev_candidate = self._reverse_complement(candidate)
-                match = self._check_match(rev_candidate, matcher, whitelist_key, 'reverse')
-                if match:
-                    matches.append({
-                        'barcode': match[0],
-                        'whitelist': whitelist_key,
-                        'orientation': 'reverse',
-                        'start': start + 1,
-                        'end': start + barcode_len,
-                        'mismatches': match[1]
-                    })
-        
+
         return sorted(matches, key=lambda x: x['start'])
 
-    def _check_match(self, candidate: str, matcher: Dict, whitelist: str, orientation: str) -> Tuple[str, int]:
-        """Check if candidate matches any barcode in the matcher"""
+    def _check_match(self, candidate: str, matcher: Dict) -> Tuple[str, int]:
+        """Check if candidate matches any barcode in the matcher."""
         if candidate in matcher['exact']:
             return (candidate, 0)
         if self.mismatches > 0 and matcher['mismatch'] and candidate in matcher['mismatch']:
@@ -264,6 +275,13 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         default="./barcode_counts.csv",
     )
     subparser.add_argument(
+        "-t", "--trie",
+        metavar="<file>",
+        help=("Path to Aho-Corasick trie compressed pickle to use this method for barcode matching [None]"),
+        type=str,
+        default=None
+    )
+    subparser.add_argument(
         "-b", "--batch_size",
         metavar="<int>",
         help=("Number of read pairs per batch to process at a time [10000]"),
@@ -297,6 +315,7 @@ def validate_seed_args(parser, args):
              random_seed = args.random_seed,
              upper_read_count = args.upper_read_count,
              barcodes = args.barcodes, 
+             trie = args.trie,
              output_file = args.out, 
              batches = args.batch_size, 
              linker_base_frequency = args.linker_base_frequency,
@@ -304,77 +323,10 @@ def validate_seed_args(parser, args):
              verbose = args.verbose)
     
 @log_errors
-def parse_seed_arguments(barcode_args):
-    """
-    Parse seed arguments from command line.
-    
-    Args:
-        barcode_args (List[str]): List of barcode arguments in format 'KEY:WHITELIST:FILE'
-    
-    Returns:
-        Dict[str, List[str]]: Dictionary of barcodes with keys as region identifiers
-    """
-    logger = logging.getLogger('scarecrow')
-
-    expected_barcodes = {}
-    
-    for arg in barcode_args:
-        try:
-            # Split the argument into key, whitelist and file path
-            key, label, file_path = arg.split(':')
-            
-            # Read barcodes from the file
-            try:
-                barcodes = read_barcode_file(file_path)
-            except FileNotFoundError:
-                raise Exception(f"Barcode file not found: {file_path}")
-
-            expected_barcodes[key,label] = barcodes
-            logger.info(f"Loaded {len(barcodes)} barcodes for barcode '{key}' from whitelist '{label}' file '{file_path}'")
-                                    
-        except ValueError:
-            logger.error(f"Invalid barcode argument format: {arg}. Use 'KEY:FILE'")
-    
-    return expected_barcodes
-
-@log_errors
-def read_barcode_file(file_path):
-    """
-    Read barcode sequences from a text file.
-    
-    Args:
-        file_path (str): Path to the barcode file
-    
-    Returns:
-        List[str]: List of unique barcode sequences
-    """
-    logger = logging.getLogger('scarecrow')
-
-    try:
-        with open(file_path, 'r') as f:
-            # Read lines, strip whitespace, remove empty lines
-            barcodes = [line.strip() for line in f if line.strip()]
-        
-        # Remove duplicates while preserving order
-        unique_barcodes = list(dict.fromkeys(barcodes))
-        
-        if not unique_barcodes:
-            logger.warning(f"No barcodes found in file: {file_path}")
-        
-        return unique_barcodes
-    
-    except FileNotFoundError:
-        logger.error(f"Barcode file not found: {file_path}")
-        sys.exit(1)
-        return []
-    except Exception as e:
-        logger.error(f"Error reading barcode file {file_path}: {e}")
-        sys.exit(1)
-
-@log_errors
 def process_read_batch(read_batch: List[Tuple], 
                        verbose: bool = False, 
-                       matcher: BarcodeMatcherOptimized = None) -> List[Dict]:
+                       matcher: BarcodeMatcherOptimized = None,
+                       whitelist_key: str = None) -> List[Dict]:
     """
     Process a batch of reads efficiently
     """
@@ -382,22 +334,56 @@ def process_read_batch(read_batch: List[Tuple],
     results = []
     
     for read1, read2 in read_batch:
-        read_pair_info = {
-            'read1': {
-                'header': read1.name,
-                'regions': matcher.find_matches(read1.sequence)
-            },
-            'read2': {
-                'header': read2.name,
-                'regions': matcher.find_matches(read2.sequence)
+        for orientation in ['forward', 'reverse']:
+            read_pair_info = {
+                'read1': {
+                    'header': read1.name,
+                    'regions': matcher.find_matches([(read1.sequence,1)], whitelist_key, orientation, 1),
+                    'seqlen': len(read1.sequence)
+                },
+                'read2': {
+                    'header': read2.name,
+                    'regions': matcher.find_matches([(read2.sequence,1)], whitelist_key, orientation, 1),
+                    'seqlen': len(read2.sequence)
+                }
             }
-        }
-        results.append(read_pair_info)
-        if verbose:
-            logger.info(f"Read 1\t{read1.name}\n{read1.sequence}\n{read_pair_info['read1']['regions']}")
-            logger.info(f"Read 2\t{read2.name}\n{read2.sequence}\n{read_pair_info['read2']['regions']}")
+            results.append(read_pair_info)
+            if verbose:
+                logger.info(f"Read 1\t{read1.name}\n{read1.sequence}\n{read_pair_info['read1']['regions']}")
+                logger.info(f"Read 2\t{read2.name}\n{read2.sequence}\n{read_pair_info['read2']['regions']}")
     
-    return results
+    # Filter data to ensure no more than one barcode recorded for a given read at a given position and orientation
+    filtered_data = filter_data(results)
+
+    return filtered_data
+
+# Function to filter data for unique combinations
+def filter_data(data):
+    filtered_data = []
+
+    for entry in data:
+        for read, info in entry.items():  # Access each read within the list
+            header = info["header"]
+            regions = info["regions"]
+            seqlen = info["seqlen"]
+
+            seen = set()
+            filtered_regions = []
+
+            for region in regions:
+                # Create a key with the unique combination
+                key = (header, region["whitelist"], region["orientation"], region["start"])
+
+                # If this combination hasn't been seen before, add it to the result
+                if key not in seen:
+                    seen.add(key)
+                    filtered_regions.append(region)
+
+            # Store the filtered regions back into the same structure
+            filtered_data.append({read: {"header": header, "regions": filtered_regions, "seqlen": seqlen}})
+
+    return filtered_data
+
 
 @log_errors
 def run_seed(
@@ -406,6 +392,7 @@ def run_seed(
     random_seed: int = 1234,
     upper_read_count: int = 10000000,
     barcodes: List[str] = None,
+    trie: str = None,
     output_file: str = None,
     batches: int = 10000,
     linker_base_frequency: float = 0.75,
@@ -425,12 +412,20 @@ def run_seed(
 
     # Parse barcode whitelists
     expected_barcodes = parse_seed_arguments(barcodes)
-    
-    # Initialize optimized matcher
-    matcher = BarcodeMatcherOptimized(
-        barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
-        mismatches=1
-    )
+    whitelist_key = list(expected_barcodes.keys())[0]
+
+    # Initialize matcher based on the chosen method
+    if trie:
+        matcher = BarcodeMatcherAhoCorasick(
+            barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
+            pickle_file = trie,
+            mismatches = 0
+        )
+    else:
+        matcher = BarcodeMatcherOptimized(
+            barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
+            mismatches = 0
+        )
     
     # Initialize sequence analyzers for each read
     read1_analyzer = SequenceFrequencyAnalyzer()
@@ -441,7 +436,8 @@ def run_seed(
         if upper_read_count == 0:
             logger.info(f"For subsetting, getting total read count to generate random indices for sampling.")
             upper_read_count = sum(1 for _ in pysam.FastxFile(fastqs[0]))
-        sample_indices = set(random.sample(range(upper_read_count), min(num_reads, upper_read_count)))
+        num_reads = min(num_reads, upper_read_count)
+        sample_indices = set(random.sample(range(upper_read_count), num_reads))
         logger.info(f"Selected {len(sample_indices)} random reads out of an upper limit of {upper_read_count} reads")
         logger.info(f"Random seed used: {random_seed}")
 
@@ -451,7 +447,7 @@ def run_seed(
          open(output_file, 'w') as out_csv:
         
         # Write header
-        out_csv.write("read\tname\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
+        out_csv.write("read\tname\tseqlen\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n")
         
         # Create batches efficiently
         current_batch = []        
@@ -473,7 +469,7 @@ def run_seed(
             if len(current_batch) >= batches:
 
                 # Process batch
-                results = process_read_batch(current_batch, verbose, matcher)
+                results = process_read_batch(current_batch, verbose, matcher, whitelist_key)
                 
                 # Write results
                 for result in results:
@@ -483,10 +479,12 @@ def run_seed(
         
         # Process remaining reads
         if current_batch:
-            results = process_read_batch(current_batch, verbose, matcher)
+            results = process_read_batch(current_batch, verbose, matcher, whitelist_key)
             for result in results:
                 write_batch_results(result, out_csv)
-        
+
+    logger.info(f"Barcode seeds written to\n\t{output_file}")
+
     # Write frequency analysis results
     freq_output_base = os.path.splitext(output_file)[0]
     read1_analyzer.write_frequencies(f"{freq_output_base}_read1_frequencies.tsv", "read1")
@@ -516,12 +514,34 @@ def write_batch_results(read_pair: Dict, output_handler) -> None:
     """
     Write batch results to output file efficiently
     """
-    for read_key in ['read1', 'read2']:
+    for read_key in read_pair:
         read_info = read_pair[read_key]
         header = read_info['header']
+        seqlen = read_info['seqlen']
         
         for region in read_info['regions']:
             output_handler.write(
-                f"{read_key}\t{header}\t{region['whitelist']}\t{region['barcode']}\t"
+                f"{read_key}\t{header}\t{seqlen}\t{region['whitelist']}\t{region['barcode']}\t"
                 f"{region['orientation']}\t{region['start']}\t{region['end']}\t{region['mismatches']}\n"
             )
+
+def setup_worker_logger(log_file: str = None):
+    """Configure logger for worker processes with file output"""
+    logger = logging.getLogger('scarecrow')
+    if not logger.handlers:  # Only add handlers if none exist
+        # Create formatters
+        formatter = logging.Formatter('%(asctime)s - %(processName)s - %(name)s - %(levelname)s - %(message)s')
+        
+        # Console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+        
+        # File handler if log_file provided
+        if log_file:
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        
+        logger.setLevel(logging.INFO)
+    return logger

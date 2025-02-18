@@ -9,6 +9,10 @@
   <img alt="Chromium 10X 5' library structure" src="../img/10X5p_light.svg">
 </picture>
 
+Library structure
+
+### Prep
+
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash

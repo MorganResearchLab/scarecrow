@@ -9,6 +9,10 @@
   <img alt="Parse Evercode WTv2 library structure" src="../img/WTv2_light.svg">
 </picture>
 
+Library structure
+
+### Prep
+
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash
@@ -103,10 +107,6 @@ sbatch --ntasks ${THREADS} --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutad
 ### 4. Extract sequences and barcodes ###
 
 Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will also record barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and [*optionally*] UMI data (sequence, quailties). The output can be either SAM format (default) or FASTQ. The `--barcode_reverse_order` flag determines the order of barcode sequences in the tag. The range to `--extract` includes the read (`1` or `2`) followed by the positional range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting fastq if required.
-
-***does barcode_reverse_order update the other barcode metadata order?***
-
-***UMI sequence position is more complicated in other libraries and may need to account for jitter***
 
 ```bash
 mkdir -p ${PROJECT}/extracted

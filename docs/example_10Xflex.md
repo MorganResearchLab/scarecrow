@@ -9,6 +9,10 @@
   <img alt="Chromium 10X Flex library structure" src="../img/10Xflex_light.svg">
 </picture>
 
+Library structure
+
+### Prep
+
 Stay organised - create a folder for the project to keep things tidy.
 
 ```bash
