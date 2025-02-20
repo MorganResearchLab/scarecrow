@@ -219,8 +219,8 @@ def run_weed(
         for i in range(threads):
             output_sam = f"chunk_{i}.sam"
             with open(output_sam, "r") as in_sam:
-                for line in in_sam:
-                    out_bam.write(pysam.AlignedSegment.fromstring(line, out_bam.header))
+                for read in in_sam:
+                    out_bam.write(pysam.AlignedSegment.fromstring(read.strip(), out_bam.header))
     
     # Report disk space used
     bam_size = sum(f.stat().st_size for f in Path(".").glob("chunk*.bam"))
@@ -367,12 +367,15 @@ def process_chunk(bam_chunk, fastq_file, index_db, output_sam, barcode_index, ma
                 offset = result[0]
                 barcode = get_barcode_from_fastq(fastq_file, offset, barcode_index)
 
-                # Add barcode matching call
+                # Search for barcode in forward orientation
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                    barcode, None, whitelist, 'reverse', 1, len(barcode), 0, None)
+                    barcode, None, whitelist, 'forward', 1, len(barcode), 0, None)
+                # If none found, search in reverse orientation
+                if 'NN' in matched_barcode:
+                    matched_barcode, mismatch_count, adj_position = matcher.find_match(
+                        barcode, None, whitelist, 'reverse', 1, len(barcode), 0, None)
 
-                #logger.info(f"{read_name}: {barcode} = {matched_barcode} with {mismatch_count} mismatches")
-                
+                # Update read tags
                 if barcode:
                     # Update CR and CY tags
                     cr_tag = read.get_tag('CR') if read.has_tag('CR') else ''
