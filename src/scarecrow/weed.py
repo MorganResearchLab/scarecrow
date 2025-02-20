@@ -354,7 +354,7 @@ def process_chunk(bam_chunk, fastq_file, index_db, output_sam, barcode_index, ma
 
     with pysam.AlignmentFile(bam_chunk, "rb", check_sq=False) as bam, open(output_sam, "w") as out_sam:
         for read in bam.fetch(until_eof=True):
-            logger.info(f"{read}")
+            #logger.info(f"{read}")
             read_name = read.query_name
             if not read_name:
                 logger.warning(f"Skipping read with no name in {bam_chunk}")
@@ -371,17 +371,21 @@ def process_chunk(bam_chunk, fastq_file, index_db, output_sam, barcode_index, ma
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     barcode, None, whitelist, 'reverse', 1, len(barcode), 0, None)
 
-                logger.info(f"{read_name}: Matched barcode: {matched_barcode} with {mismatch_count} mismatches")
+                #logger.info(f"{read_name}: {barcode} = {matched_barcode} with {mismatch_count} mismatches")
                 
                 if barcode:
                     # Update CR and CY tags
                     cr_tag = read.get_tag('CR') if read.has_tag('CR') else ''
                     cy_tag = read.get_tag('CY') if read.has_tag('CY') else ''
                     cb_tag = read.get_tag('CB') if read.has_tag('CB') else ''
+                    xm_tag = read.get_tag('XM') if read.has_tag('XM') else ''
+                    xp_tag = read.get_tag('XP') if read.has_tag('XP') else ''
                     read.set_tag('CR', f"{cr_tag}_{barcode}")
                     read.set_tag('CY', f"{cy_tag}_{'!' * len(barcode)}")
                     if matched_barcode:
                         read.set_tag('CB', f"{cb_tag}_{matched_barcode}")
+                        read.set_tag('XM', f"{xm_tag}_{mismatch_count}")
+                        read.set_tag('XP', f"{xp_tag}_0")
             
                 out_sam.write(read.to_string() + "\n")
 

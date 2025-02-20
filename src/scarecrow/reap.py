@@ -179,7 +179,7 @@ class BarcodeMatcherOptimized:
                         for n in range(1, self.mismatches + 1):
                             if n in variants and seq in variants[n]:
                                 matching_barcodes.append((barcode, n))
-                
+
                     if matching_barcodes:
                         # Calculate distance from expected start
                         pos_distance = abs(pos - original_start)
@@ -270,7 +270,7 @@ class BarcodeStats:
 
 def generate_mismatches(sequence: str, max_mismatches: int) -> Dict[int, Dict[str, str]]:
     """Generate all possible sequences with up to max_mismatches mismatches"""
-    bases = {'A', 'C', 'G', 'T'}
+    bases = {'A', 'C', 'G', 'T', 'N'}
     mismatch_dict = {i: {} for i in range(1, max_mismatches + 1)}
     seq_length = len(sequence)
     

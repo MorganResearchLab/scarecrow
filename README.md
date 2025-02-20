@@ -25,6 +25,8 @@ A toolkit for preprocessing single cell sequencing data.
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
 
+* Recently added N base to mismatch set, needs testing to ensure it hasn't broken anything
+
 # Testing on laptop (WTv2)
 ```bash
 R1=./WTv2/100K_R1.fastq
