@@ -123,9 +123,9 @@ def count_reads_no_header(bam_file):
             read_count += 1
     return read_count
 
-def split_bam_file(bam_file, num_chunks):
+def split_bam_file(bam_file, num_chunks, out):
     """Split the BAM file into chunks, distributing reads evenly."""
-    bam_chunks = [f"chunk_{i}.bam" for i in range(num_chunks)]
+    bam_chunks = [f"{out}_chunk_{i}.bam" for i in range(num_chunks)]
     with pysam.AlignmentFile(bam_file, "rb", check_sq=False) as bam:
         # Count the total number of reads in the SAM file
         with open(bam_file, "r") as infile:
@@ -166,35 +166,47 @@ def run_weed(
     """
     Multiprocessing function to process SAM tags efficiently
     """
+    
+    # Get outfile dirname for writing temp chunk files to
+    outpath = os.path.dirname(out_file)
+    if not outpath:
+        outpath = "./"
+    else:
+        outpath = f"{outpath}/"
+
     # Setup logging
-    logfile = f'./scarecrow_weed_{generate_random_string()}.log'
+    rnd_string = generate_random_string()
+    logfile = f'{outpath}scarecrow_weed_{rnd_string}.log'
     logger = setup_logger(logfile)
     logger.info(f"logfile: '{logfile}'")
+    logger.info(f"outpath: '{outpath}'")
 
     # Check if FASTQ data is compressed, and if so uncompress it
+    remove_fq = False
     if is_gz_file(fastq_file):
-        logger.info(f"'Decompressing {fastq_file}' for processing.")
+        logger.info(f"Decompressing '{fastq_file}' for processing.")
         fastq_file = decompress_gz_file(fastq_file)
+        remove_fq = True
 
     # Create or load the FASTQ index
     index_db = f'{fastq_file}.db'
     if not os.path.exists(index_db):
-        logger.info("Creating FASTQ index...")
+        logger.info("Creating FASTQ index")
         create_fastq_index(fastq_file, index_db)
         logger.info("FASTQ index created.")
     else:
         logger.info(f"Using existing FASTQ index db: '{index_db}'")
 
     # Split the BAM file into chunks
-    logger.info("Splitting BAM file into chunks...")
-    bam_chunks = split_bam_file(bam_file, threads)
+    logger.info("Splitting BAM file into chunks")
+    bam_chunks = split_bam_file(bam_file, threads, f'{outpath}{rnd_string}')
     logger.info(f"{bam_chunks}")
 
     # Extract barcodes and convert whitelist to set
     barcode_files = parse_seed_arguments([barcodes])
     for whitelist, filename in barcode_files.items():
-        logger.info(f"{whitelist}: {filename}")
-
+        pass
+    
     # Create matcher
     matcher = BarcodeMatcherOptimized(
         barcode_files = barcode_files,
@@ -204,38 +216,43 @@ def run_weed(
     )
 
     # Process each chunk in parallel
-    logger.info("Processing BAM chunks...")
+    logger.info("Processing BAM chunks")
     pool = mp.Pool(processes = threads)
     results = []
     for i, chunk in enumerate(bam_chunks):
-        output_sam = f"chunk_{i}.sam"
+        output_sam = f"{outpath}{rnd_string}_chunk_{i}.sam"
         results.append(pool.apply_async(process_chunk, args=(chunk, fastq_file, index_db, output_sam, barcode_index, matcher, whitelist)))
     pool.close()
     pool.join()
 
     # Combine the processed SAM files into a single BAM file
-    logger.info(f"Writing SAM chunks to {out_file}...")
+    logger.info(f"Writing SAM chunks to: '{out_file}'")
     with pysam.AlignmentFile(out_file, "w", template=pysam.AlignmentFile(bam_file, "rb", check_sq=False)) as out_bam:
         for i in range(threads):
-            output_sam = f"chunk_{i}.sam"
+            output_sam = f"{outpath}{rnd_string}_chunk_{i}.sam"
             with open(output_sam, "r") as in_sam:
                 for read in in_sam:
                     out_bam.write(pysam.AlignedSegment.fromstring(read.strip(), out_bam.header))
     
     # Report disk space used
-    bam_size = sum(f.stat().st_size for f in Path(".").glob("chunk*.bam"))
-    sam_size = sum(f.stat().st_size for f in Path(".").glob("chunk*.sam"))
+    bam_size = sum(f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.bam"))
+    sam_size = sum(f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.sam"))
     logger.info(f"Total BAM chunk disk space used: {bam_size}")
     logger.info(f"Total SAM chunk disk space used: {sam_size}")
     
     # Clean up temporary files
-    logger.info("Removing chunks...")
     for i in range(threads):
-        if os.path.exists(f"chunk_{i}.bam"):
-            os.remove(f"chunk_{i}.bam")
-        if os.path.exists(f"chunk_{i}.sam"):
-            os.remove(f"chunk_{i}.sam")
+        if os.path.exists(f"{outpath}{rnd_string}_chunk_{i}.bam"):
+            os.remove(f"{outpath}{rnd_string}_chunk_{i}.bam")
+        if os.path.exists(f"{outpath}{rnd_string}_chunk_{i}.sam"):
+            os.remove(f"{outpath}{rnd_string}_chunk_{i}.sam")
     
+    if remove_fq is True:
+        logger.info(f"Removing decompressed FASTQ file that was generated: '{fastq_file}'")
+        os.remove(fastq_file)
+    logger.info(f"Removing FASTQ index that was generated: '{index_db}'")
+    os.remove(index_db)
+
     logger.info("Finished!")
         
 def is_gz_file(filepath):
