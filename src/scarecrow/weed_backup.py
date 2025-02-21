@@ -131,8 +131,7 @@ def validate_weed_args(parser, args):
         mismatches = args.mismatches,
         base_quality = args.base_quality,
         verbose = args.verbose,
-        threads = args.threads,
-        args_string = " ".join(f"--{k} {v}" for k, v in vars(args).items() if v is not None)
+        threads = args.threads
     )
 
 def count_reads_no_header(bam_file):
@@ -143,39 +142,32 @@ def count_reads_no_header(bam_file):
             read_count += 1
     return read_count
 
-def split_bam_file(bam_file, num_chunks, out, args_string):
+def split_bam_file(bam_file, num_chunks, out):
     """Split the BAM file into chunks, distributing reads evenly."""
     bam_chunks = [f"{out}_chunk_{i}.bam" for i in range(num_chunks)]
-
     with pysam.AlignmentFile(bam_file, "rb", check_sq=False) as bam:
-        # Extract headers
-        headers = bam.header.to_dict()
-        # Update PG part of header
-        if "PG" not in headers:
-            headers["PG"] = []
-        headers["PG"].append({
-            "ID": "weed",
-            "PN": "scarecrow",
-            "VN": __version__,
-            "DS": args_string
-        })
+        # Count the total number of reads in the SAM file
+        with open(bam_file, "r") as infile:
+            total_reads = sum(1 for line in infile if not line.startswith("@"))  # Skip header lines if any
+
+        reads_per_chunk = total_reads // num_chunks
+
+        # Reset the BAM file iterator
+        bam.reset()
 
         # Open all chunk files for writing
-        chunk_files = []
-        for chunk in bam_chunks:
-            chunk_file = pysam.AlignmentFile(chunk, "wb", header=headers)
-            chunk_files.append(chunk_file)
+        chunk_files = [pysam.AlignmentFile(chunk, "wb", template=bam) for chunk in bam_chunks]
 
         # Distribute reads across chunks
         for i, read in enumerate(bam.fetch(until_eof=True)):
-            chunk_idx = i % num_chunks  # Distribute reads evenly across chunks
+            chunk_idx = min(i // reads_per_chunk, num_chunks - 1)
             chunk_files[chunk_idx].write(read)
 
         # Close all chunk files
         for chunk_file in chunk_files:
             chunk_file.close()
 
-    return bam_chunks, headers
+    return bam_chunks
 
 
 @log_errors
@@ -190,8 +182,7 @@ def run_weed(
     mismatches: int = 1,
     base_quality: int = 10,
     verbose: bool = False,
-    threads: Optional[int] = None,
-    args_string: str = None
+    threads: Optional[int] = None
 ) -> None:
     """
     Multiprocessing function to process SAM tags efficiently
@@ -216,7 +207,7 @@ def run_weed(
 
     # Split the BAM file into chunks
     logger.info("Splitting BAM file into chunks")
-    bam_chunks, headers = split_bam_file(bam_file, threads, f'{outpath}{rnd_string}', args_string)
+    bam_chunks = split_bam_file(bam_file, threads, f'{outpath}{rnd_string}')
     logger.info(f"{bam_chunks}")
 
     # Extract barcodes and convert whitelist to set
@@ -234,25 +225,23 @@ def run_weed(
 
     # Process each chunk in parallel
     logger.info("Processing BAM chunks")
-    with mp.Pool(processes=threads) as pool:
-        # Prepare arguments for worker tasks
-        args = [
-            (chunk, fastq_file, index_db, f"{outpath}{rnd_string}_chunk_{i}.sam", barcode_index, matcher, whitelist)
-            for i, chunk in enumerate(bam_chunks)
-        ]
+    pool = mp.Pool(processes = threads)
+    results = []
+    for i, chunk in enumerate(bam_chunks):
+        output_sam = f"{outpath}{rnd_string}_chunk_{i}.sam"
+        results.append(pool.apply_async(process_chunk, args=(chunk, fastq_file, index_db, output_sam, barcode_index, matcher, whitelist)))
+    pool.close()
+    pool.join()
 
-        # Use imap_unordered to process chunks
-        temp_files = pool.imap_unordered(process_chunk, args, chunksize=1)
-
-        # Combine the temporary SAM files into the final output
-        with pysam.AlignmentFile(out_file, "w", header=headers) as out_sam:
-            for temp_file in temp_files:
-                with pysam.AlignmentFile(temp_file, "r", check_sq=False) as in_sam:
-                    for read in in_sam.fetch(until_eof=True):
-                        out_sam.write(read)
-                os.remove(temp_file)  # Clean up the temporary file
-
-
+    # Combine the processed SAM files into a single BAM file
+    logger.info(f"Writing SAM chunks to: '{out_file}'")
+    with pysam.AlignmentFile(out_file, "w", template=pysam.AlignmentFile(bam_file, "rb", check_sq=False)) as out_bam:
+        for i in range(threads):
+            output_sam = f"{outpath}{rnd_string}_chunk_{i}.sam"
+            with open(output_sam, "r") as in_sam:
+                for read in in_sam:
+                    out_bam.write(pysam.AlignedSegment.fromstring(read.strip(), out_bam.header))
+    
     # Report disk space used
     bam_size = sum(f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.bam"))
     sam_size = sum(f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.sam"))
@@ -272,7 +261,6 @@ def run_weed(
     logger.info(f"Removing FASTQ index that was generated: '{index_db}'")
     os.remove(index_db)
 
-    logger.info(f"Updated SAM file written to '{out_file}'")
     logger.info("Finished!")
         
 def is_gz_file(filepath):
@@ -381,55 +369,53 @@ def get_barcode_from_fastq(fastq_file: str, offset: int, barcode_index: int) -> 
     return None
 
 @log_errors        
-def process_chunk(args):
+def process_chunk(bam_chunk, fastq_file, index_db, output_sam, barcode_index, matcher, whitelist):
     """Process a chunk of the BAM file and add tags from the FASTQ file."""
-    bam_chunk, fastq_file, index_db, output_sam, barcode_index, matcher, whitelist = args
     logger = setup_worker_logger()
 
     # Connect to the SQLite database
     conn = sqlite3.connect(index_db)
     cursor = conn.cursor()
 
-    # Open the output SAM file for writing
-    with pysam.AlignmentFile(output_sam, "w", template=pysam.AlignmentFile(bam_chunk, "rb", check_sq=False)) as out_sam:
-        with pysam.AlignmentFile(bam_chunk, "rb", check_sq=False) as bam:
-            for read in bam.fetch(until_eof=True):
-                read_name = read.query_name
-                if not read_name:
-                    logger.warning(f"Skipping read with no name in {bam_chunk}")
-                    continue
+    with pysam.AlignmentFile(bam_chunk, "rb", check_sq=False) as bam, open(output_sam, "w") as out_sam:
+        for read in bam.fetch(until_eof=True):
+            #logger.info(f"{read}")
+            read_name = read.query_name
+            if not read_name:
+                logger.warning(f"Skipping read with no name in {bam_chunk}")
+                continue
 
-                # Query the database for the read's offset
-                cursor.execute("SELECT offset FROM fastq_index WHERE read_name = ?", (read_name,))
-                result = cursor.fetchone()
-                if result:
-                    offset = result[0]
-                    barcode = get_barcode_from_fastq(fastq_file, offset, barcode_index)
+            # Query the database for the read's offset
+            cursor.execute("SELECT offset FROM fastq_index WHERE read_name = ?", (read_name,))
+            result = cursor.fetchone()
+            if result:
+                offset = result[0]
+                barcode = get_barcode_from_fastq(fastq_file, offset, barcode_index)
 
-                    # Search for barcode in forward orientation
+                # Search for barcode in forward orientation
+                matched_barcode, mismatch_count, adj_position = matcher.find_match(
+                    barcode, None, whitelist, 'forward', 1, len(barcode), 0, None)
+                # If none found, search in reverse orientation
+                if 'NN' in matched_barcode:
                     matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                        barcode, None, whitelist, 'forward', 1, len(barcode), 0, None)
-                    # If none found, search in reverse orientation
-                    if 'NN' in matched_barcode:
-                        matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                            barcode, None, whitelist, 'reverse', 1, len(barcode), 0, None)
+                        barcode, None, whitelist, 'reverse', 1, len(barcode), 0, None)
 
-                    # Update read tags
-                    if barcode:
-                        # Update CR and CY tags
-                        cr_tag = read.get_tag('CR') if read.has_tag('CR') else ''
-                        cy_tag = read.get_tag('CY') if read.has_tag('CY') else ''
-                        cb_tag = read.get_tag('CB') if read.has_tag('CB') else ''
-                        xm_tag = read.get_tag('XM') if read.has_tag('XM') else ''
-                        xp_tag = read.get_tag('XP') if read.has_tag('XP') else ''
-                        read.set_tag('CR', f"{cr_tag}_{barcode}")
-                        read.set_tag('CY', f"{cy_tag}_{'!' * len(barcode)}")
-                        if matched_barcode:
-                            read.set_tag('CB', f"{cb_tag}_{matched_barcode}")
-                            read.set_tag('XM', f"{xm_tag}_{mismatch_count}")
-                            read.set_tag('XP', f"{xp_tag}_0")
-                
-                out_sam.write(read)  # Write the modified read to the output SAM file
+                # Update read tags
+                if barcode:
+                    # Update CR and CY tags
+                    cr_tag = read.get_tag('CR') if read.has_tag('CR') else ''
+                    cy_tag = read.get_tag('CY') if read.has_tag('CY') else ''
+                    cb_tag = read.get_tag('CB') if read.has_tag('CB') else ''
+                    xm_tag = read.get_tag('XM') if read.has_tag('XM') else ''
+                    xp_tag = read.get_tag('XP') if read.has_tag('XP') else ''
+                    read.set_tag('CR', f"{cr_tag}_{barcode}")
+                    read.set_tag('CY', f"{cy_tag}_{'!' * len(barcode)}")
+                    if matched_barcode:
+                        read.set_tag('CB', f"{cb_tag}_{matched_barcode}")
+                        read.set_tag('XM', f"{xm_tag}_{mismatch_count}")
+                        read.set_tag('XP', f"{xp_tag}_0")
+            
+                out_sam.write(read.to_string() + "\n")
 
     conn.close()
-    return output_sam  # Return the path to the temporary SAM file
+

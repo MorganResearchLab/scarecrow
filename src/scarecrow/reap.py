@@ -522,8 +522,8 @@ def run_reap(fastqs: List[str],
     if SAM:
         outfile = f'{output}.sam'
         with open(outfile, 'w') as file:
-            file.write("@HD:\tVN:1.6\n")
-            file.write(f"@PG:\tID:scarecrow\tPN:scarecrow\tVN:{__version__}\tDS:{args_string}\n")
+            file.write("@HD\tVN:1.6\n")
+            file.write(f"@PG\tID:reap\tPN:scarecrow\tVN:{__version__}\tDS:{args_string}\n")
 
     logger.info(f"Results will be written to '{outfile}'")
 
@@ -552,6 +552,8 @@ def run_reap(fastqs: List[str],
         with open(outfile, 'rb') as f_in, gz.open(outfile + ".gz", 'wb') as f_out:
             shutil.copyfileobj(f_in, f_out)
         os.remove(outfile)
+
+    logger.info("Finished!")
 
 @log_errors
 def process_read_batch(read_batch: List[Tuple], 
