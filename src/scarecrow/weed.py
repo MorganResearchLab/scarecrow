@@ -15,6 +15,7 @@ import logging
 from typing import Optional
 from pathlib import Path
 from argparse import RawTextHelpFormatter
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.reap import setup_worker_logger, parse_seed_arguments, BarcodeMatcherOptimized
 from scarecrow.tools import generate_random_string
@@ -103,12 +104,30 @@ def validate_weed_args(parser, args):
     """
     Validate and run samtag processing
     """
+        # Get outfile dirname for writing temp chunk files to
+    outpath = os.path.dirname(args.out)
+    if not outpath:
+        outpath = "./"
+    else:
+        outpath = f"{outpath}/"
+    
+
+    # Setup logging
+    rnd_string = generate_random_string()
+    logfile = f'{outpath}scarecrow_weed_{rnd_string}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+    logger.info(f"outpath: '{outpath}'")
+
     run_weed(
         fastq_file = args.fastq, 
         barcode_index = args.barcode_index,
         barcodes = args.barcodes,
         bam_file = args.sam, 
         out_file = args.out, 
+        outpath = outpath,
+        rnd_string = rnd_string,
         mismatches = args.mismatches,
         base_quality = args.base_quality,
         verbose = args.verbose,
@@ -158,6 +177,8 @@ def run_weed(
     barcodes: str = None,
     bam_file: str = None, 
     out_file: str = None, 
+    outpath: str = None,
+    rnd_string: str = None,
     mismatches: int = 1,
     base_quality: int = 10,
     verbose: bool = False,
@@ -166,20 +187,7 @@ def run_weed(
     """
     Multiprocessing function to process SAM tags efficiently
     """
-    
-    # Get outfile dirname for writing temp chunk files to
-    outpath = os.path.dirname(out_file)
-    if not outpath:
-        outpath = "./"
-    else:
-        outpath = f"{outpath}/"
-
-    # Setup logging
-    rnd_string = generate_random_string()
-    logfile = f'{outpath}scarecrow_weed_{rnd_string}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
-    logger.info(f"outpath: '{outpath}'")
+    logger = logging.getLogger('scarecrow')
 
     # Check if FASTQ data is compressed, and if so uncompress it
     remove_fq = False

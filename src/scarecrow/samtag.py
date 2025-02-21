@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 from pathlib import Path
 from argparse import RawTextHelpFormatter
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -64,9 +65,16 @@ scarecrow samtag --fastq in.fastq --sam in.sam
     return subparser
 
 def validate_samtag_args(parser, args):
+    """ 
+    Validate arguments 
     """
-    Validate and run samtag processing
-    """
+
+    # Global logger setup
+    logfile = f'./scarecrow_seed_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+
     run_samtag(
         fastq_file = args.fastq, 
         bam_file = args.sam, 
@@ -109,10 +117,7 @@ def run_samtag(
     """
     Multiprocessing function to process SAM tags efficiently
     """
-    # Setup logging
-    logfile = f'./scarecrow_samtag_{generate_random_string()}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
+    logger = logging.getLogger('scarecrow')
 
     # Create or load the FASTQ index
     index_db = f'{fastq_file}.db'

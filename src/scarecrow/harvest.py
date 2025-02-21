@@ -15,6 +15,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from functools import lru_cache
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -391,6 +392,15 @@ scarecrow harveset BC1.csv BC2.csv BC3.csv \n\t--barcode_count 1 \n\t--min_dista
     return subparser
 
 def validate_harvest_args(parser, args):
+    """ 
+    Validate arguments 
+    """
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_sam2fastq', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+
     run_harvest(barcodes = args.barcodes,
                 output_file = args.out,
                 num_barcodes = args.barcode_count,
@@ -406,10 +416,7 @@ def run_harvest(barcodes: List[str],
     """
     Optimized main function for harvesting barcode positions
     """
-    # Setup logging
-    logfile = f'./scarecrow_harvest_{generate_random_string()}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
+    logger = logging.getLogger('scarecrow')
     
     # Initialize optimizer
     optimizer = HarvestOptimizer(min_distance, conserved_file)

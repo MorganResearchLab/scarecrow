@@ -4,7 +4,6 @@
 @author: David Wragg
 """
 
-import ast
 import gzip as gz
 import itertools
 import logging
@@ -123,7 +122,7 @@ class BarcodeMatcherOptimized:
                 if filtered_matches:
                     #self.logger.info(f"\n> reap filtered matches: {filtered_matches}")              
                     # Sort by number of mismatches and distance from expected start
-                    filtered_matches.sort(key=lambda x: (x['mismatches'], x['distance']))
+                    filtered_matches.sort(key=lambda x: (x['mismatches'], abs(x['distance'])))
                     if len(filtered_matches) == 1 or (filtered_matches[0]['mismatches'] < filtered_matches[1]['mismatches'] or filtered_matches[0]['distance'] < filtered_matches[1]['distance']):
                         # Only one match or the best match is unique
                         best_match = filtered_matches[0]
@@ -131,21 +130,21 @@ class BarcodeMatcherOptimized:
                     else:
                         # Multiple matches with the same number of mismatches and distance
                         #self.logger.info("Multiple equidistant-error matches")
-                        return 'NNNNNNNN', -1, -1
+                        return 'NNNNNNNN', -1, 'N'
                 else:
                     # No match found within the jitter range
                     #self.logger.info("No match found within jitter range")
-                    return 'NNNNNNNN', -1, -1
+                    return 'NNNNNNNN', -1, 'N'
             else:
                 # No match found
                 #self.logger.info("No match")
-                return 'NNNNNNNN', -1, -1
+                return 'NNNNNNNN', -1, 'N'
 
         else:
             # Default to set-based method
             if whitelist not in self.matchers:
                 self.logger.warning(f"Whitelist '{whitelist}' not found in available whitelists: {list(self.matchers.keys())}")
-                return 'NNNNNNNN', -1, -1
+                return 'NNNNNNNN', -1, 'N'
         
             #self.logger.info(f"-> start:{original_start} end:{original_end} jitter:{jitter}")
             #self.logger.info(f"{sub_sequence}")
@@ -170,7 +169,7 @@ class BarcodeMatcherOptimized:
                     self.logger.info(f"Multiple matches")
                     return 'NNNNNNNN', -1, 'N'
             
-            # If no exact match was found, check mismatch lookup            
+            # If no exact match was found, check mismatch lookup
             #self.logger.info(f"subs_sequence: {sub_sequence}")
             if self.mismatches > 0:
                 mismatch_matches = []
@@ -192,14 +191,13 @@ class BarcodeMatcherOptimized:
                 if mismatch_matches:
                     #self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
-                    from collections import defaultdict
                     match_groups = defaultdict(list)
                     for match in mismatch_matches:
                         key = (match[1], match[3])  # (mismatch_count, distance)
                         match_groups[key].append(match)
 
-                    # Find the best group (fewest mismatches, smallest distance)
-                    best_key = min(match_groups.keys(), key=lambda x: (x[0], abs(x[1]))) # Sort by absolute distance in case barcode starts off-sequence
+                    # Find the best group (fewest mismatches, smallest absolute distance)
+                    best_key = min(match_groups.keys(), key=lambda x: (x[0], abs(x[1])))
                     best_matches = match_groups[best_key]
                 
                     if len(best_matches) == 1:
@@ -437,6 +435,34 @@ def validate_reap_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+    logger.info(f"{args}\n")
+
+    # Check input files exist
+    missing_files = []
+    missing_files.extend(f for f in args.fastqs if not os.path.exists(f))
+    if not os.path.exists(args.barcode_positions):
+        missing_files.append(args.barcode_positions)
+    for barcode in args.barcodes:
+        key, label, file = barcode.split(':')
+        if not os.path.exists(file):
+            missing_files.append(file)
+
+    # Log any missing files and raise error
+    if missing_files:
+        logger.error(f"The following files were not found:\n{'\n'.join(missing_files)}")
+        raise FileNotFoundError
+    
+    # Check output path exists        
+    outpath = os.path.dirname(args.out)
+    if not os.path.exists(outpath) and outpath != "":
+        logger.error(f"Output directory {outpath} does not exist")
+        raise FileNotFoundError
+
     run_reap(fastqs = [f for f in args.fastqs], 
              barcode_positions = args.barcode_positions,
              barcode_reverse_order = args.barcode_reverse_order,
@@ -476,15 +502,7 @@ def run_reap(fastqs: List[str],
     """
     Main function to extract sequences with barcode headers
     """    
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_reap', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
-    logger.info(f"fastqs: {fastqs}")
-    logger.info(f"output: '{output}'")
-    logger.info(f"jitter: '{jitter}'")
-    logger.info(f"mismatches: '{mismatches}'")
-    logger.info(f"base_quality: '{base_quality}'")
+    logger = logging.getLogger('scarecrow')
 
     # Extract barcodes and convert whitelist to set
     barcode_files = parse_seed_arguments(barcodes)
@@ -494,6 +512,7 @@ def run_reap(fastqs: List[str],
 
     # Default output to SAM format if not specified
     if FASTQ is False and SAM is False:
+        logger.info("Defaulting to SAM file output")
         SAM = True
 
     # Append suffix to output prefix
@@ -632,6 +651,7 @@ def process_read_batch(read_batch: List[Tuple],
             header += f" XM={('_').join(mismatches)}"
 
             # Add UMI information if specified
+            # Need to check if UMI is on a read with barcodes, if so is it downstream of barcodes, if barcode is jittered then UMI needs to be jittered
             if umi_index is not None:
                 umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
                 umi_qual = reads[umi_index].quality[umi_range[0]:umi_range[1]]
@@ -662,6 +682,8 @@ def process_read_batch(read_batch: List[Tuple],
             tags.append(f"XP:Z:{'_'.join(positions)}")
             tags.append(f"XM:Z:{'_'.join(mismatches)}")
 
+            # Add UMI information if specified
+            # Need to check if UMI is on a read with barcodes, if so is it downstream of barcodes, if barcode is jittered then UMI needs to be jittered
             if umi_index is not None:
                 umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
                 umi_qual = reads[umi_index].quality[umi_range[0]:umi_range[1]]
@@ -831,7 +853,7 @@ def extract_sequences(
 
     # Write final statistics after all processing is complete
     master_stats.write_stats(output)
-    logger.info(f"Barcode statistics written to '{output}_mismatch_stats.csv' and '{output}_position_stats.csv'")
+    logger.info(f"Barcode statistics written to:\n'{output}_mismatch_stats.csv'\n'{output}_position_stats.csv'")
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:

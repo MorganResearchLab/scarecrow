@@ -4,7 +4,6 @@
 @author: David Wragg
 """
 
-import ast
 import os
 import gzip
 import logging
@@ -13,6 +12,7 @@ from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from itertools import combinations, product
 from typing import List, Dict, Set
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
 
@@ -242,6 +242,15 @@ scarecrow encode --barcodes whitelist.txt --trie
     return subparser
 
 def validate_encode_args(parser, args):
+    """ 
+    Validate arguments 
+    """
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_sam2fastq', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+     
     run_encode(barcodes = args.barcodes,
              out_trie = args.trie,)
     
@@ -251,10 +260,7 @@ def run_encode(barcodes: str = None,
     """
     Function to encode whitelist in a format suitable for efficient barcode matching
     """
-    # Setup logging
-    logfile = f'./scarecrow_encode_{generate_random_string()}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
+    logger = logging.getLogger('scarecrow')    
     
     # Parse barcode whitelists
     key, label, file_path = barcodes.split(':')

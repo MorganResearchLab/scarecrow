@@ -9,6 +9,7 @@ import logging
 import json
 import itertools
 from typing import List, Dict
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -52,6 +53,15 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
     return subparser
 
 def validate_rake_args(parser, args):
+    """ 
+    Validate arguments 
+    """
+    # Global logger setup
+    logfile = f'./scarecrow_rake_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+    
     run_rake(barcodes = args.barcodes,
             output_file = args.out,
             max_mismatches = args.max_mismatches)
@@ -63,11 +73,8 @@ def run_rake(barcodes: str = None,
     """
     Function to rake barcodes for mismatches
     """
-    # Setup logging
-    logfile = f'./scarecrow_rake_{generate_random_string()}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
-    
+    logger = logging.getLogger('scarecrow')
+
     if barcodes:
         logger.info(f"Processing barcodes in {barcodes}")
         if output_file is None:

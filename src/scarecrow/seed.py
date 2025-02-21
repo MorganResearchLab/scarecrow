@@ -7,11 +7,13 @@
 import os
 import pysam
 import logging
+import random
 from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 from functools import lru_cache
 from typing import List, Dict, Set, Tuple
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
 from scarecrow.encode import BarcodeMatcherAhoCorasick
@@ -310,6 +312,16 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
     return subparser
 
 def validate_seed_args(parser, args):
+    """ 
+    Validate arguments 
+    """
+
+    # Global logger setup
+    logfile = f'./scarecrow_seed_{generate_random_string()}.log'
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+
     run_seed(fastqs = [f for f in args.fastqs],
              num_reads = args.num_reads,
              random_seed = args.random_seed,
@@ -402,13 +414,8 @@ def run_seed(
     """
     Optimized implementation of seed functionality
     """
-    import random
+    logger = logging.getLogger('scarecrow')
     random.seed(random_seed)
-
-    # Setup logging
-    logfile = f'./scarecrow_seed_{generate_random_string()}.log'
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
 
     # Parse barcode whitelists
     expected_barcodes = parse_seed_arguments(barcodes)

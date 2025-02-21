@@ -9,6 +9,7 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 from argparse import RawTextHelpFormatter
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -40,6 +41,12 @@ def validate_samstat_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_sam2fastq', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+
     run_samstat(sam_file = args.sam)
 
 @log_errors
@@ -47,10 +54,7 @@ def run_samstat(sam_file: str = None) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_sam2fastq', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
+    logger = logging.getLogger('scarecrow')
 
     # Validate file exists
     if sam_file:

@@ -10,6 +10,7 @@ import pandas as pd
 from argparse import RawTextHelpFormatter
 from typing import List, Tuple
 from collections import defaultdict
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
@@ -53,6 +54,12 @@ def validate_tally_args(parser, args) -> None:
     """ 
     Validate arguments 
     """
+    # Global logger setup
+    logfile = '{}_{}.{}'.format('./scarecrow_tally', generate_random_string(), 'log')
+    logger = setup_logger(logfile)
+    logger.info(f"scarecrow version {__version__}")
+    logger.info(f"logfile: '{logfile}'")
+
     run_tally(input_file = args.input,
               mismatches = args.mismatches,
               verbose = args.verbose)
@@ -64,11 +71,8 @@ def run_tally(input_file: str = None,
     """
     Main function to extract sequences with barcode headers
     """    
-    # Global logger setup
-    logfile = '{}_{}.{}'.format('./scarecrow_tally', generate_random_string(), 'log')
-    logger = setup_logger(logfile)
-    logger.info(f"logfile: '{logfile}'")
-
+    logger = logging.getLogger('scarecrow')
+    
     # Determine file type
     is_fastq = input_file.lower().endswith(('.fastq', '.fastq.gz', '.fq', '.fq.gz'))    
 

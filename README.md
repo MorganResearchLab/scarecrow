@@ -23,8 +23,15 @@ A toolkit for preprocessing single cell sequencing data.
 *   - alignment (STAR and kallisto)
 * Test alignment with kallisto and STAR
 *    - may need to alter sequence header formatting depending on what is retained in BAM file
+* Aho-Corasick (trie) needs checking
+*   - runs 4x faster than set-based method on small subset (100K)
+*   - runs 4x slower than set-based method on normal dataset (100M+ reads)
+*   - difference possibly due to time taken to generate barcode sets in set method being more apparent with few reads relative to many reads
 
-* Recently added N base to mismatch set, needs testing to ensure it hasn't broken anything
+### Recent changes that need monitoring
+* Added N base to mismatch set, needs testing to ensure it hasn't broken anything
+* Added functionality to reap.py _get_sequence_with_jitter to tackle potentially clipped barcodes starting at position 1
+*   - this is not applied to the trie method currently
 
 # Testing on laptop (WTv2)
 ```bash
@@ -58,7 +65,6 @@ FILES=(./WTv2/barcodes_BC*_trie.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --conserved ./WTv2/barcodes_BC1_conserved.tsv \
     --out ./WTv2/barcode_positions_trie.csv
-
 
 # Reap (set-based approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
@@ -107,11 +113,15 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --conserved ./barcodes_BC1_conserved.tsv \
     --out ./barcode_positions.csv
 
-scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
+scarecrow reap --fastqs ${R1} ${R2} -j 2 -m 3 -q 10 \
     -p ./barcode_positions.csv \
     --barcodes ${BARCODES[@]} --extract 2:11-150 --umi 2:1-10 --base_quality 10 \
-    --out ./cDNA --threads 1 --verbose &> debug.log
+    --out ./cDNA_v2 --threads 1 --verbose &> debug.log
 
+LH00235:395:22LJ3MLT4:3:1101:31581:1042
+      GNTCTTAGTC
+        TCTTAGTTCT
+     TGCTCTTAGT
 
 cut -f15 ./cDNA.sam | sed 's/XP:Z://' | awk -F'_' '{count1[$1]++; count2[$2]++} END {print "Field 1:"; for (i in count1) print i, count1[i]; print "\nField 2:"; for (i in count2) print i, count2[i]}'
 
