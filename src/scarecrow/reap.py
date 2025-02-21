@@ -19,6 +19,7 @@ from argparse import RawTextHelpFormatter
 from collections import Counter, defaultdict
 from functools import lru_cache
 from typing import List, Tuple, Optional, Dict
+from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement
 from scarecrow.encode import BarcodeMatcherAhoCorasick
@@ -167,9 +168,10 @@ class BarcodeMatcherOptimized:
                 else:
                     # Multiple exact matches with the same distance
                     self.logger.info(f"Multiple matches")
-                    return 'NNNNNNNN', -1, -1
+                    return 'NNNNNNNN', -1, 'N'
             
             # If no exact match was found, check mismatch lookup            
+            #self.logger.info(f"subs_sequence: {sub_sequence}")
             if self.mismatches > 0:
                 mismatch_matches = []
                 for seq, pos in sub_sequence:
@@ -197,7 +199,7 @@ class BarcodeMatcherOptimized:
                         match_groups[key].append(match)
 
                     # Find the best group (fewest mismatches, smallest distance)
-                    best_key = min(match_groups.keys(), key=lambda x: (x[0], x[1]))
+                    best_key = min(match_groups.keys(), key=lambda x: (x[0], abs(x[1]))) # Sort by absolute distance in case barcode starts off-sequence
                     best_matches = match_groups[best_key]
                 
                     if len(best_matches) == 1:
@@ -208,12 +210,12 @@ class BarcodeMatcherOptimized:
                     else:
                         # Multiple matches in the best group
                         #self.logger.info("Multiple mismatch matches with the same distance, returning no match")
-                        return 'NNNNNNNN', -1, -1
+                        return 'NNNNNNNN', -1, 'N'
         
             # No match found
             #self.logger.info("No match found")
             null_match = "N" * len(next(iter(self.matchers[whitelist]['exact'])))
-            return null_match, -1, -1
+            return null_match, -1, 'N'
 
     def _get_sequence_with_jitter(self, full_sequence: str, start: int, end: int, jitter: int) -> List[Tuple[str, int]]:
         """Generate possible sequences with position jitter"""
@@ -227,7 +229,20 @@ class BarcodeMatcherOptimized:
             seq = full_sequence[adj_start:adj_start + barcode_length]
             if len(seq) == barcode_length:
                 sequences.append((seq, adj_start + 1))
-                
+
+        # Handle cases where the start position minus jitter is less than 1
+        if start - jitter < 1:
+            for clip_count in range(1, jitter + 1):
+
+                # Extract the original sequence clipped at the end (start is - 1 for Python 0-based position)
+                original_seq = full_sequence[(start - 1):(start - 1 + barcode_length - clip_count)]
+            
+                # Insert 'N's at the start
+                clipped_seq = 'N' * clip_count + original_seq
+
+                #if len(clipped_seq) == barcode_length:
+                sequences.append((clipped_seq, start - clip_count - 1)) # -1 skips position 0
+
         return sequences
 
 # Add a new class to track statistics
@@ -250,8 +265,8 @@ class BarcodeStats:
         
         # Track each position
         for pos in positions:
-            if pos > '0':  # Exclude invalid positions
-                self.position_counts[int(pos)] += 1
+            #if not pos == 'N' and pos > '0':  # Exclude invalid positions
+            self.position_counts[pos] += 1
     
     def write_stats(self, output_prefix: str):
         # Write mismatch counts
@@ -437,7 +452,8 @@ def validate_reap_args(parser, args) -> None:
              FASTQ = args.out_fastq,
              SAM = args.out_sam,
              verbose = args.verbose,
-             gzip = args.gzip)
+             gzip = args.gzip,
+             args_string = " ".join(f"--{k} {v}" for k, v in vars(args).items() if v is not None))
 
 @log_errors
 def run_reap(fastqs: List[str], 
@@ -455,7 +471,8 @@ def run_reap(fastqs: List[str],
              FASTQ: bool = False,
              SAM: bool = True,
              verbose: bool = False,
-             gzip: bool = False) -> None:
+             gzip: bool = False,
+             args_string: str = None) -> None:
     """
     Main function to extract sequences with barcode headers
     """    
@@ -484,6 +501,10 @@ def run_reap(fastqs: List[str],
         outfile = f'{output}.fastq'        
     if SAM:
         outfile = f'{output}.sam'
+        with open(outfile, 'w') as file:
+            file.write("@HD:\tVN:1.6\n")
+            file.write(f"@PG:\tID:scarecrow\tPN:scarecrow\tVN:{__version__}\tDS:{args_string}\n")
+
     logger.info(f"Results will be written to '{outfile}'")
 
     # Extract sequences
@@ -749,11 +770,11 @@ def extract_sequences(
         gc.collect()
     
     def combine_results_chunked(files, output, chunk_size=1024*1024):
-        with open(output, 'w') as out_fastq:
+        with open(output, 'a') as file:
             for fastq_file in files:
                 with open(fastq_file, 'r') as in_fastq:
                     while chunk := in_fastq.read(chunk_size):
-                        out_fastq.write(chunk)
+                        file.write(chunk)
                 os.remove(fastq_file)
 
     logger.info(f"Processing reads")
@@ -802,7 +823,7 @@ def extract_sequences(
         pool.join()
 
     # Combine results
-    logger.info(f"Combining results: {files}")
+    logger.info(f"Combining results: {files} into '{output}'")
     combine_results_chunked(files, output)
 
     # Log final count
@@ -810,7 +831,7 @@ def extract_sequences(
 
     # Write final statistics after all processing is complete
     master_stats.write_stats(output)
-    logger.info(f"Barcode statistics written to {output}_mismatch_stats.csv and {output}_position_stats.csv")
+    logger.info(f"Barcode statistics written to '{output}_mismatch_stats.csv' and '{output}_position_stats.csv'")
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:
