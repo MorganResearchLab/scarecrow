@@ -767,15 +767,32 @@ def extract_sequences(
     files = []
     total_reads = 0 # Initialize total read counter
 
-    def write_and_clear_results(results, outfile):
-        """Write results to file and clear memory."""
-        with open(outfile, 'a') as f:
-            f.writelines(results)
-        del results
+    def write_and_clear_results(jobs):
+        """Retrieve results from completed jobs, write to file, and free memory."""
+        nonlocal total_reads  # Access the outer scope counter
+        for idx, job in enumerate(jobs):
+            # Get batch data
+            results, batch_count, batch_stats = job.get()
+            
+            # Update total read count
+            total_reads += batch_count  
+
+            # Update master stats
+            master_stats.mismatch_counts.update(batch_stats.mismatch_counts)
+            master_stats.position_counts.update(batch_stats.position_counts)
+
+            outfile = output + "_" + str(idx)
+            if outfile not in files:
+                files.append(outfile)
+                if os.path.exists(outfile):
+                    os.remove(outfile)
+            with open(outfile, 'a') as out_fastq:
+                out_fastq.writelines(results)
+            del results                
+        jobs.clear()
         gc.collect()
     
-    def combine_results_chunked(files, output, chunk_size=1024 * 1024):
-        """Combine results from multiple files into a single output file."""
+    def combine_results_chunked(files, output, chunk_size=1024*1024):
         with open(output, 'a') as file:
             for fastq_file in files:
                 with open(fastq_file, 'r') as in_fastq:
@@ -790,42 +807,43 @@ def extract_sequences(
         # Create batches efficiently
         read_pairs = zip(r1, r2)        
 
-        # Generate batches 
-        def batch_generator(read_pairs, batch_size):
-            batch = []
-            for reads in read_pairs:
-                batch.append(reads)
-                if len(batch) >= batch_size:
-                    yield batch
-                    batch = []
-            if batch:
-                yield batch
+        pool = mp.Pool(threads)
+        batch = []
+        jobs = []
+        counter = 0       
 
-        # Prepare arguments for worker tasks
-        args_generator = (
-            (batch, barcode_configs, matcher, extract_range, extract_index,
-             umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
-            for batch in batch_generator(read_pairs, batch_size)
-        )
+        for reads in read_pairs:            
+            batch.append(reads)            
+            if len(batch) >= batch_size:
+                jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
+                                                                 extract_range, extract_index, 
+                                                                 umi_index, umi_range, 
+                                                                 base_quality, jitter, FASTQ, SAM,
+                                                                 verbose),)))
+                counter += len(batch)                
 
-        # Use imap_unordered for parallel processing
-        with mp.Pool(threads) as pool:
-            for result in pool.imap_unordered(worker_task, args_generator, chunksize=10):
-                entries, batch_count, batch_stats = result
+                # Write results and free memory if jobs exceed a threshold
+                if len(jobs) >= threads:
+                    write_and_clear_results(jobs)
+                    logger.info(f"Processed {counter} reads")
+                
+                # Clear the current batch
+                batch = []                
 
-                # Update total read count
-                total_reads += batch_count
-
-                # Update master stats
-                master_stats.mismatch_counts.update(batch_stats.mismatch_counts)
-                master_stats.position_counts.update(batch_stats.position_counts)
-
-                # Write results to a temporary file
-                outfile = f"{output}_temp_{total_reads}"
-                files.append(outfile)
-                write_and_clear_results(entries, outfile)
-
-                logger.info(f"Processed {total_reads} reads")
+        # Process remaining reads
+        if batch:
+            jobs.append(pool.apply_async(worker_task, args=((batch, barcode_configs, matcher, 
+                                                                 extract_range, extract_index, 
+                                                                 umi_index, umi_range, 
+                                                                 base_quality, jitter, FASTQ, SAM,
+                                                                 verbose),)))
+            
+        write_and_clear_results(jobs)
+        logger.info(f"Processed {counter} reads")
+        
+        # Close pools
+        pool.close()
+        pool.join()
 
     # Combine results
     logger.info(f"Combining results: {files} into '{output}'")
@@ -919,21 +937,21 @@ def setup_worker_logger(log_file: str = None):
     return logger
 
 def worker_task(args):
-    """Worker function that ensures logger is configured for the process."""
+    """Worker function that ensures logger is configured for the process"""
     logger = setup_worker_logger()
-    (batch, barcode_configs, matcher,
-     extract_range, extract_index,
-     umi_index, umi_range,
+    (batch, barcode_configs, matcher, 
+     extract_range, extract_index, 
+     umi_index, umi_range, 
      base_quality, jitter, FASTQ, SAM, verbose) = args
-
+    
     stats = BarcodeStats()  # Create stats tracker for this batch
 
     if verbose:
         logger.info(f"Worker process started")
     try:
         entries, count = process_read_batch(batch, barcode_configs, matcher,
-                                           extract_range, extract_index, umi_index, umi_range,
-                                           stats, base_quality, jitter, FASTQ, SAM, verbose)
+            extract_range, extract_index, umi_index, umi_range,
+            stats, base_quality, jitter, FASTQ, SAM, verbose)
         if verbose:
             logger.info(f"Processed batch of {count} reads")
         return entries, count, stats
