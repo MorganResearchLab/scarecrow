@@ -666,16 +666,16 @@ def process_read_batch(read_batch: List[Tuple],
         # Output SAM
         if SAM:
             qname = source_entry.name  # QNAME
-            flag = "4"  # FLAG (4 means unaligned)
-            rname = "*"  # RNAME (unaligned, so *)
-            pos = "0"  # POS (unaligned, so 0)
-            mapq = "255"  # MAPQ (255 means unavailable)
-            cigar = "*"  # CIGAR (unaligned, so *)
-            rnext = "*"  # RNEXT (unaligned, so *)
-            pnext = "0"  # PNEXT (unaligned, so 0)
-            tlen = "0"  # TLEN (unaligned, so 0)
-            seq = filtered_seq  # SEQ
-            qual = filtered_qual  # QUAL
+            flag = "4"                 # FLAG (4 means unaligned)
+            rname = "*"                # RNAME (unaligned, so *)
+            pos = "0"                  # POS (unaligned, so 0)
+            mapq = "255"               # MAPQ (255 means unavailable)
+            cigar = "*"                # CIGAR (unaligned, so *)
+            rnext = "*"                # RNEXT (unaligned, so *)
+            pnext = "0"                # PNEXT (unaligned, so 0)
+            tlen = "0"                 # TLEN (unaligned, so 0)
+            seq = filtered_seq         # SEQ
+            qual = filtered_qual       # QUAL
 
             # Optional tags
             tags = []
@@ -684,9 +684,14 @@ def process_read_batch(read_batch: List[Tuple],
             tags.append(f"CB:Z:{'_'.join(matched_barcodes)}")
             tags.append(f"XP:Z:{'_'.join(positions)}")
             tags.append(f"XM:Z:{'_'.join(mismatches)}")
+            
+            """
+            Need to check if UMI is on a read with barcodes
+                if so, is it downstream of barcodes
+                if barcode is jittered then UMI needs to be jittered
+            """
 
             # Add UMI information if specified
-            # Need to check if UMI is on a read with barcodes, if so is it downstream of barcodes, if barcode is jittered then UMI needs to be jittered
             if umi_index is not None:
                 umi_seq = reads[umi_index].sequence[umi_range[0]:umi_range[1]]
                 umi_qual = reads[umi_index].quality[umi_range[0]:umi_range[1]]
@@ -839,7 +844,6 @@ def extract_sequences(
     # Write final statistics after all processing is complete
     master_stats.write_stats(output)
     logger.info(f"Barcode statistics written to:\n'{output}_mismatch_stats.csv'\n'{output}_position_stats.csv'")
-
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """

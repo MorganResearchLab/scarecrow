@@ -20,18 +20,16 @@ A toolkit for preprocessing single cell sequencing data.
 * Benchmark different assays (SPLiTseq, Parse, 10X) and methods (split-pipe, scarecrow, UMI tools)
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
-* Test alignment with kallisto and STAR
-*    - may need to alter sequence header formatting depending on what is retained in BAM file
+
 * Aho-Corasick (trie) needs checking
 *   - runs 4x faster than set-based method on small subset (100K)
 *   - runs 4x slower than set-based method on normal dataset (100M+ reads)
 *   - difference possibly due to time taken to generate barcode sets in set method being more apparent with few reads relative to many reads
 *   - try an approximate matching solution instead of generating variant sequences
 
-### Recent changes that need monitoring
-* Added N base to mismatch set, needs testing to ensure it hasn't broken anything
 * Added functionality to reap.py _get_sequence_with_jitter to tackle potentially clipped barcodes starting at position 1
 *   - this is not applied to the trie method currently
+
 
 # Testing on laptop (WTv2)
 ```bash
@@ -87,8 +85,6 @@ time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
 ```
 
 
-
-
 # Testing on laptop (split-seq)
 ```bash
 cd ~/Documents/split-seq
@@ -118,30 +114,14 @@ scarecrow reap --fastqs ${R1} ${R2} -j 2 -m 3 -q 10 \
     --barcodes ${BARCODES[@]} --extract 2:11-150 --umi 2:1-10 --base_quality 10 \
     --out ./cDNA_v2 --threads 1 --verbose &> debug.log
 
-```
-
-# SPLiT-seq
-# - is BC1 or BC2 more affected by 'invalid' barcodes
-# - do invalid BC1 or BC2 barcodes map to particular samples
-#i
 scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.gz \
     --sam cDNA_v2.sam \
-    -i 1\
+    -i 1 \
     --out cDNA_v2_fix.sam \
     -m 1 \
     --barcodes BC3:P7:./BC3.txt &> debug.log
-
-
-# Debugging notes
-```bash
-READ=SRR28867558.397
-grep -m1 ${READ} WTv2/*sam
-grep -m1 -A1 ${READ} ${R2}
-grep -m1 -A300 ${READ} debug_set.log | less
-grep -m1 -A300 ${READ} debug_trie.log | less
 ```
 
-# k-mer length 2 appears to work wth 8 nt barcodes
 
 
 # Testing on laptop (10X3p)
@@ -151,25 +131,42 @@ R2=./10X3p/SRR28867562_4.fastq
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt)
 
 # Generate Aho-Corasick trie for use with scarecrow seed (3m30s)
-time scarecrow encode --barcodes ${BARCODE} --trie
+#time scarecrow encode --barcodes ${BARCODE} --trie
 
 # Seed using trie
 time scarecrow seed --fastqs ${R1} ${R2} \
     -o ./10X3p/barcodes_${BARCODE%:*:*}.csv \
-    --barcodes ${BARCODE} -n 0 -u 0 \
+    --barcodes ${BARCODE} -n 0 -u 0 -k 8 \
     --trie ./10X3p/3M-february-2018.txt.trie.gz
-# Without --trie 19s, with trie 30s
-
-
-
-FILES=(./10X3p/barcodes_BC*csv)
-scarecrow harvest ${FILES[@]} --barcode_count 1 --out ./10X3p/barcode_positions.csv
+    
+# Harvest (Aho-Corasick approach)
+FILES=(./10X3p/barcodes_BC1.csv)
+scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
+    --conserved ./10X3p/barcodes_BC1_conserved.tsv \
+    --out ./10X3p/barcode_positions.csv
 
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt)
-time scarecrow reap --fastqs ${R1} ${R2} -p ./10X3p/barcode_positions.csv \
-    -j 2 -m 1 -q 30 --barcodes ${BARCODE} --extract 2:1-78 --umi 1:17-28 \
-    --out ./10X3p/cDNA_set --threads 4 \
-    --trie ./10X3p/3M-february-2018.txt.trie.gz 
-# Without trie killed the process after >1h, with trie 59s
+scarecrow encode --force_overwrite --barcodes ${BARCODE} --trie -k 4
 
+# Reap (Aho-Corasick approach)
+BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.k4.trie.gz)
+time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
+    -p ./10X3p/barcode_positions.csv \
+    --barcodes ${BARCODE} --extract 2:1-90 --umi 1:17-28 \
+    --out ./10X3p/cDNA_k4 --threads 4
+
+# kmer_length = 4
+
+
+scarecrow samstat --sam ./10X3p/cDNA_trie.sam
+```
+
+
+# Debugging notes
+```bash
+READ=SRR28867558.397
+grep -m1 ${READ} WTv2/*sam
+grep -m1 -A1 ${READ} ${R2}
+grep -m1 -A300 ${READ} debug_set.log | less
+grep -m1 -A300 ${READ} debug_trie.log | less
 ```

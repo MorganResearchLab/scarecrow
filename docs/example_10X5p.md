@@ -11,6 +11,8 @@
 
 Library structure
 
+---
+
 ### Prep
 
 Stay organised - create a folder for the project to keep things tidy.
