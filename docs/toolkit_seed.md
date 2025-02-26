@@ -6,10 +6,10 @@
 This tool identifies barcode seed positions and potential linker sequences within reads. It returns a CSV file of barcode alignments, a TSV file of nucleotide frequencies for each fastq file, and a TSV file of conserved sequence runs. This step should be repeated for each barcode whitelist. The barcode whitelist is a text file with one barcode sequence per line and no header. The `--num_reads` option specifies the number of reads to run the analysis on, and defaults to 100000. Using all reads (`--num reads 0`) is neither necessary nor recommended, the tool does not run multiprocessing so will take considerable time to process millions of reads. Subsets of reads are sampled randomly, the random seed can be set by `--random_seed <int>` and defaults to 1234.
 
 ```bash
-scarecrow seed --fastqs <paired_fastq_R1> <paired_fastq_R2> \
+scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz \
     --num_reads 100000 \
-    --out <BC1_counts.csv> \
-    --barcodes BC1:v1:<v1_whitelist.txt> 
+    --out BC1_counts.csv \
+    --barcodes BC1:v1:v1_whitelist.txt 
 ```
 
 The `--out` file has the below format. The `read` column indicates the read on which a barcode match was found, `name` is the name retrieved from sequencing read, `barcode_whitelist` contains the first two elements of the string passed to `--barcdoes`, `barcode` is the sequence of the matched barcode, `orientation` is the orientation in which the sequence was found on the read, `start` and `end` are the positions of the alignment, `mismatches` is the number of mismatching bases between the fastq sequence and barcode.

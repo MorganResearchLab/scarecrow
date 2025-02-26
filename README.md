@@ -26,6 +26,7 @@ A toolkit for preprocessing single cell sequencing data.
 *   - runs 4x faster than set-based method on small subset (100K)
 *   - runs 4x slower than set-based method on normal dataset (100M+ reads)
 *   - difference possibly due to time taken to generate barcode sets in set method being more apparent with few reads relative to many reads
+*   - try an approximate matching solution instead of generating variant sequences
 
 ### Recent changes that need monitoring
 * Added N base to mismatch set, needs testing to ensure it hasn't broken anything
@@ -46,11 +47,11 @@ do
     ID=${BARCODE%:*:*}
     WHITELIST=${BARCODE#*:*:}
     echo ${ID}
-    time scarecrow seed --fastqs ${R1} ${R2} \
-        -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0
+#    time scarecrow seed --fastqs ${R1} ${R2} \
+#        -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0
     time scarecrow seed --fastqs ${R1} ${R2} \
         -o ./WTv2/barcodes_${ID}_trie.csv --barcodes ${BARCODE} -n 0 -u 0 \
-        --trie ${WHITELIST}.${ID}.trie.gz
+        --trie ${WHITELIST}.${ID}.trie.gz -k 2
 done
 
 # Harvest (set-based approach)
@@ -72,7 +73,7 @@ BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_set.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA_set --threads 4
+    --out ./WTv2/cDNA_set --threads 1 --verbose &> debug_set.log
 
 # Reap (Aho-Corasick approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.trie.gz
@@ -81,7 +82,7 @@ BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.trie.gz
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_trie.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA_trie --threads 4
+    --out ./WTv2/cDNA_trie --threads 1 --verbose &> debug_trie.log
 
 ```
 
@@ -122,22 +123,25 @@ scarecrow reap --fastqs ${R1} ${R2} -j 2 -m 3 -q 10 \
 # SPLiT-seq
 # - is BC1 or BC2 more affected by 'invalid' barcodes
 # - do invalid BC1 or BC2 barcodes map to particular samples
+#i
 scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.gz \
-    --sam test.sam \
+    --sam cDNA_v2.sam \
     -i 1\
-    --out test_fix.sam \
+    --out cDNA_v2_fix.sam \
     -m 1 \
-    --barcodes BC3:P7:./BC3.txt
+    --barcodes BC3:P7:./BC3.txt &> debug.log
 
 
 # Debugging notes
 ```bash
-READ=SRR28867558.2
-grep -m1 -A100 ${READ} debug_trie.log | less
-grep -m1 -A1 ${READ} WTv2/*sam
+READ=SRR28867558.397
+grep -m1 ${READ} WTv2/*sam
 grep -m1 -A1 ${READ} ${R2}
+grep -m1 -A300 ${READ} debug_set.log | less
+grep -m1 -A300 ${READ} debug_trie.log | less
 ```
 
+# k-mer length 2 appears to work wth 8 nt barcodes
 
 
 # Testing on laptop (10X3p)

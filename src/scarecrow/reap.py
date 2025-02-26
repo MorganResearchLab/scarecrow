@@ -103,7 +103,7 @@ class BarcodeMatcherOptimized:
         if orientation == 'reverse':
             sequence = reverse_complement(sequence)
 
-        # Get sub sequence with jitter
+        # Get sub sequences with jitter
         sub_sequence = self._get_sequence_with_jitter(sequence, original_start, original_end, jitter)
 
         if self.trie_matcher:
@@ -170,7 +170,7 @@ class BarcodeMatcherOptimized:
                     return 'NNNNNNNN', -1, 'N'
             
             # If no exact match was found, check mismatch lookup
-            #self.logger.info(f"subs_sequence: {sub_sequence}")
+            self.logger.info(f"subs_sequence: {sub_sequence}")
             if self.mismatches > 0:
                 mismatch_matches = []
                 for seq, pos in sub_sequence:
@@ -190,7 +190,7 @@ class BarcodeMatcherOptimized:
                             mismatch_matches.append((barcode, n, pos, pos_distance))
             
                 if mismatch_matches:
-                    #self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
                     match_groups = defaultdict(list)
                     for match in mismatch_matches:

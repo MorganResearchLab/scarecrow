@@ -11,8 +11,7 @@ import pickle
 from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from itertools import combinations, product
-from collections import defaultdict
-from typing import List, Dict, Set, Tuple
+from typing import List, Dict, Set
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
@@ -26,7 +25,7 @@ class BarcodeMatcher:
         self.mismatches = mismatches
 
 class BarcodeMatcherAhoCorasick(BarcodeMatcher):
-    def __init__(self, barcode_sequences: Dict[str, Set[str]], pickle_file: str = None, kmer_length: int = 4, jitter: int = 0, mismatches: int = 0):
+    def __init__(self, barcode_sequences: Dict[str, Set[str]], pickle_file: str = None, jitter: int = 0, mismatches: int = 0):
         """
         Initialize Aho-Corasick based barcode matcher.
         """
@@ -36,8 +35,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             self.automata = {}
 
         self.barcode_info = {}
-        self.kmer_index = {}  # k-mer index for approximate matching
-        self.kmer_length = kmer_length
         self.jitter = jitter
         self.logger = setup_worker_logger()
 
@@ -45,8 +42,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             self._load_trie(pickle_file, mismatches = mismatches)
 
         else:
-            self._build_trie(barcode_sequences)
-            self._build_kmer_index(barcode_sequences)  # Build k-mer index for approximate matching
+            self._build_trie(barcode_sequences)                        
             self._save_trie(pickle_file)
 
     def _build_trie(self, barcode_sequences: Dict[str, Set[str]]):
@@ -67,65 +63,41 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                 
         automaton.make_automaton()
         self.automata[str(whitelist_key)] = automaton
-        self.logger.info(f"Finished building trie for whitelist: '{whitelist_key}'")
+        self.logger.info(f"Finished building trie for whitelist: {whitelist_key}")
         
-    def _build_kmer_index(self, barcode_sequences: Dict[str, Set[str]]):
-        """
-        Build a k-mer index for approximate matching.
-        """
-        self.logger.info(f"Building k-mer index for approximate matching using k-mer size {self.kmer_length}")
-        for whitelist_key, sequences in barcode_sequences.items():
-            kmer_index = defaultdict(set)
-            for seq in sequences:
-                for i in range(len(seq) - self.kmer_length + 1):
-                    kmer = seq[i:i + self.kmer_length]
-                    kmer_index[kmer].add(seq)
-            self.kmer_index[whitelist_key] = kmer_index
-        self.logger.info("Finished building k-mer index")
-
     def _load_trie(self, pickle_file: str, mismatches: int):
         """
         Loads a pre-built Aho-Corasick trie from a pickle file.
         """
-        #self.logger.info(f"Before loading, automata keys: {list(self.automata.keys())}")
+        self.logger.info(f"Before loading, automata keys: {list(self.automata.keys())}")
         self.logger.info(f"Loading Aho-Corasick trie from '{pickle_file}'")
-        try:
-            # Load automata and k-mer index
-            with gzip.open(pickle_file, "rb") as f:
-                loaded_data = pickle.load(f)
+        with gzip.open(pickle_file, "rb") as f:
+            loaded_data = pickle.load(f)
+        
+        # Extract the automaton object from the loaded data
+        if isinstance(loaded_data, dict):
+            # Assuming the dictionary contains a single automaton under a key
+            whitelist_key = list(loaded_data.keys())[0]
+            automaton = loaded_data[whitelist_key]
+        else:
+            # If the loaded data is not a dictionary, assume it is the automaton itself
+            whitelist_key = "default_key"  # Use a meaningful key if possible
+            automaton = loaded_data
 
-            # Extract the automaton object from the loaded data
-            automaton = loaded_data.get('automata', {})
-            whitelist_key = list(automaton.keys())[0]
-            self.automata[whitelist_key] = automaton[whitelist_key]
-            self.kmer_index[whitelist_key] = loaded_data.get('kmer_index', {})
+        self.automata[whitelist_key] = automaton
+        self.mismatches = mismatches
+                
+        self.logger.info(f"After loading, automata keys: {list(self.automata.keys())}\n")
 
-            # Retrieve the k-mer length from the k-mer index
-            first_kmer = next(iter(self.kmer_index[whitelist_key][whitelist_key].keys()))
-            self.kmer_length = len(first_kmer)            
-
-            self.mismatches = mismatches
-            self.logger.info(f"Loaded automata for whitelists: {list(self.automata.keys())}")
-            self.logger.info(f"Loaded k-mer index for whitelists: {list(self.kmer_index.keys())}")
-            self.logger.info(f"Retrieved k-mer length: {self.kmer_length}")
-            self.logger.info(f"Automata keys: {list(self.automata.keys())}\n")
-
-        except:
-            self.logger.info(f"Error loading automata and k-mer index from {pickle_file}")
-            raise ImportError       
 
     def _save_trie(self, pickle_file: str):
         """
-        Save the Aho-Corasick trie and k-mer index to a pickle file.
+        Saves the current Aho-Corasick trie to a pickle file.
         """
-        self.logger.info(f"Pickling and compressing Aho-Corasick trie and k-mer index to '{pickle_file}'")
-        data_to_save = {
-            'automata': self.automata,
-            'kmer_index': self.kmer_index
-        }
+        self.logger.info(f"Pickling and compressing Aho-Corasick trie to '{pickle_file}'")
         with gzip.open(pickle_file, "wb") as f:
-            pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-        self.logger.info("Pickling complete")
+            pickle.dump(self.automata, f, protocol=pickle.HIGHEST_PROTOCOL)
+        self.logger.info(f"Pickling complete")
 
     def _generate_query_variants(self, sequence: str, mismatches: int) -> List[str]:
         """
@@ -177,36 +149,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     'mismatches': mismatches  # Since we're generating n-mismatch variants
                 })
         return matches
-
-    def _find_approximate_matches(self, sequence: str, whitelist_key: str, k: int = 4, max_mismatches: int = 1) -> List[str]:
-        """
-        Find approximate matches using the k-mer index.
-        k = k-mer size
-        """
-        candidates = set()
-        inner_dict = self.kmer_index[whitelist_key][whitelist_key]
-
-        for i in range(len(sequence) - k + 1):
-            kmer = sequence[i:i + k]
-            if kmer in inner_dict:
-                candidates.update(inner_dict[kmer])
-        #self.logger.info(f"candidates: {candidates}")
-        
-        # Filter candidates by Hamming distance
-        matches = []
-        for candidate in candidates:
-            dist = self._hamming_distance(sequence, candidate)
-            #self.logger.info(f"{sequence} : {candidate} : {dist}")
-            if dist <= max_mismatches:
-                matches.append(candidate)
-        return matches
-
-    def _hamming_distance(self, s1: str, s2: str) -> int:
-        """
-        Calculate the Hamming distance between two sequences.
-        """
-        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-
+    
     def find_matches(self, sequence: List[tuple[str,int]], whitelist_key: str, orientation: str, original_start: int) -> List[Dict]:
         """
         Find all matching barcodes in a sequence using Aho-Corasick.
@@ -219,7 +162,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             return matches
         
         automaton = self.automata[whitelist_key]
-        exact_match = False
 
         # Iterate over possible sequences and their start positions
         for seq, start_pos in sequence:
@@ -243,28 +185,28 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     'mismatches': mismatches,
                     'distance': match_dist  
                 })
-                exact_match = True
             #if matches:
                 #self.logger.info(f"{matches}")
 
-            # If no exact matches found, search with the k-mer index
-            if not exact_match and self.mismatches > 0:
-                approximate_matches = self._find_approximate_matches(seq, whitelist_key, k=self.kmer_length, max_mismatches=self.mismatches)
-                #if approximate_matches:
-                    #self.logger.info(f"Approximate matches (m={self.mismatches} for {seq}): {approximate_matches}")
-                for match in approximate_matches:
-                    match_start = start_pos
-                    match_dist = abs(match_start - original_start)
-                    match_mismatches = self._hamming_distance(seq, match)
-                    matches.append({
-                        'barcode': match,
-                        'whitelist': whitelist_key,
-                        'orientation': orientation,
-                        'start': match_start,
-                        'end': match_start + len(match),
-                        'mismatches': match_mismatches,
-                        'distance': match_dist
-                    })
+        # If no exact matches found, search with up to 'n' mismatches
+        if not matches and self.mismatches > 0:
+            for n in range(1, self.mismatches + 1):
+                #self.logger.info(f"Checking {n} mismatches")
+                for seq, start_pos in sequence:
+                    n_mismatch_matches = self._search_with_n_mismatches(seq, n, orientation, automaton)
+                    for match in n_mismatch_matches:
+                        match_start = start_pos + match['start'] - 1 # Adjust start position
+                        match_dist = abs(match_start - original_start)  # Distance from expected start 
+                        matches.append({
+                            'barcode': match['barcode'],
+                            'whitelist': match['whitelist'],
+                            'orientation': orientation,
+                            'start': match_start, 
+                            'end': match_start + len(match['barcode']), # this was - 1 but removed to get correct end for seed
+                            'mismatches': match['mismatches'],
+                            'distance': match_dist
+                        })
+                        #self.logger.info(f"\n\t{seq}\tstart_pos: {start_pos} oroginal_start: {original_start} match_start: {match_start} match_dist: {match_dist} mismatches: {match['mismatches']}")
         
         return sorted(matches, key=lambda x: x['start'])
 
@@ -286,7 +228,7 @@ scarecrow encode --barcodes whitelist.txt --trie
     subparser.add_argument(
         "-b", "--barcodes",
         metavar="<file>",
-                help='Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt)',
+        help=("Path to barcode text file"),
         type=str,
         default=None,
     )
@@ -295,18 +237,6 @@ scarecrow encode --barcodes whitelist.txt --trie
         "-t", "--trie",
         action='store_true',
         help='Encode whitelist as an Aho-Corasick trie [true]'
-    )
-    subparser.add_argument(
-        "-k", "--kmer_length",
-        metavar="<int>",
-        help=("K-mer length for building k-mer index for approximate matching [4]"),
-        type=int,
-        default=4,
-    )
-    subparser.add_argument(
-        "-f", "--force_overwrite",
-        action='store_true',
-        help='Force overwrite of existing trie file if it exists [false]'
     )
     return subparser
 
@@ -321,15 +251,11 @@ def validate_encode_args(parser, args):
     logger.info(f"logfile: '{logfile}'")
      
     run_encode(barcodes = args.barcodes,
-               out_trie = args.trie,
-               force_overwrite = args.force_overwrite,
-               kmer_length = args.kmer_length)
+             out_trie = args.trie,)
     
 @log_errors
 def run_encode(barcodes: str = None,
-               out_trie: bool = True,
-               force_overwrite: bool = False,
-               kmer_length: int = 4) -> None:
+               out_trie: bool = True) -> None:
     """
     Function to encode whitelist in a format suitable for efficient barcode matching
     """
@@ -342,16 +268,10 @@ def run_encode(barcodes: str = None,
         expected_barcodes = parse_seed_arguments([barcodes])
 
         # Generate Aho-Corasick Trie
-        pickle_file = f'{file_path}.trie.gz'
         if out_trie:
-            if force_overwrite and os.path.exists(pickle_file):
-                logger.info(f"Removing existing file '{pickle_file}'")
-                os.remove(pickle_file)
-
             matcher = BarcodeMatcherAhoCorasick(
                     barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
-                    pickle_file = pickle_file,
-                    kmer_length = kmer_length
+                    pickle_file =  f'{file_path}.trie.gz'
                 )
     else:
         logger.info(f"{file_path} not found")

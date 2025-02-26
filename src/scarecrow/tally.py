@@ -142,6 +142,8 @@ def run_tally(input_file: str = None,
                            columns=["BarcodeCombination", "Count"]).sort_values(by="Count")
     barcodes.to_csv(f"{input_file}.barcode.combinations.csv", index=False)
 
+    logger.info("Finished!")
+
 def process_fastq_headers(file_path: str) -> Tuple[List[defaultdict[str, int]], defaultdict[str, int]]:
     """
     Process fastq header to report on barcode counts

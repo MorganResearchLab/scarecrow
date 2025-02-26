@@ -44,13 +44,13 @@ Chromium barcode whitelists for different chemistry versions are available at [h
 
 ```bash
 mkdir -p ${PROJECT}/barcode_profiles
-THREADS=1
 FASTQS=(${PROJECT}/fastq/subset/*.fastq.gz)
 BARCODE=BC1:3M-FEB-2018:${PROJECT}/barcodes/3M-february-2018.txt
-sbatch --ntasks ${THREADS} --mem 48G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
+sbatch --ntasks 1 --mem 4G --time=01:00:00 -o seed.%j.out -e seed.%j.err \
     scarecrow seed \
-        --threads ${THREADS} \
-        --fastqs ${FASTQS[@]} --strands pos neg \
-        --barcodes ${BARCODE} \
-        --out ${PROJECT}/barcode_profiles/barcodes.${BARCODE%%:*}.csv
+      --num_reads 10000 \
+      --upper_read_count 100000 \
+      --fastqs ${FASTQS[@]}
+      --barcodes ${BARCODE} \
+      --out ${PROJECT}/barcode_profiles/barcodes.${BARCODE%%:*}.csv
 ```

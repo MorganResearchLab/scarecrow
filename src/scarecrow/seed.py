@@ -284,6 +284,13 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         default=None
     )
     subparser.add_argument(
+        "-k", "--kmer_length",
+        metavar="<int>",
+        help=("K-mer length for building k-mer index for approximate matching [4]"),
+        type=int,
+        default=4,
+    )
+    subparser.add_argument(
         "-b", "--batch_size",
         metavar="<int>",
         help=("Number of read pairs per batch to process at a time [10000]"),
@@ -328,6 +335,7 @@ def validate_seed_args(parser, args):
              upper_read_count = args.upper_read_count,
              barcodes = args.barcodes, 
              trie = args.trie,
+             kmer_length = args.kmer_length,
              output_file = args.out, 
              batches = args.batch_size, 
              linker_base_frequency = args.linker_base_frequency,
@@ -405,6 +413,7 @@ def run_seed(
     upper_read_count: int = 10000000,
     barcodes: List[str] = None,
     trie: str = None,
+    kmer_length: int = 4,
     output_file: str = None,
     batches: int = 10000,
     linker_base_frequency: float = 0.75,
@@ -426,6 +435,7 @@ def run_seed(
         matcher = BarcodeMatcherAhoCorasick(
             barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
             pickle_file = trie,
+            kmer_length = kmer_length,
             mismatches = 0
         )
     else:
@@ -515,6 +525,8 @@ def run_seed(
             logger.info(f"Possible linker sequence:\n\t'read2:{run['start']}-{run['end']}'\t'{run['sequence']}'")
         
     logger.info(f"Conserved sequence analysis results written to:\n\t{freq_output_base}_conserved.tsv")
+
+    logger.info("Finished!")
 
 
 def write_batch_results(read_pair: Dict, output_handler) -> None:

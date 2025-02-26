@@ -81,6 +81,7 @@ def run_rake(barcodes: str = None,
             output_file = f'{barcodes}.json'
         process_barcodes(barcodes, 2, output_file)
 
+    logger.info("Finished!")
     
 def generate_mismatches(sequence: str, max_mismatches: int) -> Dict[int, Dict[str, str]]:
     bases = {'A', 'C', 'G', 'T'}

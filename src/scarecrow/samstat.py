@@ -80,6 +80,8 @@ def run_samstat(sam_file: str = None) -> None:
             logger.info(f"'{sam_file}' does not exist")
     else:
         logger.info("No SAM file provided")
+    
+    logger.info("Finished!")
 
 @log_errors
 def parse_sam_tags(sam_file: str = None):

@@ -77,3 +77,5 @@ def run_sam2fastq(sam_file: str = None) -> None:
             logger.info(f"'{sam_file}' does not exist")
     else:
         logger.info("No SAM file provided")
+    
+    logger.info("Finished!")

@@ -3,21 +3,22 @@
 [root](root.md)
 
 ## scarecrow reap
-The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either a FASTQ file or a SAM file (default) with the prefix `--out`. If writing to SAM then it the input FASTQ data should be trimmed beforehand to remove any adapter sequences. `jitter` is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence. `base_quality` will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN` in the sequence header. 
+The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either a FASTQ file or a SAM file (default) with the prefix `--out`. If writing to SAM then it the input FASTQ data should be trimmed beforehand to remove any adapter sequences. `jitter` is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence. If 'jitter' extends beyond the start of the sequence, for example if the barcode starts at position 1, then it will clip *n* end bases and insert *n* x N start bases when checking negative positions. `base_quality` will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN` in the sequence header. 
+
+This tool processes reads in batches and so generates a lot of temporary files in the process. These temporary files are removed once the process is complete.
 
 ```bash
 # Reap target sequence from fastqs (TBC)
-scarecrow reap --fastqs <paired_fastq_R1> <paired_fastq_R2> \
-    --barcode_positions <barcode_positions.csv> \
-    --barcodes BC1:v1:<v1_whitelist.txt> BC2:v1:<v1_whitelist.txt> BC3:n198:<n198_whitelist.txt> \
-    --barcodes ${BARCODES[@]} \
+scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz \
+    --barcode_positions barcode_positions.csv \
+    --barcodes BC1:v1:v1_whitelist.txt BC2:v1:v1_whitelist.txt BC3:n198:n198_whitelist.txt \
     --out ./cDNA \
     --extract 1:1-64 \
     --umi 2:1-10 \
     --jitter 2 \
     --mismatches 2 \
     --base_quality 10 \
-    --threads 4
+    --threads 16
 ```
 
 Below is an example read written in FASTQ format. Here a barcode has been corrected as `NNNNNNNN` at barcode position `51` with a mismatch count of `-1` indicating no barcode was found within the specified mismatch distance.

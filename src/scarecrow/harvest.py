@@ -457,7 +457,7 @@ def run_harvest(barcodes: List[str],
         conserved_regions = conserved_regions,
         selected_peaks = results
     )
-    
+    logger.info("Finished!")
     return results
 
 @log_errors
