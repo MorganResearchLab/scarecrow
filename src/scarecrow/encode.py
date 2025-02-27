@@ -17,6 +17,44 @@ from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
 
+class CompactKmerIndex:
+    def __init__(self, k):
+        self.k = k
+        self.barcodes = []  # List to store unique barcodes
+        self.kmer_to_barcode_indices = {}  # Key: integer-encoded k-mer, Value: list of indices in self.barcodes
+
+    def add_barcode(self, barcode):
+        """Add a barcode to the index."""
+        barcode_index = len(self.barcodes)
+        self.barcodes.append(barcode)
+        
+        # Add all k-mers in the barcode to the index
+        for i in range(len(barcode) - self.k + 1):
+            kmer = barcode[i:i + self.k]
+            kmer_int = self._kmer_to_int(kmer)
+            if kmer_int not in self.kmer_to_barcode_indices:
+                self.kmer_to_barcode_indices[kmer_int] = []
+            self.kmer_to_barcode_indices[kmer_int].append(barcode_index)
+
+    def _kmer_to_int(self, kmer):
+        """Convert a k-mer to an integer."""
+        encoding = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+        result = 0
+        for base in kmer:
+            result = (result << 2) | encoding.get(base, 0)  # Default to 0 for unknown bases
+        return result
+
+    def find_matches(self, sequence):
+        """Find approximate matches for a sequence using the k-mer index."""
+        matches = set()
+        for i in range(len(sequence) - self.k + 1):
+            kmer = sequence[i:i + self.k]
+            kmer_int = self._kmer_to_int(kmer)
+            if kmer_int in self.kmer_to_barcode_indices:
+                for barcode_index in self.kmer_to_barcode_indices[kmer_int]:
+                    matches.add(self.barcodes[barcode_index])
+        return matches
+    
 class BarcodeMatcher:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], pickle_file: str = None, mismatches: int = 0):
         """
@@ -98,17 +136,22 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             automaton = loaded_data.get('automata', {})
             whitelist_key = list(automaton.keys())[0]
             self.automata[whitelist_key] = automaton[whitelist_key]
-            self.kmer_index[whitelist_key] = loaded_data.get('kmer_index', {})
+
+            # Load k-mer index
+            kmer_index_data = loaded_data.get('kmer_index', {})
+            self.kmer_index = CompactKmerIndex(k=self.kmer_length)
+            for kmer_int, barcode_indices in kmer_index_data.items():
+                self.kmer_index.kmer_to_barcode_indices[kmer_int] = barcode_indices
+            self.kmer_index.barcodes = loaded_data.get('barcodes', [])
 
             # Retrieve the k-mer length from the k-mer index
-            first_kmer = next(iter(self.kmer_index[whitelist_key][whitelist_key].keys()))
+            first_kmer = next(iter(self.kmer_index.kmer_to_barcode_indices[whitelist_key].keys()))
             self.kmer_length = len(first_kmer)            
 
             self.mismatches = mismatches
             self.logger.info(f"Loaded automata for whitelists: {list(self.automata.keys())}")
-            self.logger.info(f"Loaded k-mer index for whitelists: {list(self.kmer_index.keys())}")
+            self.logger.info(f"Loaded k-mer indices for whitelists: {list(self.kmer_index.kmer_to_barcode_indices.keys())}")
             self.logger.info(f"Retrieved k-mer length: {self.kmer_length}")
-            self.logger.info(f"Automata keys: {list(self.automata.keys())}\n")
 
         except:
             self.logger.info(f"Error loading automata and k-mer index from {pickle_file}")
@@ -183,23 +226,21 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         Find approximate matches using the k-mer index.
         k = k-mer size
         """
-        candidates = set()
-        inner_dict = self.kmer_index[whitelist_key][whitelist_key]
+        if whitelist_key not in self.kmer_index.kmer_to_barcode_indices:
+            self.logger.warning(f"No k-mer index found for whitelist: {whitelist_key}")
+            return []
 
-        for i in range(len(sequence) - k + 1):
-            kmer = sequence[i:i + k]
-            if kmer in inner_dict:
-                candidates.update(inner_dict[kmer])
-        #self.logger.info(f"candidates: {candidates}")
-        
+        # Find candidate barcodes using the k-mer index
+        candidates = self.kmer_index.find_matches(sequence)
+
         # Filter candidates by Hamming distance
         matches = []
         for candidate in candidates:
             dist = self._hamming_distance(sequence, candidate)
-            #self.logger.info(f"{sequence} : {candidate} : {dist}")
             if dist <= max_mismatches:
                 matches.append(candidate)
         return matches
+
 
     def _hamming_distance(self, s1: str, s2: str) -> int:
         """
