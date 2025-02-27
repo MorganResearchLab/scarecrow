@@ -760,15 +760,7 @@ def extract_sequences(
         umi_index = None
         umi_range = None
 
-    # Create matcher
-    matcher = BarcodeMatcherOptimized(
-        barcode_files = barcode_files,
-        mismatches = mismatches,
-        base_quality_threshold = base_quality,
-        verbose = verbose
-    )
-       
-    # Process files with minimal overhead
+    # Set number of threads to use
     if threads is None:
         threads = min(mp.cpu_count() - 1, 8)
     else:
