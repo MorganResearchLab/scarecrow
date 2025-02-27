@@ -20,7 +20,7 @@ from functools import lru_cache
 from typing import List, Tuple, Optional, Dict
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
-from scarecrow.tools import generate_random_string, reverse_complement
+from scarecrow.tools import generate_random_string, reverse_complement, get_process_memory_usage
 from scarecrow.encode import BarcodeMatcherAhoCorasick
 
 
@@ -790,6 +790,10 @@ def extract_sequences(
                         file.write(chunk)
                 os.remove(fastq_file)
 
+    # Report memory usage before starting read processing
+    total_mb, total_gb = get_process_memory_usage()
+    logger.info(f"Total memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
+
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
          pysam.FastqFile(fastq_files[1]) as r2:
@@ -832,7 +836,8 @@ def extract_sequences(
                 files.append(outfile)
                 write_and_clear_results(entries, outfile)
 
-                logger.info(f"Processed {total_reads} reads")
+                total_mb, total_gb = get_process_memory_usage()
+                logger.info(f"Processed {total_reads} reads [memory usage: {total_mb:.2f} MB ({total_gb:.2f} GB)]")
 
     # Combine results
     logger.info(f"Combining results: {files} into '{output}'")

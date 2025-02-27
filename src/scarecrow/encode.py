@@ -342,7 +342,7 @@ def run_encode(barcodes: str = None,
         expected_barcodes = parse_seed_arguments([barcodes])
 
         # Generate Aho-Corasick Trie
-        pickle_file = f'{file_path}.trie.gz'
+        pickle_file = f'{file_path}.k{kmer_length}.trie.gz'
         if out_trie:
             if force_overwrite and os.path.exists(pickle_file):
                 logger.info(f"Removing existing file '{pickle_file}'")

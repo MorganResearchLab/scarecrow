@@ -7,6 +7,8 @@ import resource
 import gzip
 import logging
 import sys
+import os
+import psutil
 from functools import lru_cache
 from scarecrow.logger import log_errors
 import string, random
@@ -29,6 +31,28 @@ def get_memory_usage() -> float:
         float: Memory usage in MB
     """
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+def get_process_memory_usage():
+    # Get the current process
+    main_process = psutil.Process(os.getpid())
+    
+    # Get all child processes
+    child_processes = main_process.children(recursive=True)
+    
+    # Sum memory usage (RSS) of the main process and all child processes
+    total_rss = main_process.memory_info().rss  # Main process RSS
+    for child in child_processes:
+        try:
+            total_rss += child.memory_info().rss  # Add child process RSS
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            # Handle cases where the child process no longer exists or access is denied
+            pass
+    
+    # Convert to MB and GB
+    total_rss_mb = total_rss / (1024 ** 2)  # Convert to MB
+    total_rss_gb = total_rss / (1024 ** 3)  # Convert to GB
+    return total_rss_mb, total_rss_gb
+
 
 def count_fastq_reads(file):
     opener = gzip.open if file.endswith('.gz') else open
