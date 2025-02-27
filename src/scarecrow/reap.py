@@ -794,6 +794,7 @@ def extract_sequences(
                     while chunk := in_fastq.read(chunk_size):
                         file.write(chunk)
                 os.remove(fastq_file)
+        gc.collect()
 
     # Report memory usage before starting read processing
     total_mb, total_gb = get_process_memory_usage()
@@ -973,3 +974,6 @@ def worker_task(args):
         if verbose:
             logger.error(f"Error processing batch: {str(e)}", exc_info=True)
         raise
+
+    finally:
+        gc.collect()  # Force garbage collection after processing each batch
