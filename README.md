@@ -146,16 +146,17 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --out ./10X3p/barcode_positions.csv
 
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt)
-scarecrow encode --force_overwrite --barcodes ${BARCODE} --trie -k 8
+scarecrow encode --force_overwrite --barcodes ${BARCODE} --trie -k 6
 
 # Reap (Aho-Corasick approach)
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt.k8.trie.gz)
 time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
     -p ./10X3p/barcode_positions.csv \
     --barcodes ${BARCODE} --extract 2:1-90 --umi 1:17-28 \
-    --out ./10X3p/cDNA_k8 --threads 4
+    --out ./10X3p/cDNA_k8 --threads 1
 
-# kmer_length = 8
+# kmer_length = 8 (1m17.906s)
+
 
 
 scarecrow samstat --sam ./10X3p/cDNA_trie.sam

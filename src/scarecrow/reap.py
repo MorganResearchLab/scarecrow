@@ -503,7 +503,9 @@ def run_reap(fastqs: List[str],
     """
     Main function to extract sequences with barcode headers
     """    
-    logger = logging.getLogger('scarecrow')
+    logger = logging.getLogger('scarecrow')    
+    total_mb, total_gb = get_process_memory_usage()
+    logger.info(f"Current memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
 
     # Extract barcodes and convert whitelist to set
     barcode_files = parse_seed_arguments(barcodes)
@@ -511,6 +513,9 @@ def run_reap(fastqs: List[str],
         for whitelist, filename in barcode_files.items():
             logger.info(f"{whitelist}: {filename}")
 
+    total_mb, total_gb = get_process_memory_usage()
+    logger.info(f"Current memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
+    
     # Default output to SAM format if not specified
     if FASTQ is False and SAM is False:
         logger.info("Defaulting to SAM file output")
@@ -792,7 +797,7 @@ def extract_sequences(
 
     # Report memory usage before starting read processing
     total_mb, total_gb = get_process_memory_usage()
-    logger.info(f"Total memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
+    logger.info(f"Current memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
 
     logger.info(f"Processing reads")
     with pysam.FastqFile(fastq_files[0]) as r1, \
@@ -813,14 +818,20 @@ def extract_sequences(
                 yield batch
 
         # Prepare arguments for worker tasks
-        args_generator = (
-            (batch, barcode_configs, matcher, extract_range, extract_index,
-             umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
-            for batch in batch_generator(read_pairs, batch_size)
-        )
+        logger.info(f"Initializing workers")
+#        args_generator = (
+#            (batch, barcode_configs, matcher, extract_range, extract_index,
+#             umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
+#            for batch in batch_generator(read_pairs, batch_size)
+#        )
 
         # Use imap_unordered for parallel processing
-        with mp.Pool(threads) as pool:
+        with mp.Pool(threads, initializer = init_worker, initargs=(barcode_files, mismatches, base_quality, verbose)) as pool:
+            args_generator = (
+                (batch, barcode_configs, extract_range, extract_index,
+                 umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
+                 for batch in batch_generator(read_pairs, batch_size)
+                 )
             for result in pool.imap_unordered(worker_task, args_generator, chunksize=10):
                 entries, batch_count, batch_stats = result
 
@@ -929,12 +940,21 @@ def setup_worker_logger(log_file: str = None):
         logger.setLevel(logging.INFO)
     return logger
 
+def init_worker(barcode_files, mismatches, base_quality, verbose):
+    global matcher
+    matcher = BarcodeMatcherOptimized(
+        barcode_files=barcode_files,
+        mismatches=mismatches,
+        base_quality_threshold=base_quality,
+        verbose=verbose
+    )
+
 def worker_task(args):
     """Worker function that ensures logger is configured for the process."""
     logger = setup_worker_logger()
-    (batch, barcode_configs, matcher,
-     extract_range, extract_index,
-     umi_index, umi_range,
+    global matcher
+
+    (batch, barcode_configs, extract_range, extract_index, umi_index, umi_range,
      base_quality, jitter, FASTQ, SAM, verbose) = args
 
     stats = BarcodeStats()  # Create stats tracker for this batch
@@ -948,6 +968,7 @@ def worker_task(args):
         if verbose:
             logger.info(f"Processed batch of {count} reads")
         return entries, count, stats
+    
     except Exception as e:
         if verbose:
             logger.error(f"Error processing batch: {str(e)}", exc_info=True)
