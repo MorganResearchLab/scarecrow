@@ -8,7 +8,7 @@ import os
 import gzip
 import logging
 import pickle
-from ahocorasick import Automaton
+import random
 from argparse import RawTextHelpFormatter
 from itertools import combinations, product
 from collections import defaultdict
@@ -16,6 +16,42 @@ from typing import List, Dict, Set, Tuple
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
+
+class CompactTrieNode:
+    def __init__(self):
+        self.children = {}  # Key: byte, Value: index of child node
+        self.is_end = False  # Marks the end of a barcode
+
+class CompactTrie:
+    def __init__(self):
+        self.nodes = [CompactTrieNode()]  # Root node at index 0
+
+    def insert(self, sequence):
+        """Insert a sequence into the trie."""
+        node_index = 0  # Start at the root
+        for byte in sequence.encode('ascii'):  # Convert to bytes
+            node = self.nodes[node_index]
+            if byte not in node.children:
+                # Add a new node
+                new_node_index = len(self.nodes)
+                self.nodes.append(CompactTrieNode())
+                node.children[byte] = new_node_index
+            node_index = node.children[byte]
+        self.nodes[node_index].is_end = True  # Mark end of sequence
+
+    def find_matches(self, sequence):
+        """Find all matches in a sequence."""
+        matches = []
+        for i in range(len(sequence)):
+            node_index = 0  # Start at the root
+            for j in range(i, len(sequence)):
+                byte = sequence[j].encode('ascii')[0]  # Convert to byte
+                if byte not in self.nodes[node_index].children:
+                    break  # No match
+                node_index = self.nodes[node_index].children[byte]
+                if self.nodes[node_index].is_end:
+                    matches.append((i-1, j, sequence[i:j+1]))  # Match found
+        return matches
 
 class CompactKmerIndex:
     def __init__(self, k):
@@ -63,7 +99,7 @@ class BarcodeMatcher:
         self.barcode_sequences = barcode_sequences
         self.mismatches = mismatches
 
-class BarcodeMatcherAhoCorasick(BarcodeMatcher):
+class BarcodeMatcherTrie(BarcodeMatcher):
     def __init__(self, barcode_sequences: Dict[str, Set[str]], pickle_file: str = None, kmer_length: int = 4, jitter: int = 0, mismatches: int = 0):
         """
         Initialize Aho-Corasick based barcode matcher.
@@ -89,86 +125,125 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
     def _build_trie(self, barcode_sequences: Dict[str, Set[str]]):
         """
-        Constructs the Aho-Corasick trie from barcode sequences and their single-N mismatch variants.
+        Constructs the custom trie from barcode sequences
         """
         total_barcodes = sum(len(v) for v in barcode_sequences.values())
-        self.logger.info(f"Building Aho-Corasick trie for {total_barcodes} barcodes")
+        self.logger.info(f"Building custom trie for {total_barcodes} barcodes")
 
         for whitelist_key, sequences in barcode_sequences.items():
-            automaton = Automaton()
+            # Initialize a custom trie for this whitelist
+            custom_trie = CompactTrie()
+
+            # Insert all sequences into the custom trie
             for i, seq in enumerate(sequences, start=1):
                 if i % 1000000 == 0 or i == total_barcodes:
                     self.logger.info(f"Progress {100*(i/total_barcodes):.2f}%")
 
-                # Add the original sequence to the automaton
-                automaton.add_word(seq, (whitelist_key, seq, 0))
-                
-        automaton.make_automaton()
-        self.automata[str(whitelist_key)] = automaton
-        self.logger.info(f"Finished building trie for whitelist: '{whitelist_key}'")
+                # Add the original sequence to the custom trie
+                custom_trie.insert(seq)
+
+            # Store the custom trie in the automata dictionary
+            self.automata[str(whitelist_key)] = custom_trie
+            self.logger.info(f"Finished building custom trie for whitelist: '{whitelist_key}'")
         
     def _build_kmer_index(self, barcode_sequences: Dict[str, Set[str]]):
         """
-        Build a k-mer index for approximate matching.
+        Build a k-mer index for approximate matching using the CompactKmerIndex class.
         """
         self.logger.info(f"Building k-mer index for approximate matching using k-mer size {self.kmer_length}")
+
+        # Initialize the kmer_index as a dictionary to store k-mer indices per whitelist
+        self.kmer_index = {}
+
+        # Add barcodes to the k-mer index for each whitelist
         for whitelist_key, sequences in barcode_sequences.items():
-            kmer_index = defaultdict(set)
+            # Initialize a CompactKmerIndex for this whitelist
+            kmer_index = CompactKmerIndex(k = self.kmer_length)
+
+            # Add barcodes to the k-mer index
             for seq in sequences:
-                for i in range(len(seq) - self.kmer_length + 1):
-                    kmer = seq[i:i + self.kmer_length]
-                    kmer_index[kmer].add(seq)
+                kmer_index.add_barcode(seq)
+
+            # Store the k-mer index for this whitelist
             self.kmer_index[whitelist_key] = kmer_index
+
         self.logger.info("Finished building k-mer index")
 
     def _load_trie(self, pickle_file: str, mismatches: int):
         """
-        Loads a pre-built Aho-Corasick trie from a pickle file.
+        Loads a pre-built custom trie and k-mer index from a pickle file.
         """
-        #self.logger.info(f"Before loading, automata keys: {list(self.automata.keys())}")
-        self.logger.info(f"Loading Aho-Corasick trie from '{pickle_file}'")
+        self.logger.info(f"Loading custom trie and k-mer index from '{pickle_file}'")
         try:
-            # Load automata and k-mer index
+            # Load data from the pickle file
             with gzip.open(pickle_file, "rb") as f:
                 loaded_data = pickle.load(f)
 
-            # Extract the automaton object from the loaded data
-            automaton = loaded_data.get('automata', {})
-            whitelist_key = list(automaton.keys())[0]
-            self.automata[whitelist_key] = automaton[whitelist_key]
+            # Load the custom trie
+            self.automata = loaded_data.get('automata', {})
+            if not self.automata:
+                raise ValueError("No automata found in the pickle file.")
 
-            # Load k-mer index
+            # Load the k-mer index in a compact format
             kmer_index_data = loaded_data.get('kmer_index', {})
-            self.kmer_index = CompactKmerIndex(k=self.kmer_length)
-            for kmer_int, barcode_indices in kmer_index_data.items():
-                self.kmer_index.kmer_to_barcode_indices[kmer_int] = barcode_indices
-            self.kmer_index.barcodes = loaded_data.get('barcodes', [])
+            if not kmer_index_data:
+                raise ValueError("No k-mer index found in the pickle file.")
 
-            # Retrieve the k-mer length from the k-mer index
-            first_kmer = next(iter(self.kmer_index.kmer_to_barcode_indices[whitelist_key].keys()))
-            self.kmer_length = len(first_kmer)            
+            # Initialize the kmer_index as a dictionary to store k-mer indices per whitelist
+            self.kmer_index = {}
+
+            # Load the k-mer index for each whitelist
+            for whitelist_key, kmer_index_data_for_whitelist in kmer_index_data.items():
+                # Initialize the CompactKmerIndex with the correct k-mer length
+                self.kmer_length = kmer_index_data_for_whitelist.get('kmer_length')
+                kmer_index = CompactKmerIndex(k = self.kmer_length)
+
+                # Populate the k-mer index
+                for kmer_int, barcode_indices in kmer_index_data_for_whitelist.get('kmer_to_barcode_indices', {}).items():
+                    kmer_index.kmer_to_barcode_indices[kmer_int] = barcode_indices
+                kmer_index.barcodes = kmer_index_data_for_whitelist.get('barcodes', [])
+
+                # Store the k-mer index for this whitelist
+                self.kmer_index[whitelist_key] = kmer_index
 
             self.mismatches = mismatches
-            self.logger.info(f"Loaded automata for whitelists: {list(self.automata.keys())}")
-            self.logger.info(f"Loaded k-mer indices for whitelists: {list(self.kmer_index.kmer_to_barcode_indices.keys())}")
+            self.logger.info(f"Extracted custom trie(s) for whitelist(s): {list(self.automata.keys())}")
+            self.logger.info(f"Extracted k-mer indices for whitelist(s): {list(self.kmer_index.keys())}")
             self.logger.info(f"Retrieved k-mer length: {self.kmer_length}")
 
-        except:
-            self.logger.info(f"Error loading automata and k-mer index from {pickle_file}")
-            raise ImportError       
+        except Exception as e:
+            self.logger.error(f"Error loading custom trie and k-mer index from {pickle_file}: {str(e)}")
+            raise ImportError
 
     def _save_trie(self, pickle_file: str):
         """
-        Save the Aho-Corasick trie and k-mer index to a pickle file.
+        Save the custom trie and k-mer index to a pickle file.
         """
-        self.logger.info(f"Pickling and compressing Aho-Corasick trie and k-mer index to '{pickle_file}'")
-        data_to_save = {
-            'automata': self.automata,
-            'kmer_index': self.kmer_index
-        }
-        with gzip.open(pickle_file, "wb") as f:
-            pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
-        self.logger.info("Pickling complete")
+        self.logger.info(f"Pickling and compressing custom trie and k-mer index to '{pickle_file}'")
+        try:
+            # Prepare data to save
+            kmer_index_data = {}
+            for whitelist_key, kmer_index in self.kmer_index.items():
+                kmer_index_data[whitelist_key] = {
+                    'kmer_to_barcode_indices': kmer_index.kmer_to_barcode_indices,
+                    'barcodes': kmer_index.barcodes,
+                    'kmer_length': kmer_index.k  # Save the k-mer length
+                }
+
+            data_to_save = {
+                'automata': self.automata,
+                'kmer_index': kmer_index_data
+            }
+
+            # Save data to a compressed pickle file
+            with gzip.open(pickle_file, "wb") as f:
+                pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+            
+            self.logger.info("Pickling complete")
+
+        except Exception as e:
+            self.logger.error(f"Error saving custom trie and k-mer index to {pickle_file}: {str(e)}")
+            raise
 
     def _generate_query_variants(self, sequence: str, mismatches: int) -> List[str]:
         """
@@ -198,40 +273,20 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
         return list(variants)
 
-    def _search_with_n_mismatches(self, sequence: str, mismatches: int, orientation: str, automaton: Automaton) -> List[Dict]:
-        """
-        Searches for matches with up to 'n' mismatches by generating query variants
-        and checking them against the trie.
-        """
-        matches = []
-        query_variants = self._generate_query_variants(sequence, mismatches)
-        #self.logger.info(f"query variants: {query_variants}")
-        for variant in query_variants:
-            # Use the automaton's iter method to search for matches
-            for end_index, (whitelist_key, variant_seq, n) in automaton.iter(variant):                
-                start_index = end_index - len(variant_seq) + 1
-                #self.logger.info(f"-> variant_seq: {variant_seq} start_index: {start_index} end_index: {end_index} n: {n} mismatches: {mismatches}")
-                matches.append({
-                    'barcode': variant_seq,
-                    'whitelist': whitelist_key,
-                    'orientation': orientation,
-                    'start': start_index + 1,
-                    'end': end_index + 1,
-                    'mismatches': mismatches  # Since we're generating n-mismatch variants
-                })
-        return matches
-
     def _find_approximate_matches(self, sequence: str, whitelist_key: str, k: int = 4, max_mismatches: int = 1) -> List[str]:
         """
         Find approximate matches using the k-mer index.
         k = k-mer size
         """
-        if whitelist_key not in self.kmer_index.kmer_to_barcode_indices:
+        if whitelist_key not in self.kmer_index:
             self.logger.warning(f"No k-mer index found for whitelist: {whitelist_key}")
             return []
 
+        # Get the k-mer index for this whitelist
+        kmer_index = self.kmer_index[whitelist_key]
+
         # Find candidate barcodes using the k-mer index
-        candidates = self.kmer_index.find_matches(sequence)
+        candidates = kmer_index.find_matches(sequence)
 
         # Filter candidates by Hamming distance
         matches = []
@@ -240,7 +295,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             if dist <= max_mismatches:
                 matches.append(candidate)
         return matches
-
 
     def _hamming_distance(self, s1: str, s2: str) -> int:
         """
@@ -259,30 +313,27 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             self.logger.error(f"No automaton found for whitelist: {whitelist_key}")
             return matches
         
-        automaton = self.automata[whitelist_key]
+        # Use the custom trie for matching
+        trie = self.automata[whitelist_key]
         exact_match = False
 
         # Iterate over possible sequences and their start positions
         for seq, start_pos in sequence:
-            #self.logger.info(f"-> seq {seq} start_pos: {start_pos}")
-
-            # Reverse complement sequence if required
             if orientation == 'reverse':
                 seq = reverse_complement(seq)
 
-            # Check for exact matches in the automaton
-            for end_index, (wl_key, original_seq, mismatches) in automaton.iter(seq):
-                match_start = start_pos + (end_index - len(original_seq)) 
-                match_dist = abs((match_start + 1) - original_start)
-                #self.logger.info(f"match_start: {match_start} start_pos: {original_start} match_dist: {match_dist}")
+            # Find matches in the custom trie
+            trie_matches = trie.find_matches(seq)
+            for match_start, match_end, matched_seq in trie_matches:
+                match_dist = abs((start_pos + match_start) - original_start)
                 matches.append({
-                    'barcode': original_seq,
-                    'whitelist': wl_key,
+                    'barcode': matched_seq,
+                    'whitelist': whitelist_key,
                     'orientation': orientation,
-                    'start': match_start + 1, 
-                    'end': match_start + len(original_seq), # this was - 1 but removed to get correct end for seed
-                    'mismatches': mismatches,
-                    'distance': match_dist  
+                    'start': start_pos + match_start + 1,
+                    'end': start_pos + match_end,
+                    'mismatches': 0,  # Exact match
+                    'distance': match_dist
                 })
                 exact_match = True
             #if matches:
@@ -375,29 +426,140 @@ def run_encode(barcodes: str = None,
     Function to encode whitelist in a format suitable for efficient barcode matching
     """
     logger = logging.getLogger('scarecrow')    
-    
+
     # Parse barcode whitelists
     key, label, file_path = barcodes.split(':')
     logger.info(f"Parsing '{key}' '{label}' in {file_path}")
     if os.path.exists(file_path):
         expected_barcodes = parse_seed_arguments([barcodes])
 
-        # Generate Aho-Corasick Trie
+        # Generate custom trie and kmer index
         pickle_file = f'{file_path}.k{kmer_length}.trie.gz'
         if out_trie:
             if force_overwrite and os.path.exists(pickle_file):
                 logger.info(f"Removing existing file '{pickle_file}'")
                 os.remove(pickle_file)
 
-            matcher = BarcodeMatcherAhoCorasick(
+            matcher = BarcodeMatcherTrie(
                     barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
                     pickle_file = pickle_file,
                     kmer_length = kmer_length
                 )
     else:
         logger.info(f"{file_path} not found")
+
+    if matcher:
+        # Print a manageable subset of the structure
+        output_trie_and_kmer_index(matcher, max_depth=matcher.kmer_length, sample_size=5, max_barcodes=2)
     
     logger.info("Finished!")
+
+
+def output_trie(trie, max_depth=3, max_children=5,  num_base_nodes=3):
+    """
+    Print the structure of the trie up to a specified depth, summarizing large subtrees.
+    """
+    if not trie:
+        print("Trie is empty.")
+        return
+    
+    _output_trie_node(trie, 0, "", max_depth, depth=0)
+
+
+def _output_trie_node(trie, node_index, prefix, max_depth, depth):
+    """
+    Recursively print a node in the trie, following a single path to the last level.
+    """
+    node = trie.nodes[node_index]
+    byte_value = chr(list(node.children.keys())[0]) if node.children else "End"
+    print(prefix + "└── " + f"{byte_value} (depth {depth})")
+
+    # Stop if we've reached the penultimate level
+    if depth >= max_depth - 1:
+        # Print all nodes at the penultimate level
+        children = list(node.children.items())
+        if children:
+            for byte, child_index in children:
+                child_node = trie.nodes[child_index]
+                child_byte_value = chr(list(child_node.children.keys())[0]) if child_node.children else "End"
+                print(prefix + "    └── " + f"{child_byte_value} (depth {depth + 1})")
+        return
+
+    # Update the prefix for child nodes
+    new_prefix = prefix + "    "
+
+    # Print children, following a single path
+    children = list(node.children.items())
+    if children:
+        # Follow the first child
+        first_child_byte, first_child_index = children[0]
+        _output_trie_node(trie, first_child_index, new_prefix, max_depth, depth + 1)
+
+        # Print the number of unprinted children
+        if len(children) > 1:
+            print(new_prefix + f"├── ... ({len(children) - 1} more children)")
+
+def output_kmer_index(kmer_indices, sample_size=10, max_barcodes=3):
+    """
+    Print a random sample of k-mers and their associated barcodes for each whitelist,
+    limiting the number of barcodes displayed.
+    """
+    if not kmer_indices:
+        print("K-mer index is empty.")
+        return
+
+    for whitelist_key, kmer_index in kmer_indices.items():
+        print(f"K-mer Index for Whitelist: {whitelist_key}")
+        print(f"Random sample of {sample_size} k-mers (max {max_barcodes} barcodes per k-mer):")
+
+        if not kmer_index.kmer_to_barcode_indices:
+            print("  No k-mers found for this whitelist.")
+            continue
+
+        # Get a random sample of k-mers
+        kmer_samples = random.sample(
+            list(kmer_index.kmer_to_barcode_indices.items()),
+            min(sample_size, len(kmer_index.kmer_to_barcode_indices))
+        )
+
+        for kmer_int, barcode_indices in kmer_samples:
+            # Decode the k-mer integer back to a string
+            kmer = int_to_kmer(kmer_int, kmer_index.k)
+            barcodes = [kmer_index.barcodes[idx] for idx in barcode_indices[:max_barcodes]]
+            if len(barcode_indices) > max_barcodes:
+                barcodes.append(f"... ({len(barcode_indices) - max_barcodes} more)")
+            print(f"  K-mer: {kmer} -> Barcodes: {barcodes}")
+        print()
+
+def int_to_kmer(kmer_int, k):
+    """
+    Convert an integer-encoded k-mer back to a string.
+    """
+    encoding = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
+    kmer = []
+    for _ in range(k):
+        kmer.append(encoding[kmer_int & 0b11])
+        kmer_int >>= 2
+    return ''.join(reversed(kmer))
+
+def output_trie_and_kmer_index(matcher, max_depth=3, max_children=5, num_base_nodes=3, sample_size=10, max_barcodes=3):
+    """
+    Print a manageable subset of the trie and k-mer index structure.
+    """
+    print("")
+    for whitelist_key, trie in matcher.automata.items():
+        print(f"Whitelist: {whitelist_key}")
+        print("Trie Structure (single path to last level):")
+        output_trie(trie, max_depth=max_depth)
+        print()
+
+    # Print k-mer indices for each whitelist
+    if hasattr(matcher, 'kmer_index') and matcher.kmer_index:
+        output_kmer_index(matcher.kmer_index, sample_size=sample_size, max_barcodes=max_barcodes)
+    else:
+        print("No k-mer index found.")
+
+    print("")
 
 def setup_worker_logger(log_file: str = None):
     """Configure logger for worker processes with file output"""
@@ -419,3 +581,4 @@ def setup_worker_logger(log_file: str = None):
         
         logger.setLevel(logging.INFO)
     return logger   
+

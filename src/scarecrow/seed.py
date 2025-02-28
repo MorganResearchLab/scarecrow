@@ -8,7 +8,6 @@ import os
 import pysam
 import logging
 import random
-from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from collections import defaultdict
 from functools import lru_cache
@@ -16,7 +15,7 @@ from typing import List, Dict, Set, Tuple
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
-from scarecrow.encode import BarcodeMatcherAhoCorasick
+from scarecrow.encode import BarcodeMatcherTrie
 
 class BarcodeMatcher:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 0):
@@ -432,7 +431,7 @@ def run_seed(
 
     # Initialize matcher based on the chosen method
     if trie:
-        matcher = BarcodeMatcherAhoCorasick(
+        matcher = BarcodeMatcherTrie(
             barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
             pickle_file = trie,
             kmer_length = kmer_length,

@@ -3,6 +3,7 @@
 # scarecrow docs
 * [Installation](installation.md)
 * [Introduction](introduction.md)
+* [Troubleshooting](troubleshooting.md)
 * Toolkit
     * [`encode`](toolkit_encode.md)
     * [`harvest`](toolkit_harvest.md)
