@@ -8,26 +8,30 @@ import os
 import gzip
 import logging
 import pickle
+import numpy as np
 from ahocorasick import Automaton
 from argparse import RawTextHelpFormatter
 from itertools import combinations, product
 from collections import defaultdict
+from pympler import asizeof
 from typing import List, Dict, Set, Tuple
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
 
 class CompactKmerIndex:
-    def __init__(self, k):
-        self.k = k
+    def __init__(self, k: int):
+        self.k = k  # k-mer size
         self.barcodes = []  # List to store unique barcodes
-        self.kmer_to_barcode_indices = {}  # Key: integer-encoded k-mer, Value: list of indices in self.barcodes
+        self.kmer_to_barcode_indices = {}  # Temporary dictionary for fast lookups during build
+        self.kmer_array = None  # Will store k-mers as a numpy array after finalization
+        self.barcode_indices = None  # Will store barcode indices as a numpy array after finalization
 
-    def add_barcode(self, barcode):
+    def add_barcode(self, barcode: str):
         """Add a barcode to the index."""
         barcode_index = len(self.barcodes)
         self.barcodes.append(barcode)
-        
+
         # Add all k-mers in the barcode to the index
         for i in range(len(barcode) - self.k + 1):
             kmer = barcode[i:i + self.k]
@@ -36,24 +40,56 @@ class CompactKmerIndex:
                 self.kmer_to_barcode_indices[kmer_int] = []
             self.kmer_to_barcode_indices[kmer_int].append(barcode_index)
 
-    def _kmer_to_int(self, kmer):
-        """Convert a k-mer to an integer."""
-        encoding = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
+    def finalize(self):
+        """
+        Convert the temporary dictionary to numpy arrays for memory efficiency.
+        This should be called after all barcodes have been added.
+        """
+        # Convert k-mer dictionary to numpy arrays
+        self.kmer_array = np.array(list(self.kmer_to_barcode_indices.keys()), dtype=np.uint16)
+        self.barcode_indices = np.array(list(self.kmer_to_barcode_indices.values()), dtype=object)
+
+        # Free the temporary dictionary
+        del self.kmer_to_barcode_indices
+
+    def _kmer_to_int(self, kmer: str) -> int:
+        """Convert a k-mer to an integer using 2 bits per nucleotide."""
+        encoding = {'A': 0b00, 'C': 0b01, 'G': 0b10, 'T': 0b11}
         result = 0
         for base in kmer:
             result = (result << 2) | encoding.get(base, 0)  # Default to 0 for unknown bases
         return result
 
-    def find_matches(self, sequence):
-        """Find approximate matches for a sequence using the k-mer index."""
+    def find_matches(self, sequence: str, max_mismatches: int = 1) -> Set[str]:
+        """
+        Find approximate matches for a sequence using the k-mer index.
+        """
         matches = set()
-        for i in range(len(sequence) - self.k + 1):
-            kmer = sequence[i:i + self.k]
-            kmer_int = self._kmer_to_int(kmer)
-            if kmer_int in self.kmer_to_barcode_indices:
-                for barcode_index in self.kmer_to_barcode_indices[kmer_int]:
-                    matches.add(self.barcodes[barcode_index])
+        sequence_length = len(sequence)
+
+        # Encode the entire sequence into a bit representation
+        sequence_int = self._kmer_to_int(sequence)
+
+        # Iterate through all k-mers in the sequence
+        for i in range(sequence_length - self.k + 1):
+            # Extract the k-mer from the sequence
+            kmer_int = (sequence_int >> (2 * (sequence_length - self.k - i))) & ((1 << (2 * self.k)) - 1)
+
+            # Find candidate barcodes using the k-mer index
+            if kmer_int in self.kmer_array:
+                idx = np.where(self.kmer_array == kmer_int)[0][0]
+                for barcode_index in self.barcode_indices[idx]:
+                    barcode = self.barcodes[barcode_index]
+                    # Calculate Hamming distance between the sequence and the barcode
+                    if self._hamming_distance(sequence, barcode) <= max_mismatches:
+                        matches.add(barcode)
         return matches
+
+    def _hamming_distance(self, s1: str, s2: str) -> int:
+        """
+        Calculate the Hamming distance between two sequences.
+        """
+        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
     
 class BarcodeMatcher:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], pickle_file: str = None, mismatches: int = 0):
@@ -74,7 +110,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             self.automata = {}
 
         self.barcode_info = {}
-        self.kmer_index = {}  # k-mer index for approximate matching
+        self.kmer_index = {} 
         self.kmer_length = kmer_length
         self.jitter = jitter
         self.logger = setup_worker_logger()
@@ -84,8 +120,36 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
         else:
             self._build_trie(barcode_sequences)
-            self._build_kmer_index(barcode_sequences)  # Build k-mer index for approximate matching
+            self._build_kmer_index(barcode_sequences)
             self._save_trie(pickle_file)
+        
+        self.report_memory_usage()
+
+    def report_memory_usage(self):
+        """
+        Report the memory usage of the trie and k-mer index using pympler.asizeof.
+        This method is called from `self` and has access to all class attributes.
+        """
+        trie_memory = 0
+        kmer_index_memory = 0
+
+        # Calculate memory usage of the trie
+        for whitelist_key, trie in self.automata.items():
+            trie_memory += asizeof.asizeof(trie)
+
+        # Calculate memory usage of the k-mer index
+        if hasattr(self, 'kmer_index') and self.kmer_index:
+            for whitelist_key, kmer_index in self.kmer_index.items():
+                # Memory usage of kmer_array
+                kmer_index_memory += asizeof.asizeof(kmer_index.kmer_array)
+                # Memory usage of barcode_indices
+                kmer_index_memory += asizeof.asizeof(kmer_index.barcode_indices)
+                # Memory usage of barcodes
+                kmer_index_memory += asizeof.asizeof(kmer_index.barcodes)
+
+        # Print memory usage
+        self.logger.info(f"Trie memory usage: {trie_memory / 1024 / 1024:.2f} MB")
+        self.logger.info(f"K-mer index memory usage: {kmer_index_memory / 1024 / 1024:.2f} MB")
 
     def _build_trie(self, barcode_sequences: Dict[str, Set[str]]):
         """
@@ -100,8 +164,10 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                 if i % 1000000 == 0 or i == total_barcodes:
                     self.logger.info(f"Progress {100*(i/total_barcodes):.2f}%")
 
-                # Add the original sequence to the automaton
-                automaton.add_word(seq, (whitelist_key, seq, 0))
+                # Encode the sequence into a compact string
+                encoded_seq = encode_dna_to_compact_string(seq)
+                # Add the encoded sequence to the automaton
+                automaton.add_word(encoded_seq, (whitelist_key, seq, 0))
                 
         automaton.make_automaton()
         self.automata[str(whitelist_key)] = automaton
@@ -113,11 +179,10 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         """
         self.logger.info(f"Building k-mer index for approximate matching using k-mer size {self.kmer_length}")
         for whitelist_key, sequences in barcode_sequences.items():
-            kmer_index = defaultdict(set)
+            kmer_index = CompactKmerIndex(k=self.kmer_length)
             for seq in sequences:
-                for i in range(len(seq) - self.kmer_length + 1):
-                    kmer = seq[i:i + self.kmer_length]
-                    kmer_index[kmer].add(seq)
+                kmer_index.add_barcode(seq)
+            kmer_index.finalize()  # Convert to numpy arrays after all barcodes are added
             self.kmer_index[whitelist_key] = kmer_index
         self.logger.info("Finished building k-mer index")
 
@@ -137,20 +202,19 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             whitelist_key = list(automaton.keys())[0]
             self.automata[whitelist_key] = automaton[whitelist_key]
 
-            # Extract k-mer index and convert to compact format
+            # Load k-mer index
+            self.kmer_length = loaded_data.get('kmer_length', {})
             kmer_index_data = loaded_data.get('kmer_index', {})
-            self.kmer_index = CompactKmerIndex(k=self.kmer_length)
-            for kmer_int, barcode_indices in kmer_index_data.items():
-                self.kmer_index.kmer_to_barcode_indices[kmer_int] = barcode_indices
-            self.kmer_index.barcodes = loaded_data.get('barcodes', [])
-
-            # Retrieve the k-mer length from the k-mer index
-            first_kmer = next(iter(self.kmer_index.kmer_to_barcode_indices[whitelist_key].keys()))
-            self.kmer_length = len(first_kmer)            
+            for whitelist_key, kmer_index_data in kmer_index_data.items():
+                kmer_index = CompactKmerIndex(k=self.kmer_length)
+                kmer_index.barcodes = kmer_index_data.get('barcodes', [])
+                kmer_index.kmer_array = np.array(kmer_index_data.get('kmer_array', []), dtype=np.uint16)
+                kmer_index.barcode_indices = kmer_index_data.get('barcode_indices', [])  # Already a list of lists
+                self.kmer_index[whitelist_key] = kmer_index
 
             self.mismatches = mismatches
-            self.logger.info(f"Loaded automata for whitelists: {list(self.automata.keys())}")
-            self.logger.info(f"Loaded k-mer indices for whitelists: {list(self.kmer_index.kmer_to_barcode_indices.keys())}")
+            self.logger.info(f"Loaded Aho-Corasick trie for whitelists: {list(self.automata.keys())}")
+            self.logger.info(f"Loaded k-mer indices for whitelists: {list(self.kmer_index.keys())}")
             self.logger.info(f"Retrieved k-mer length: {self.kmer_length}")
 
         except:
@@ -164,11 +228,52 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         self.logger.info(f"Pickling and compressing Aho-Corasick trie and k-mer index to '{pickle_file}'")
         data_to_save = {
             'automata': self.automata,
-            'kmer_index': self.kmer_index
+            'kmer_index': {
+                whitelist_key: {
+                    'barcodes': kmer_index.barcodes,
+                    'kmer_array': kmer_index.kmer_array.tolist(),  # Convert numpy array to list
+                    'barcode_indices': kmer_index.barcode_indices  # Already a list of lists
+                }
+                for whitelist_key, kmer_index in self.kmer_index.items()
+            },
+            'kmer_length': self.kmer_length
         }
         with gzip.open(pickle_file, "wb") as f:
             pickle.dump(data_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
         self.logger.info("Pickling complete")
+
+    def output_kmer_index_details(self, num_keys=5, num_values=2):
+        """
+        Output details about the k-mer index for the first whitelist.
+        """
+        if not self.kmer_index:
+            self.logger.info("K-mer index is empty.")
+            return
+
+        # Get the first whitelist and its k-mer index
+        first_whitelist_key = next(iter(self.kmer_index))
+        kmer_index = self.kmer_index[first_whitelist_key]
+
+        self.logger.info(f"\nK-mer Index Details for Whitelist: '{first_whitelist_key}'")
+        self.logger.info(f"Total number of k-mers: {len(kmer_index.kmer_array)}")
+        self.logger.info(f"Total number of whitelists: {len(self.kmer_index)}")
+
+        # Output the first few k-mers and their values
+        for i in range(min(num_keys, len(kmer_index.kmer_array))):
+            kmer_int = kmer_index.kmer_array[i]
+            barcode_indices = kmer_index.barcode_indices[i]
+
+            # Decode the k-mer integer back to a string
+            kmer = int_to_kmer(kmer_int, kmer_index.k)
+
+            # Get the first few barcodes
+            barcodes = [kmer_index.barcodes[idx] for idx in barcode_indices[:num_values]]
+            total_values = len(barcode_indices)
+
+            # Log the k-mer, first few barcodes, and total count of barcodes
+            self.logger.info(f"  K-mer: {kmer}")
+            self.logger.info(f"    First {num_values} barcodes: {barcodes}")
+            self.logger.info(f"    Total barcodes: {total_values}")
 
     def _generate_query_variants(self, sequence: str, mismatches: int) -> List[str]:
         """
@@ -226,32 +331,28 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         Find approximate matches using the k-mer index.
         k = k-mer size
         """
-        if whitelist_key not in self.kmer_index.kmer_to_barcode_indices:
+        if whitelist_key not in self.kmer_index:
             self.logger.warning(f"No k-mer index found for whitelist: {whitelist_key}")
             return []
 
+        # Get the CompactKmerIndex instance for the given whitelist_key
+        kmer_index = self.kmer_index[whitelist_key]
+
         # Find candidate barcodes using the k-mer index
-        candidates = self.kmer_index.find_matches(sequence)
+        candidates = kmer_index.find_matches(sequence)
 
         # Filter candidates by Hamming distance
         matches = []
         for candidate in candidates:
-            dist = self._hamming_distance(sequence, candidate)
+            dist = hamming_distance(sequence, candidate)
             if dist <= max_mismatches:
                 matches.append(candidate)
         return matches
 
-
-    def _hamming_distance(self, s1: str, s2: str) -> int:
-        """
-        Calculate the Hamming distance between two sequences.
-        """
-        return sum(c1 != c2 for c1, c2 in zip(s1, s2))
-
     def find_matches(self, sequence: List[tuple[str,int]], whitelist_key: str, orientation: str, original_start: int) -> List[Dict]:
         """
         Find all matching barcodes in a sequence using Aho-Corasick.
-        If no exact match is found, searches for matches with up to 'n' mismatches.
+        If no exact match is found, searches for approximate matches up to 'n' mismatches.
         """
         matches = []
 
@@ -270,8 +371,11 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             if orientation == 'reverse':
                 seq = reverse_complement(seq)
 
+            # Encode the sequence into a compact string
+            encoded_seq = encode_dna_to_compact_string(seq)
+
             # Check for exact matches in the automaton
-            for end_index, (wl_key, original_seq, mismatches) in automaton.iter(seq):
+            for end_index, (wl_key, original_seq, mismatches) in automaton.iter(encoded_seq):
                 match_start = start_pos + (end_index - len(original_seq)) 
                 match_dist = abs((match_start + 1) - original_start)
                 #self.logger.info(f"match_start: {match_start} start_pos: {original_start} match_dist: {match_dist}")
@@ -296,7 +400,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                 for match in approximate_matches:
                     match_start = start_pos
                     match_dist = abs(match_start - original_start)
-                    match_mismatches = self._hamming_distance(seq, match)
+                    match_mismatches = hamming_distance(seq, match)
                     matches.append({
                         'barcode': match,
                         'whitelist': whitelist_key,
@@ -378,7 +482,7 @@ def run_encode(barcodes: str = None,
     
     # Parse barcode whitelists
     key, label, file_path = barcodes.split(':')
-    logger.info(f"Parsing '{key}' '{label}' in {file_path}")
+    logger.info(f"Parsing '{key}' '{label}' in '{file_path}'")
     if os.path.exists(file_path):
         expected_barcodes = parse_seed_arguments([barcodes])
 
@@ -397,7 +501,39 @@ def run_encode(barcodes: str = None,
     else:
         logger.info(f"{file_path} not found")
     
+    if matcher:
+        # Output k-mer index
+        matcher.output_kmer_index_details(num_keys=1, num_values=3)
+
+
     logger.info("Finished!")
+
+def int_to_kmer(kmer_int, k):
+    """
+    Convert an integer-encoded k-mer back to a string.
+    """
+    encoding = {0: 'A', 1: 'C', 2: 'G', 3: 'T'}
+    kmer = []
+    for _ in range(k):
+        kmer.append(encoding[kmer_int & 0b11])  # Extract the last 2 bits
+        kmer_int >>= 2  # Shift right by 2 bits
+    return ''.join(reversed(kmer))
+
+def hamming_distance(s1, s2):
+    """
+    Calculate the Hamming distance between two sequences.
+    """
+    return sum(c1 != c2 for c1, c2 in zip(s1, s2))
+
+def encode_dna_to_compact_string(sequence):
+    """
+    Encodes a DNA sequence into a compact string representation using 2 bits per nucleotide.
+    """
+    nucleotide_to_char = {'A': '0', 'C': '1', 'G': '2', 'T': '3'}
+    encoded = []
+    for nucleotide in sequence:
+        encoded.append(nucleotide_to_char.get(nucleotide, '0'))  # Default to '0' for unknown bases
+    return ''.join(encoded)
 
 def setup_worker_logger(log_file: str = None):
     """Configure logger for worker processes with file output"""
@@ -419,3 +555,6 @@ def setup_worker_logger(log_file: str = None):
         
         logger.setLevel(logging.INFO)
     return logger   
+
+
+

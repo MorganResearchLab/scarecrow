@@ -25,6 +25,9 @@ A toolkit for preprocessing single cell sequencing data.
 * Added functionality to reap.py _get_sequence_with_jitter to tackle potentially clipped barcodes starting at position 1
 *   - this is not applied to the trie method currently
 
+* Compact trie not as efficient as ahocorasick trie so reinstate the previous method
+*   - retain the structure outputs and the memory usage
+*   - will need to check if code needs refactoring for this
 
 # Testing on laptop (WTv2)
 ```bash
@@ -121,17 +124,18 @@ scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.
 
 # Testing on laptop (10X3p)
 ```bash
-R1=./10X3p/SRR28867562_3.1M.fastq.gz
-R2=./10X3p/SRR28867562_4.1M.fastq.gz
+R1=./10X3p/SRR28867562_3.fastq
+R2=./10X3p/SRR28867562_4.fastq
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt)
 
-# Generate custom trie for use with scarecrow seed (3m30s)
+# Generate custom trie and kmer index for use with scarecrow seed
 time scarecrow encode --force_overwrite --barcodes ${BARCODE} --trie -k 8
+time scarecrow encode --barcodes ${BARCODE} --trie -k 8
 
 # Seed using trie
 time scarecrow seed --fastqs ${R1} ${R2} \
     -o ./10X3p/barcodes_${BARCODE%:*:*}.csv \
-    --barcodes ${BARCODE} -n 0 -u 0 -k 8 \
+    --barcodes ${BARCODE} -n 0 -u 0 \
     --trie ./10X3p/3M-february-2018.txt.k8.trie.gz
 
 # Harvest (trie and kmer index approach)
@@ -145,7 +149,8 @@ BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt.k8.trie.gz)
 time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
     -p ./10X3p/barcode_positions.csv \
     --barcodes ${BARCODE} --extract 2:1-90 --umi 1:17-28 \
-    --out ./10X3p/cDNA_k8 --threads 1 &> debug.log
+    --out ./10X3p/cDNA_k8 --threads 2
+
 
 
 

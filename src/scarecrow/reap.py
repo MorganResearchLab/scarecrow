@@ -21,8 +21,7 @@ from typing import List, Tuple, Optional, Dict
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, get_process_memory_usage
-from scarecrow.encode import BarcodeMatcherTrie
-
+from scarecrow.encode import BarcodeMatcherAhoCorasick
 
 class BarcodeMatcherOptimized:
     def __init__(self, barcode_files: Dict[str, str], mismatches: int = 0, base_quality_threshold: int = None, verbose: bool = False):
@@ -77,7 +76,7 @@ class BarcodeMatcherOptimized:
                 # Initialize the trie matcher only once
                 if self.trie_matcher is None:
                     if os.path.exists(file):
-                        self.trie_matcher = BarcodeMatcherTrie(barcode_sequences = {}, pickle_file = file, mismatches = mismatches)
+                        self.trie_matcher = BarcodeMatcherAhoCorasick(barcode_sequences = {}, pickle_file = file, mismatches = mismatches)
                     else:
                         raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
                 else:

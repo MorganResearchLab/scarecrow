@@ -15,7 +15,7 @@ from typing import List, Dict, Set, Tuple
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
-from scarecrow.encode import BarcodeMatcherTrie
+from scarecrow.encode import BarcodeMatcherAhoCorasick
 
 class BarcodeMatcher:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 0):
@@ -285,9 +285,9 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
     subparser.add_argument(
         "-k", "--kmer_length",
         metavar="<int>",
-        help=("K-mer length for building k-mer index for approximate matching [4]"),
+        help=("K-mer length for building k-mer index for approximate matching"),
         type=int,
-        default=4,
+        default=None,
     )
     subparser.add_argument(
         "-b", "--batch_size",
@@ -412,7 +412,7 @@ def run_seed(
     upper_read_count: int = 10000000,
     barcodes: List[str] = None,
     trie: str = None,
-    kmer_length: int = 4,
+    kmer_length: int = None,
     output_file: str = None,
     batches: int = 10000,
     linker_base_frequency: float = 0.75,
@@ -431,7 +431,7 @@ def run_seed(
 
     # Initialize matcher based on the chosen method
     if trie:
-        matcher = BarcodeMatcherTrie(
+        matcher = BarcodeMatcherAhoCorasick(
             barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
             pickle_file = trie,
             kmer_length = kmer_length,
