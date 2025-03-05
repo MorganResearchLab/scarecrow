@@ -37,6 +37,7 @@ class BarcodeMatcherOptimized:
         self.verbose = verbose
         self.trie_matcher = None
         self.logger = setup_worker_logger()
+        self.logger.info("Initializing BarcodeMatcher")
 
         # Load and process barcode data from text files
         for whitelist, file in barcode_files.items():            
@@ -78,6 +79,7 @@ class BarcodeMatcherOptimized:
                 if self.trie_matcher is None:
                     if os.path.exists(file):
                         self.trie_matcher = BarcodeMatcherAhoCorasick(barcode_sequences = {}, pickle_file = file, mismatches = mismatches)
+                        self.logger.info(f"Imported pickle for worker")
                     else:
                         raise FileNotFoundError(f"Barcode whitelist file not found: {file}")
                 else:
@@ -910,47 +912,52 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
     """
     Worker function that processes batches from the queue.
     """
-    barcode_configs, extract_range, extract_index, umi_index, umi_range, base_quality, jitter, mismatches, FASTQ, SAM, verbose = constant_args
-    matcher = BarcodeMatcherOptimized(
-        barcode_files = barcode_files,
-        mismatches = mismatches,
-        base_quality_threshold = base_quality,
-        verbose = verbose
-    )
+    try:
+        barcode_configs, extract_range, extract_index, umi_index, umi_range, base_quality, jitter, mismatches, FASTQ, SAM, verbose = constant_args
+        matcher = BarcodeMatcherOptimized(
+            barcode_files = barcode_files,
+            mismatches = mismatches,
+            base_quality_threshold = base_quality,
+            verbose = verbose
+        )
 
-    stats = BarcodeStats()  # Create a stats object for this worker
-    logger = setup_worker_logger()  # Ensure the logger is set up
-    batch_count = 0  # Track the number of batches processed
-    read_count = 0
+        stats = BarcodeStats()  # Create a stats object for this worker
+        logger = setup_worker_logger()  # Ensure the logger is set up
+        batch_count = 0  # Track the number of batches processed
+        read_count = 0
 
-    with open(output_file, 'a') as outfile:
-        while True:
-            batch = queue.get()
-            if batch is None:  # Sentinel value to stop the worker
-                break
+        with open(output_file, 'a') as outfile:
+            while True:
+                batch = queue.get()
+                if batch is None:  # Sentinel value to stop the worker
+                    break
 
-            # Process batch
-            entries, count, batch_stats = process_read_batch(
-                batch, barcode_configs, matcher,
-                extract_range, extract_index, umi_index, umi_range,
-                stats, base_quality, jitter, FASTQ, SAM, verbose
-            )
-            outfile.writelines(entries)
-            #logger.info(f"Worker wrote {len(entries)} lines to {output_file}")
-            batch_count += 1
-            read_count += count
+                # Process batch
+                entries, count, batch_stats = process_read_batch(
+                    batch, barcode_configs, matcher,
+                    extract_range, extract_index, umi_index, umi_range,
+                    stats, base_quality, jitter, FASTQ, SAM, verbose
+                )
+                outfile.writelines(entries)
+                #logger.info(f"Worker wrote {len(entries)} lines to {output_file}")
+                batch_count += 1
+                read_count += count
 
-            # Log memory usage after processing each batch
-            if batch_count % 10 == 0:  # Log every 10 batches
-                total_mb, total_gb = get_process_memory_usage()
-                logger.info(f"Worker memory usage after {read_count} reads: {total_mb:.2f} MB ({total_gb:.2f} GB)")
-    
-    # Log final memory usage
-    total_mb, total_gb = get_process_memory_usage()
-    logger.info(f"Final worker memory usage: {total_mb:.2f} MB ({total_gb:.2f} GB)")
+                # Log memory usage after processing each batch
+                if batch_count % 10 == 0:  # Log every 10 batches
+                    total_mb, total_gb = get_process_memory_usage()
+                    logger.info(f"Worker memory usage after {read_count} reads: {total_mb:.2f} MB ({total_gb:.2f} GB)")
+        
+        # Log final memory usage
+        total_mb, total_gb = get_process_memory_usage()
+        logger.info(f"Final worker memory usage: {total_mb:.2f} MB ({total_gb:.2f} GB)")
 
-    # Put the stats object into the stats_queue
-    stats_queue.put(stats)
+        # Put the stats object into the stats_queue
+        stats_queue.put(stats)
+    except Exception as e:
+        logger.error(f"Worker failed with error: {str(e)}", exc_info=True)
+        raise
+
 
 @log_errors
 def combine_worker_outputs(output, num_workers):
