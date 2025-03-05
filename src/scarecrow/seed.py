@@ -9,13 +9,16 @@ import pysam
 import logging
 import random
 from argparse import RawTextHelpFormatter
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from functools import lru_cache
 from typing import List, Dict, Set, Tuple
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, parse_seed_arguments
 from scarecrow.encode import BarcodeMatcherAhoCorasick
+
+# Define a namedtuple for match results
+MatchResult = namedtuple('MatchResult', ['barcode', 'whitelist', 'orientation', 'start', 'end', 'mismatches', 'distance'])
 
 class BarcodeMatcher:
     def __init__(self, barcode_sequences: Dict[str, Set[str]], mismatches: int = 0):
@@ -25,7 +28,7 @@ class BarcodeMatcher:
         self.mismatches = mismatches
         self.barcode_sequences = barcode_sequences
 
-    def find_matches(self, sequence: str) -> List[Dict]:
+    def find_matches(self, sequence: str) -> List[MatchResult]:
         """
         Find all matching barcodes in a sequence.
         To be implemented by subclasses.
@@ -93,16 +96,17 @@ class BarcodeMatcherOptimized(BarcodeMatcher):
                 # Check for matches
                 match = self._check_match(candidate, matcher)
                 if match:
-                    matches.append({
-                        'barcode': match[0],
-                        'whitelist': whitelist_key,
-                        'orientation': orientation,
-                        'start': start + 1,  # 1-based position
-                        'end': start + barcode_len,
-                        'mismatches': match[1]
-                    })
+                    matches.append(MatchResult(
+                        barcode = match[0],
+                        whitelist = whitelist_key,
+                        orientation = orientation,
+                        start = start + 1,  # 1-based position
+                        end = start + barcode_len,
+                        mismatches = match[1],
+                        distance = 0
+                    ))
 
-        return sorted(matches, key=lambda x: x['start'])
+        return sorted(matches, key=lambda x: x.start)
 
     def _check_match(self, candidate: str, matcher: Dict) -> Tuple[str, int]:
         """Check if candidate matches any barcode in the matcher."""
@@ -276,9 +280,9 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         default="./barcode_counts.csv",
     )
     subparser.add_argument(
-        "-t", "--trie",
+        "-p", "--pickle",
         metavar="<file>",
-        help=("Path to Aho-Corasick trie compressed pickle to use this method for barcode matching [None]"),
+        help=("Path to compressed pickle file to use for barcode matching [None]"),
         type=str,
         default=None
     )
@@ -333,7 +337,7 @@ def validate_seed_args(parser, args):
              random_seed = args.random_seed,
              upper_read_count = args.upper_read_count,
              barcodes = args.barcodes, 
-             trie = args.trie,
+             pickle_file = args.pickle,
              kmer_length = args.kmer_length,
              output_file = args.out, 
              batches = args.batch_size, 
@@ -391,7 +395,7 @@ def filter_data(data):
 
             for region in regions:
                 # Create a key with the unique combination
-                key = (header, region["whitelist"], region["orientation"], region["start"])
+                key = (header, region.whitelist, region.orientation, region.start)
 
                 # If this combination hasn't been seen before, add it to the result
                 if key not in seen:
@@ -411,7 +415,7 @@ def run_seed(
     random_seed: int = 1234,
     upper_read_count: int = 10000000,
     barcodes: List[str] = None,
-    trie: str = None,
+    pickle_file: str = None,
     kmer_length: int = None,
     output_file: str = None,
     batches: int = 10000,
@@ -430,10 +434,10 @@ def run_seed(
     whitelist_key = list(expected_barcodes.keys())[0]
 
     # Initialize matcher based on the chosen method
-    if trie:
+    if pickle_file:
         matcher = BarcodeMatcherAhoCorasick(
             barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
-            pickle_file = trie,
+            pickle_file = pickle_file,
             kmer_length = kmer_length,
             mismatches = 0
         )
@@ -539,8 +543,8 @@ def write_batch_results(read_pair: Dict, output_handler) -> None:
         
         for region in read_info['regions']:
             output_handler.write(
-                f"{read_key}\t{header}\t{seqlen}\t{region['whitelist']}\t{region['barcode']}\t"
-                f"{region['orientation']}\t{region['start']}\t{region['end']}\t{region['mismatches']}\n"
+                f"{read_key}\t{header}\t{seqlen}\t{region.whitelist}\t{region.barcode}\t"
+                f"{region.orientation}\t{region.start}\t{region.end}\t{region.mismatches}\n"
             )
 
 def setup_worker_logger(log_file: str = None):

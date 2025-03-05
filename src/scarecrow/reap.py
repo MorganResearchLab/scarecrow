@@ -8,7 +8,6 @@ import gzip as gz
 import itertools
 import logging
 import os
-import gc
 import pandas as pd
 import pysam
 import shutil
@@ -22,8 +21,12 @@ from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string, reverse_complement, get_process_memory_usage
 from scarecrow.encode import BarcodeMatcherAhoCorasick
+from multiprocessing import Process, Queue, Manager
+
 
 class BarcodeMatcherOptimized:
+    __slots__ = ['matchers', 'mismatches', 'base_quality_threshold', 'verbose', 'trie_matcher', 'logger']
+
     def __init__(self, barcode_files: Dict[str, str], mismatches: int = 0, base_quality_threshold: int = None, verbose: bool = False):
         """
         Initialize matcher with text files containing barcodes (one per line)
@@ -33,8 +36,6 @@ class BarcodeMatcherOptimized:
         self.base_quality_threshold = base_quality_threshold
         self.verbose = verbose
         self.trie_matcher = None
-        
-        # Get logger but ensure it's properly configured first
         self.logger = setup_worker_logger()
 
         # Load and process barcode data from text files
@@ -72,7 +73,7 @@ class BarcodeMatcherOptimized:
                     #self.logger.info(f"'{whitelist}' mismatches:\n{mismatch_lookup}\n")
                     #self.logger.info(f"Matchers: {self.matchers.keys()}")
             
-            elif file.endswith('.trie.gz'):
+            elif file.endswith('.pkl.gz'):
                 # Initialize the trie matcher only once
                 if self.trie_matcher is None:
                     if os.path.exists(file):
@@ -116,16 +117,15 @@ class BarcodeMatcherOptimized:
                 #self.logger.info(f"\n> reap matches: {matches}")              
                 filtered_matches = [
                     match for match in matches
-                    if abs(match['start'] - original_start) <= jitter
+                    if abs(match.start - original_start) <= jitter
                 ]
                 if filtered_matches:
-                    #self.logger.info(f"\n> reap filtered matches: {filtered_matches}")              
                     # Sort by number of mismatches and distance from expected start
-                    filtered_matches.sort(key=lambda x: (x['mismatches'], abs(x['distance'])))
-                    if len(filtered_matches) == 1 or (filtered_matches[0]['mismatches'] < filtered_matches[1]['mismatches'] or filtered_matches[0]['distance'] < filtered_matches[1]['distance']):
+                    filtered_matches.sort(key=lambda x: (x.mismatches, abs(x.distance)))
+                    if len(filtered_matches) == 1 or (filtered_matches[0].mismatches < filtered_matches[1].mismatches or filtered_matches[0].distance < filtered_matches[1].distance):
                         # Only one match or the best match is unique
                         best_match = filtered_matches[0]
-                        return best_match['barcode'], best_match['mismatches'], best_match['start']
+                        return best_match.barcode, best_match.mismatches, best_match.start
                     else:
                         # Multiple matches with the same number of mismatches and distance
                         #self.logger.info("Multiple equidistant-error matches")
@@ -165,11 +165,11 @@ class BarcodeMatcherOptimized:
                     return match[0], 0, match[2]
                 else:
                     # Multiple exact matches with the same distance
-                    self.logger.info(f"Multiple matches")
+                    #self.logger.info(f"Multiple matches")
                     return 'NNNNNNNN', -1, 'N'
             
             # If no exact match was found, check mismatch lookup
-            self.logger.info(f"subs_sequence: {sub_sequence}")
+            #self.logger.info(f"subs_sequence: {sub_sequence}")
             if self.mismatches > 0:
                 mismatch_matches = []
                 for seq, pos in sub_sequence:
@@ -189,7 +189,7 @@ class BarcodeMatcherOptimized:
                             mismatch_matches.append((barcode, n, pos, pos_distance))
             
                 if mismatch_matches:
-                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    #self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
                     match_groups = defaultdict(list)
                     for match in mismatch_matches:
@@ -245,6 +245,8 @@ class BarcodeMatcherOptimized:
 
 # Add a new class to track statistics
 class BarcodeStats:
+    __slots__ = ['mismatch_counts', 'position_counts']
+
     def __init__(self):
         self.mismatch_counts = Counter()
         self.position_counts = Counter()
@@ -621,10 +623,7 @@ def process_read_batch(read_batch: List[Tuple],
                     logger.info(f"Matched barcode: {matched_barcode} with {mismatch_count} mismatches at position {adj_position}")
                 
                 matched_barcodes.append(matched_barcode)
-                if matcher.trie_matcher:
-                    positions.append(str(adj_position))
-                else:
-                    positions.append(str(adj_position))
+                positions.append(str(adj_position))
                 mismatches.append(str(mismatch_count))
             else:
                 logger.warning(f"Whitelist {whitelist} not found in matcher {matcher.matchers.keys()}")
@@ -708,7 +707,7 @@ def process_read_batch(read_batch: List[Tuple],
 
     if verbose:
         logger.info(f"Completed processing batch of {read_count} reads")
-    return output_entries, read_count
+    return output_entries, read_count, stats
 
 @log_errors
 def extract_sequences(
@@ -732,9 +731,6 @@ def extract_sequences(
     Modified to track stats
     """
     logger = setup_worker_logger()
-
-    # Initialize master stats tracker
-    master_stats = BarcodeStats()
 
     # Initialize configurations
     barcode_positions = pd.read_csv(barcode_positions_file)
@@ -766,92 +762,53 @@ def extract_sequences(
         threads = min(threads, mp.cpu_count())
     logger.info(f"Using {threads} threads")
 
-    # List of files generated
-    files = []
-    total_reads = 0 # Initialize total read counter
-
-    def write_and_clear_results(results, outfile):
-        """Write results to file and clear memory."""
-        with open(outfile, 'a') as f:
-            f.writelines(results)
-        del results
-        gc.collect()
-    
-    def combine_results_chunked(files, output, chunk_size=1024 * 1024):
-        """Combine results from multiple files into a single output file."""
-        with open(output, 'a') as file:
-            for fastq_file in files:
-                with open(fastq_file, 'r') as in_fastq:
-                    while chunk := in_fastq.read(chunk_size):
-                        file.write(chunk)
-                os.remove(fastq_file)
-        gc.collect()
-
     # Report memory usage before starting read processing
     total_mb, total_gb = get_process_memory_usage()
     logger.info(f"Current memory usage (main process + children): {total_mb:.2f} MB ({total_gb:.2f} GB)")
 
-    logger.info(f"Processing reads")
-    with pysam.FastqFile(fastq_files[0]) as r1, \
-         pysam.FastqFile(fastq_files[1]) as r2:
-        
-        # Create batches efficiently
-        read_pairs = zip(r1, r2)        
+    # Constant arguments
+    constant_args = (barcode_configs, extract_range, extract_index, umi_index, umi_range, 
+                     base_quality, jitter, mismatches, FASTQ, SAM, verbose)
 
-        # Generate batches 
-        def batch_generator(read_pairs, batch_size):
-            batch = []
-            for reads in read_pairs:
-                batch.append(reads)
-                if len(batch) >= batch_size:
-                    yield batch
-                    batch = []
-            if batch:
-                yield batch
+    # Create a queue for batch communication
+    queue = Queue(maxsize = threads * 2)  # Limit queue size to avoid excessive memory usage
+    stats_queue = Queue()
 
-        # Prepare arguments for worker tasks
-        logger.info(f"Initializing workers")
-#        args_generator = (
-#            (batch, barcode_configs, matcher, extract_range, extract_index,
-#             umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
-#            for batch in batch_generator(read_pairs, batch_size)
-#        )
+    # Start the producer process
+    producer = Process(target = batch_producer, args=(fastq_files, batch_size, queue))
+    producer.start()
 
-        # Use imap_unordered for parallel processing
-        with mp.Pool(threads, initializer = init_worker, initargs=(barcode_files, mismatches, base_quality, verbose)) as pool:
-            args_generator = (
-                (batch, barcode_configs, extract_range, extract_index,
-                 umi_index, umi_range, base_quality, jitter, FASTQ, SAM, verbose)
-                 for batch in batch_generator(read_pairs, batch_size)
-                 )
-            for result in pool.imap_unordered(worker_task, args_generator, chunksize=10):
-                entries, batch_count, batch_stats = result
+    # Start worker processes
+    workers = []
+    for i in range(threads):
+        worker_output = f"{output}_worker_{i}.sam"  # Each worker writes to its own file
+        worker = Process(target = worker_process, args = (queue, barcode_files, worker_output, constant_args, stats_queue))
+        worker.start()
+        workers.append(worker)
 
-                # Update total read count
-                total_reads += batch_count
+    # Wait for the producer to finish
+    producer.join()
 
-                # Update master stats
-                master_stats.mismatch_counts.update(batch_stats.mismatch_counts)
-                master_stats.position_counts.update(batch_stats.position_counts)
+    # Signal workers to stop by adding sentinel values
+    for _ in range(threads):
+        queue.put(None)
 
-                # Write results to a temporary file
-                outfile = f"{output}_temp_{total_reads}"
-                files.append(outfile)
-                write_and_clear_results(entries, outfile)
+    # Wait for all workers to finish
+    for worker in workers:
+        worker.join()
 
-                total_mb, total_gb = get_process_memory_usage()
-                logger.info(f"Processed {total_reads} reads [memory usage: {total_mb:.2f} MB ({total_gb:.2f} GB)]")
+    # Collect stats from workers
+    master_stats = BarcodeStats()
+    for _ in range(threads):
+        worker_stats = stats_queue.get()  # Get stats from the queue
+        master_stats.mismatch_counts.update(worker_stats.mismatch_counts)
+        master_stats.position_counts.update(worker_stats.position_counts)
 
-    # Combine results
-    logger.info(f"Combining results: {files} into '{output}'")
-    combine_results_chunked(files, output)
-
-    # Log final count
-    logger.info(f"Total reads processed: {total_reads}")
-
-    # Write final statistics after all processing is complete
+    # Write final statistics
     master_stats.write_stats(output)
-    logger.info(f"Barcode statistics written to:\n'{output}_mismatch_stats.csv'\n'{output}_position_stats.csv'")
+
+    # Combine worker output files into a single file
+    combine_worker_outputs(output, threads)
 
 def parse_range(range_str: str) -> Tuple[int, int]:
     """
@@ -932,39 +889,88 @@ def setup_worker_logger(log_file: str = None):
         logger.setLevel(logging.INFO)
     return logger
 
-def init_worker(barcode_files, mismatches, base_quality, verbose):
-    global matcher
+def batch_producer(fastq_files, batch_size, queue):
+    """
+    Producer function that reads FASTQ files and generates batches of read pairs.
+    """
+    with pysam.FastqFile(fastq_files[0]) as r1, pysam.FastqFile(fastq_files[1]) as r2:
+        read_pairs = zip(r1, r2)
+        batch = []
+        for read_pair in read_pairs:
+            batch.append(read_pair)
+            if len(batch) >= batch_size:
+                queue.put(batch)
+                batch = []  # Reset for the next batch
+        if batch:  # Yield any remaining reads
+            queue.put(batch)
+    queue.put(None)  # Sentinel value to signal the end of production
+
+def worker_process(queue, barcode_files, output_file, constant_args, stats_queue):
+    """
+    Worker function that processes batches from the queue.
+    """
+    barcode_configs, extract_range, extract_index, umi_index, umi_range, base_quality, jitter, mismatches, FASTQ, SAM, verbose = constant_args
     matcher = BarcodeMatcherOptimized(
-        barcode_files=barcode_files,
-        mismatches=mismatches,
-        base_quality_threshold=base_quality,
-        verbose=verbose
+        barcode_files = barcode_files,
+        mismatches = mismatches,
+        base_quality_threshold = base_quality,
+        verbose = verbose
     )
 
-def worker_task(args):
-    """Worker function that ensures logger is configured for the process."""
-    logger = setup_worker_logger()
-    global matcher
+    stats = BarcodeStats()  # Create a stats object for this worker
+    logger = setup_worker_logger()  # Ensure the logger is set up
+    batch_count = 0  # Track the number of batches processed
+    read_count = 0
 
-    (batch, barcode_configs, extract_range, extract_index, umi_index, umi_range,
-     base_quality, jitter, FASTQ, SAM, verbose) = args
+    with open(output_file, 'a') as outfile:
+        while True:
+            batch = queue.get()
+            if batch is None:  # Sentinel value to stop the worker
+                break
 
-    stats = BarcodeStats()  # Create stats tracker for this batch
+            # Process batch
+            entries, count, batch_stats = process_read_batch(
+                batch, barcode_configs, matcher,
+                extract_range, extract_index, umi_index, umi_range,
+                stats, base_quality, jitter, FASTQ, SAM, verbose
+            )
+            outfile.writelines(entries)
+            #logger.info(f"Worker wrote {len(entries)} lines to {output_file}")
+            batch_count += 1
+            read_count += count
 
-    if verbose:
-        logger.info(f"Worker process started")
-    try:
-        entries, count = process_read_batch(batch, barcode_configs, matcher,
-                                           extract_range, extract_index, umi_index, umi_range,
-                                           stats, base_quality, jitter, FASTQ, SAM, verbose)
-        if verbose:
-            logger.info(f"Processed batch of {count} reads")
-        return entries, count, stats
+            # Log memory usage after processing each batch
+            if batch_count % 10 == 0:  # Log every 10 batches
+                total_mb, total_gb = get_process_memory_usage()
+                logger.info(f"Worker memory usage after {read_count} reads: {total_mb:.2f} MB ({total_gb:.2f} GB)")
     
-    except Exception as e:
-        if verbose:
-            logger.error(f"Error processing batch: {str(e)}", exc_info=True)
-        raise
+    # Log final memory usage
+    total_mb, total_gb = get_process_memory_usage()
+    logger.info(f"Final worker memory usage: {total_mb:.2f} MB ({total_gb:.2f} GB)")
 
-    finally:
-        gc.collect()  # Force garbage collection after processing each batch
+    # Put the stats object into the stats_queue
+    stats_queue.put(stats)
+
+@log_errors
+def combine_worker_outputs(output, num_workers):
+    """
+    Combine output files from all workers into a single file.
+    """
+    logger = logging.getLogger('scarecrow')
+    total_lines = 0
+    with open(output, 'w') as outfile:
+        for i in range(num_workers):
+            worker_output = f"{output}_worker_{i}.sam"
+            try:
+                with open(worker_output, 'r') as infile:
+                    lines = infile.readlines()
+                    outfile.writelines(lines)
+                    total_lines += len(lines)
+                    logger.info(f"Combined {len(lines)} lines from {worker_output}")
+                os.remove(worker_output)
+            except FileNotFoundError:
+                logger.warning(f"Intermediate file {worker_output} not found. Skipping.")
+            except Exception as e:
+                logger.error(f"Error combining {worker_output}: {str(e)}")
+    
+    logger.info(f"Total lines written to final output: {total_lines}")

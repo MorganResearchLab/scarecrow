@@ -43,23 +43,23 @@ do
     ID=${BARCODE%:*:*}
     WHITELIST=${BARCODE#*:*:}
     echo ${ID}
-#    time scarecrow seed --fastqs ${R1} ${R2} \
-#        -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0
+    time scarecrow seed --fastqs ${R1} ${R2} \
+        -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0
     time scarecrow seed --fastqs ${R1} ${R2} \
         -o ./WTv2/barcodes_${ID}_trie.csv --barcodes ${BARCODE} -n 0 -u 0 \
-        --trie ${WHITELIST}.${ID}.trie.gz -k 2
+        --pickle ${WHITELIST}.${ID}.pkl.gz -k 2
 done
 
 # Harvest (set-based approach)
 FILES=(./WTv2/barcodes_BC*_set.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./WTv2/barcodes_BC1_conserved.tsv \
+    --conserved ./WTv2/barcodes_BC1_set_conserved.tsv \
     --out ./WTv2/barcode_positions_set.csv
 
 # Harvest (trie and kmer index approach)
 FILES=(./WTv2/barcodes_BC*_trie.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./WTv2/barcodes_BC1_conserved.tsv \
+    --conserved ./WTv2/barcodes_BC1_trie_conserved.tsv \
     --out ./WTv2/barcode_positions_trie.csv
 
 # Reap (set-based approach)
@@ -69,18 +69,22 @@ BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_set.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA_set --threads 1 --verbose &> debug_set.log
+    --out ./WTv2/cDNA_set --threads 2
 
 # Reap (trie and kmer index approach)
-BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.trie.gz
-          BC2:v1:./WTv2/bc_data_v1.txt.BC2.trie.gz
-          BC3:v1:./WTv2/bc_data_v1.txt.BC3.trie.gz)
+BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.pkl.gz
+          BC2:v1:./WTv2/bc_data_v1.txt.BC2.pkl.gz
+          BC3:v1:./WTv2/bc_data_v1.txt.BC3.pkl.gz)
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_trie.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA_trie --threads 1 --verbose &> debug_trie.log
+    --out ./WTv2/cDNA_trie --threads 2
+
+scarecrow samstat --sam ./WTv2/cDNA_set.sam
+scarecrow samstat --sam ./WTv2/cDNA_trie.sam
 
 ```
+
 
 
 # Testing on laptop (split-seq)
@@ -124,19 +128,19 @@ scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.
 
 # Testing on laptop (10X3p)
 ```bash
-R1=./10X3p/SRR28867562_3.fastq
-R2=./10X3p/SRR28867562_4.fastq
+R1=./10X3p/SRR28867562_3.1M.fastq.gz
+R2=./10X3p/SRR28867562_4.1M.fastq.gz
 BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt)
 
 # Generate custom trie and kmer index for use with scarecrow seed
-time scarecrow encode --force_overwrite --barcodes ${BARCODE} --trie -k 8
-time scarecrow encode --barcodes ${BARCODE} --trie -k 8
+time scarecrow encode --force_overwrite --barcodes ${BARCODE} --pickle -k 8
+time scarecrow encode --barcodes ${BARCODE} --pickle -k 8
 
 # Seed using trie
 time scarecrow seed --fastqs ${R1} ${R2} \
     -o ./10X3p/barcodes_${BARCODE%:*:*}.csv \
     --barcodes ${BARCODE} -n 0 -u 0 \
-    --trie ./10X3p/3M-february-2018.txt.k8.trie.gz
+    --pickle ./10X3p/3M-february-2018.txt.k8.pkl.gz
 
 # Harvest (trie and kmer index approach)
 FILES=(./10X3p/barcodes_BC1.csv)
@@ -145,24 +149,25 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --out ./10X3p/barcode_positions.csv
 
 # Reap (trie and kmer index approach)
-BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt.k8.trie.gz)
+BARCODE=(BC1:3M-Feb2018:./10X3p/3M-february-2018.txt.k8.pkl.gz)
 time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
     -p ./10X3p/barcode_positions.csv \
     --barcodes ${BARCODE} --extract 2:1-90 --umi 1:17-28 \
-    --out ./10X3p/cDNA_k8 --threads 2
+    --out ./10X3p/cDNA_k8 --threads 4 -b 10000
 
-
-
-
-scarecrow samstat --sam ./10X3p/cDNA_trie.sam
+# Stats
+scarecrow samstat --sam ./10X3p/cDNA_k8.sam
 ```
+
+
 
 
 # Debugging notes
 ```bash
-READ=SRR28867558.397
+READ=SRR28867558.7843
 grep -m1 ${READ} WTv2/*sam
 grep -m1 -A1 ${READ} ${R2}
+grep -m1 -A300 ${READ} debug.log | less
 grep -m1 -A300 ${READ} debug_set.log | less
 grep -m1 -A300 ${READ} debug_trie.log | less
 ```
