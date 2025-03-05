@@ -6,6 +6,7 @@ scarecrow
 A toolkit for pre-processing single-cell sequencing data.
 
 """
+
 __author__ = "David Wragg"
 __license__ = "GNU GPL v3.0"
 
@@ -24,9 +25,10 @@ from scarecrow.sam2fastq import parser_sam2fastq, validate_sam2fastq_args
 from scarecrow.encode import parser_encode, validate_encode_args
 from scarecrow.weed import parser_weed, validate_weed_args
 
+
 def main():
     warnings.simplefilter("default", DeprecationWarning)
-    
+
     # setup parsers
     parser = argparse.ArgumentParser(
         description=f"""
@@ -62,9 +64,9 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "samstat": parser_samstat(subparsers),
         "sam2fastq": parser_sam2fastq(subparsers),
         "encode": parser_encode(subparsers),
-        "weed": parser_weed(subparsers)
+        "weed": parser_weed(subparsers),
     }
-    
+
     # Show help when no arguments are given
     if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
@@ -78,7 +80,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
             parser.print_help(sys.stderr)
         sys.exit(1)
 
-    args = parser.parse_args()    
+    args = parser.parse_args()
 
     # Setup validator and runner for all subcommands (validate and run if valid)
     COMMAND_TO_FUNCTION = {
@@ -91,11 +93,10 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "samstat": validate_samstat_args,
         "sam2fastq": validate_sam2fastq_args,
         "encode": validate_encode_args,
-        "weed": validate_weed_args
+        "weed": validate_weed_args,
     }
     COMMAND_TO_FUNCTION[sys.argv[1]](parser, args)
 
 
 if __name__ == "__main__":
-    main()    
-
+    main()

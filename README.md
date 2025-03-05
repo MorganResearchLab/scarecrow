@@ -10,7 +10,6 @@ A toolkit for preprocessing single cell sequencing data to improve data yield.
 
 ### Todo
 
-* Run through ruff to check and format files
 * Error handling to capture missing or incorrect parameters, and unexpected file content
 * Peaks in between barcodes may need further investigation
 * Jitter does not currently apply to UMI or insert sequence

@@ -8,7 +8,7 @@ from argparse import RawTextHelpFormatter
 import logging
 import json
 import itertools
-from typing import List, Dict
+from typing import Dict
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
@@ -29,7 +29,8 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
-        "-b", "--barcodes",
+        "-b",
+        "--barcodes",
         metavar="<file>",
         help=("Path to barcode text file"),
         type=str,
@@ -37,56 +38,63 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         default=None,
     )
     subparser.add_argument(
-        "-o", "--out",
+        "-o",
+        "--out",
         metavar="<file>",
         help=("Path to output barcode mismatch file"),
         type=str,
-        default=None
+        default=None,
     )
     subparser.add_argument(
-        "-m", "--max_mismatches",
+        "-m",
+        "--max_mismatches",
         metavar="<int>",
         help=("Maximum number of mismatches in a barcode to characterise [1]"),
         type=int,
         default=1,
-    )        
+    )
     return subparser
 
+
 def validate_rake_args(parser, args):
-    """ 
-    Validate arguments 
+    """
+    Validate arguments
     """
     # Global logger setup
-    logfile = f'./scarecrow_rake_{generate_random_string()}.log'
+    logfile = f"./scarecrow_rake_{generate_random_string()}.log"
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
-    
-    run_rake(barcodes = args.barcodes,
-            output_file = args.out,
-            max_mismatches = args.max_mismatches)
-    
+
+    run_rake(
+        barcodes=args.barcodes, output_file=args.out, max_mismatches=args.max_mismatches
+    )
+
+
 @log_errors
-def run_rake(barcodes: str = None,
-             output_file: str = None,
-             max_mismatches: int = 1) -> None:
+def run_rake(
+    barcodes: str = None, output_file: str = None, max_mismatches: int = 1
+) -> None:
     """
     Function to rake barcodes for mismatches
     """
-    logger = logging.getLogger('scarecrow')
+    logger = logging.getLogger("scarecrow")
 
     if barcodes:
         logger.info(f"Processing barcodes in {barcodes}")
         if output_file is None:
-            output_file = f'{barcodes}.json'
+            output_file = f"{barcodes}.json"
         process_barcodes(barcodes, 2, output_file)
 
     logger.info("Finished!")
-    
-def generate_mismatches(sequence: str, max_mismatches: int) -> Dict[int, Dict[str, str]]:
-    bases = {'A', 'C', 'G', 'T'}
+
+
+def generate_mismatches(
+    sequence: str, max_mismatches: int
+) -> Dict[int, Dict[str, str]]:
+    bases = {"A", "C", "G", "T"}
     mismatch_dict = {i: {} for i in range(1, max_mismatches + 1)}
-    
+
     seq_length = len(sequence)
     for num_mismatches in range(1, max_mismatches + 1):
         for positions in itertools.combinations(range(seq_length), num_mismatches):
@@ -98,23 +106,26 @@ def generate_mismatches(sequence: str, max_mismatches: int) -> Dict[int, Dict[st
                 mutated_seq = "".join(mutated_seq)
                 if mutated_seq not in mismatch_dict[num_mismatches]:
                     mismatch_dict[num_mismatches][mutated_seq] = sequence
-    
+
     return mismatch_dict
 
+
 def process_barcodes(input_file: str, max_mismatches: int, output_file: str):
-    with open(input_file, 'r') as f:
+    with open(input_file, "r") as f:
         barcodes = [line.strip() for line in f if line.strip()]
-    
-    result = {0: {barcode: [barcode] for barcode in barcodes}}  # Mismatch=0 is the original
-    
+
+    result = {
+        0: {barcode: [barcode] for barcode in barcodes}
+    }  # Mismatch=0 is the original
+
     for barcode in barcodes:
         mismatches = generate_mismatches(barcode, max_mismatches)
         for mismatch_level, seq_dict in mismatches.items():
             if mismatch_level not in result:
                 result[mismatch_level] = {}
             result[mismatch_level].update(seq_dict)
-    
-    with open(output_file, 'w') as f:
+
+    with open(output_file, "w") as f:
         json.dump(result, f, indent=4)
-    
-    print(f"JSON file saved: {output_file}")    
+
+    print(f"JSON file saved: {output_file}")
