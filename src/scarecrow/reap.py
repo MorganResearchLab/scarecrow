@@ -8,6 +8,7 @@ import gzip as gz
 import itertools
 import logging
 import os
+import gc
 import pandas as pd
 import pysam
 import shutil
@@ -892,20 +893,25 @@ def setup_worker_logger(log_file: str = None):
         logger.setLevel(logging.INFO)
     return logger
 
+def read_fastq_generator(fastq_file):
+    with pysam.FastqFile(fastq_file) as fq:
+        for read in fq:
+            yield read
+            
 def batch_producer(fastq_files, batch_size, queue):
     """
     Producer function that reads FASTQ files and generates batches of read pairs.
     """
-    with pysam.FastqFile(fastq_files[0]) as r1, pysam.FastqFile(fastq_files[1]) as r2:
-        read_pairs = zip(r1, r2)
-        batch = []
-        for read_pair in read_pairs:
-            batch.append(read_pair)
-            if len(batch) >= batch_size:
-                queue.put(batch)
-                batch = []  # Reset for the next batch
-        if batch:  # Yield any remaining reads
+    r1_gen = read_fastq_generator(fastq_files[0])
+    r2_gen = read_fastq_generator(fastq_files[1])
+    batch = []
+    for read1, read2 in zip(r1_gen, r2_gen):
+        batch.append((read1, read2))
+        if len(batch) >= batch_size:
             queue.put(batch)
+            batch = []
+    if batch:
+        queue.put(batch)
     queue.put(None)  # Sentinel value to signal the end of production
 
 def worker_process(queue, barcode_files, output_file, constant_args, stats_queue):
@@ -944,9 +950,10 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
                 read_count += count
 
                 # Log memory usage after processing each batch
-                if batch_count % 10 == 0:  # Log every 10 batches
+                if batch_count % 100 == 0:  # Log every 100 batches
                     total_mb, total_gb = get_process_memory_usage()
                     logger.info(f"Worker memory usage after {read_count} reads: {total_mb:.2f} MB ({total_gb:.2f} GB)")
+                    gc.collect()
         
         # Log final memory usage
         total_mb, total_gb = get_process_memory_usage()
