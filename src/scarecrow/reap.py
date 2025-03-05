@@ -363,8 +363,8 @@ scarecrow reap --threads16\n\t--fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_posi
         "-j", "--jitter",
         metavar="<int>",
         type=int,
-        default=5,
-        help='Barcode position jitter [3]',
+        default=2,
+        help='Barcode position jitter [2]',
     )
     subparser.add_argument(
         "-m", "--mismatches",
@@ -491,11 +491,11 @@ def run_reap(fastqs: List[str],
              extract: str = None,
              umi: Optional[str] = None,
              barcodes: List[str] = None,
-             jitter: int = 3,
+             jitter: int = 2,
              mismatches: int = 1,
              base_quality: int = None,
              batches: int = 10000,
-             threads: int = 4,
+             threads: int = 1,
              FASTQ: bool = False,
              SAM: bool = True,
              verbose: bool = False,
@@ -771,7 +771,7 @@ def extract_sequences(
                      base_quality, jitter, mismatches, FASTQ, SAM, verbose)
 
     # Create a queue for batch communication
-    queue = Queue(maxsize = threads * 2)  # Limit queue size to avoid excessive memory usage
+    queue = Queue(maxsize = threads * 4)  # Limit queue size to avoid excessive memory usage
     stats_queue = Queue()
 
     # Start the producer process
@@ -785,6 +785,7 @@ def extract_sequences(
         worker = Process(target = worker_process, args = (queue, barcode_files, worker_output, constant_args, stats_queue))
         worker.start()
         workers.append(worker)
+        logger.info(f"Started worker {i + 1}")
 
     # Wait for the producer to finish
     producer.join()

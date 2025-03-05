@@ -2,7 +2,7 @@
 
 <img style="float:right;width:200px;" src="./img/scarecrow.png" alt="scarecrow"/>
 
-A toolkit for preprocessing single cell sequencing data.
+A toolkit for preprocessing single cell sequencing data to improve data yield.
 
 [Documentation](docs/root.md)
 
