@@ -169,7 +169,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         self.logger = setup_worker_logger()
 
         if pickle_file is not None and os.path.exists(pickle_file):
-            self._load_trie(pickle_file, mismatches=mismatches)
+            self._load_trie(pickle_file, mismatches = mismatches)
 
         else:
             self._build_trie(barcode_sequences)
@@ -244,7 +244,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             f"Building k-mer index for approximate matching using k-mer size {self.kmer_length}"
         )
         for whitelist_key, sequences in barcode_sequences.items():
-            kmer_index = CompactKmerIndex(k=self.kmer_length)
+            kmer_index = CompactKmerIndex(k = self.kmer_length)
             for seq in sequences:
                 kmer_index.add_barcode(seq)
             kmer_index.finalize()  # Convert to numpy arrays after all barcodes are added
@@ -256,22 +256,29 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         Loads a pre-built Aho-Corasick trie from a pickle file.
         """
         # self.logger.info(f"Before loading, automata keys: {list(self.automata.keys())}")
-        self.logger.info(f"Loading trie and k-mer index from '{pickle_file}'")
+        self.logger.info(f"Importing pickle from '{pickle_file}'")
         try:
             # Load automata and k-mer index
             with gzip.open(pickle_file, "rb") as f:
                 loaded_data = pickle.load(f)
+
+            # Assign mismatches to self
+            self.mismatches = mismatches
 
             # Extract the automaton object from the loaded data
             automaton = loaded_data.get("automata", {})
             whitelist_key = list(automaton.keys())[0]
             self.automata[whitelist_key] = automaton[whitelist_key]
 
+            self.logger.info(
+                f"Extracted Aho-Corasick trie for whitelists: {list(self.automata.keys())}"
+            )
+
             # Load k-mer index
             self.kmer_length = loaded_data.get("kmer_length", {})
             kmer_index_data = loaded_data.get("kmer_index", {})
             for whitelist_key, kmer_index_data in kmer_index_data.items():
-                kmer_index = CompactKmerIndex(k=self.kmer_length)
+                kmer_index = CompactKmerIndex(k = self.kmer_length)
                 kmer_index.barcodes = kmer_index_data.get("barcodes", [])
                 if self.kmer_length > 8:
                     kmer_index.kmer_array = np.array(
@@ -286,11 +293,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                 )  # Already a list of lists
                 self.kmer_index[whitelist_key] = kmer_index
 
-            self.mismatches = mismatches
-
-            self.logger.info(
-                f"Loaded Aho-Corasick trie for whitelists: {list(self.automata.keys())}"
-            )
             self.logger.info(
                 f"Loaded k-mer indices for whitelists: {list(self.kmer_index.keys())}"
             )
@@ -298,7 +300,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
         except (ImportError, FileNotFoundError):
             self.logger.info(
-                f"Error loading automata and k-mer index from {pickle_file}"
+                f"Error loading trie and k-mer index from {pickle_file}"
             )
             raise ImportError
 

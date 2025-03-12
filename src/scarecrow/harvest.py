@@ -647,7 +647,7 @@ def plot_peaks_optimized(
         ):
             if not subplot_data.empty:
                 # Determine per-subplot x-limits
-                x_min, x_max = subplot_data["start"].min(), subplot_data["start"].max()
+                x_min, x_max = 1, subplot_data["start"].max()
                 x_end = subplot_data.loc[
                     subplot_data["start"] == x_max, "seqlen"
                 ].values[0]

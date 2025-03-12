@@ -85,6 +85,16 @@ scarecrow samstat --sam ./WTv2/cDNA_trie.sam
 ```
 
 
+# Testing on laptop (Scale)
+```bash
+# Harvest (set-based approach)
+FILES=(./Scale/barcodes.BC*.csv)
+scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
+    --conserved ./Scale/barcodes.BC1_conserved.tsv \
+    --out ./Scale/barcode_positions.csv
+
+```
+
 
 # Testing on laptop (split-seq)
 ```bash
@@ -157,8 +167,6 @@ time scarecrow reap --fastqs ${R1} ${R2} -j 0 -m 1 -q 10 \
 # Stats
 scarecrow samstat --sam ./10X3p/cDNA_k8.sam
 ```
-
-
 
 
 # Debugging notes
