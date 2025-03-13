@@ -17,7 +17,7 @@ import shutil
 from argparse import RawTextHelpFormatter
 from collections import Counter, defaultdict
 from functools import lru_cache
-from multiprocessing import Process, Queue, Value
+from multiprocessing import Process, Queue
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import (
@@ -665,7 +665,10 @@ def process_read_batch(
     verbose: bool = False,
 ) -> List[str]:
     """
-    Modified process_read_batch to handle any number of FASTQ files.
+    Modified process_read_batch to handle jitter and improved matching.
+    Now includes original barcodes (CR), barcode qualities (CY),
+    matched barcodes (CB), UMI sequence (UR), and UMI qualities (UY).
+    Now tracks barcode statistics.
     """
     logger = setup_worker_logger()
     if verbose:
@@ -685,9 +688,8 @@ def process_read_batch(
 
         for config in barcode_configs:
             whitelist = config["whitelist"]
-            file_index = config["file_index"]
-            seq = reads[file_index].sequence
-            qual = reads[file_index].quality
+            seq = reads[config["file_index"]].sequence
+            qual = reads[config["file_index"]].quality
             start, end = config["start"], config["end"]
 
             # Extract original barcode and its quality scores
@@ -698,7 +700,7 @@ def process_read_batch(
 
             if verbose:
                 logger.info(
-                    f"Read: {reads[file_index].name} {reads[file_index].comment}"
+                    f"Read: {reads[config['file_index']].name} {reads[config['file_index']].comment}"
                 )
                 logger.info(f"Sequence: {seq}")
                 logger.info(
@@ -708,7 +710,7 @@ def process_read_batch(
             if matcher.trie_matcher or whitelist in matcher.matchers.keys():
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     seq,
-                    reads[file_index].quality,
+                    reads[config["file_index"]].quality,
                     whitelist,
                     config["orientation"],
                     start,
@@ -912,9 +914,6 @@ def extract_sequences(
     )  # Limit queue size to avoid excessive memory usage
     stats_queue = Queue()
 
-    # Initialize the shared counter for total reads
-    total_reads_counter = init_shared_counter()
-
     # Start the producer process
     producer = Process(target=batch_producer, args=(fastq_files, batch_size, queue))
     producer.start()
@@ -924,8 +923,8 @@ def extract_sequences(
     for i in range(threads):
         worker_output = f"{output}_worker_{i}.sam"  # Each worker writes to its own file
         worker = Process(
-            target = worker_process,
-            args = (queue, barcode_files, worker_output, constant_args, stats_queue, total_reads_counter),
+            target=worker_process,
+            args=(queue, barcode_files, worker_output, constant_args, stats_queue),
         )
         worker.start()
         workers.append(worker)
@@ -954,9 +953,6 @@ def extract_sequences(
 
     # Combine worker output files into a single file
     combine_worker_outputs(output, threads)
-    
-    # Log the final total number of reads processed
-    logger.info(f"Total reads processed: {total_reads_counter.value}")
 
 
 def parse_range(range_str: str) -> Tuple[int, int]:
@@ -1016,7 +1012,7 @@ def prepare_barcode_configs(positions: pd.DataFrame, jitter: int) -> List[Dict]:
     return [
         {
             "index": idx,
-            "file_index": row["file_index"],
+            "file_index": 0 if row["read"] == "read1" else 1,
             "start": row["start"],
             "end": row["end"],
             "orientation": row["orientation"],
@@ -1052,37 +1048,22 @@ def setup_worker_logger(log_file: str = None):
 
 def batch_producer(fastq_files, batch_size, queue):
     """
-    Producer function that reads multiple FASTQ files and generates batches of read tuples.
+    Producer function that reads FASTQ files and generates batches of read pairs.
     """
-    # Open all FASTQ files
-    fastq_handles = [pysam.FastxFile(f) for f in fastq_files]
-
-    # Read all files in parallel
-    read_tuples = zip(*fastq_handles)
-    batch = []
-    for read_tuple in read_tuples:
-        batch.append(read_tuple)
-        if len(batch) >= batch_size:
+    with pysam.FastqFile(fastq_files[0]) as r1, pysam.FastqFile(fastq_files[1]) as r2:
+        read_pairs = zip(r1, r2)
+        batch = []
+        for read_pair in read_pairs:
+            batch.append(read_pair)
+            if len(batch) >= batch_size:
+                queue.put(batch)
+                batch = []  # Reset for the next batch
+        if batch:  # Yield any remaining reads
             queue.put(batch)
-            batch = []  # Reset for the next batch
-    if batch:  # Yield any remaining reads
-        queue.put(batch)
-
-    # Close all FASTQ files
-    for handle in fastq_handles:
-        handle.close()
-
     queue.put(None)  # Sentinel value to signal the end of production
 
 
-def init_shared_counter():
-    """
-    Initialize a shared counter for tracking the total number of reads processed.
-    """
-    return Value("i", 0)  # Shared integer value initialized to 0
-
-
-def worker_process(queue, barcode_files, output_file, constant_args, stats_queue, total_reads_counter):
+def worker_process(queue, barcode_files, output_file, constant_args, stats_queue):
     """
     Worker function that processes batches from the queue.
     """
@@ -1110,6 +1091,7 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
         stats = BarcodeStats()  # Create a stats object for this worker
         logger = setup_worker_logger()  # Ensure the logger is set up
         batch_count = 0  # Track the number of batches processed
+        read_count = 0
 
         with open(output_file, "a") as outfile:
             while True:
@@ -1134,22 +1116,15 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
                     verbose,
                 )
                 outfile.writelines(entries)
-
-                # Update the shared counter
-                with total_reads_counter.get_lock():
-                    total_reads_counter.value += count
-                
-                # Log the total number of reads processed periodically
-                if total_reads_counter.value % 100000 == 0:
-                    logger.info(f"Total reads processed: {total_reads_counter.value}")
-
+                # logger.info(f"Worker wrote {len(entries)} lines to {output_file}")
                 batch_count += 1
+                read_count += count
 
                 # Log memory usage after processing each batch
                 if batch_count % 100 == 0:  # Log every 100 batches
                     total_mb, total_gb = get_process_memory_usage()
                     logger.info(
-                        f"Worker memory usage after {batch_count} batches: {total_mb:.2f} MB ({total_gb:.2f} GB)"
+                        f"Worker memory usage after {read_count} reads: {total_mb:.2f} MB ({total_gb:.2f} GB)"
                     )
                     gc.collect()
 
