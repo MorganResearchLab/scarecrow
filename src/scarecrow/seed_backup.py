@@ -39,7 +39,7 @@ class BarcodeMatcher:
     def find_matches(self, sequence: str) -> List[MatchResult]:
         """
         Find all matching barcodes in a sequence.
-        Implemented by subclasses.
+        To be implemented by subclasses.
         """
         raise NotImplementedError
 
@@ -115,13 +115,13 @@ class BarcodeMatcherOptimized(BarcodeMatcher):
                 if match:
                     matches.append(
                         MatchResult(
-                            barcode = match[0],
-                            whitelist = whitelist_key,
-                            orientation = orientation,
-                            start = start + 1,  # 1-based position
-                            end = start + barcode_len,
-                            mismatches = match[1],
-                            distance = 0,
+                            barcode=match[0],
+                            whitelist=whitelist_key,
+                            orientation=orientation,
+                            start=start + 1,  # 1-based position
+                            end=start + barcode_len,
+                            mismatches=match[1],
+                            distance=0,
                         )
                     )
 
@@ -252,7 +252,7 @@ def parser_seed(parser):
     subparser = parser.add_parser(
         "seed",
         description="""
-Search reads in FASTQ files for barcodes in whitelists, record exact matches and conserved sequences
+Search fastq reads for barcodes in whitelists
 
 Example:
 
@@ -268,86 +268,86 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
     subparser.add_argument(
         "-n",
         "--num_reads",
-        metavar = "<int>",
-        help = ("Number of read pairs to sample [100000]"),
-        type = int,
-        default = 100000,
+        metavar="<int>",
+        help=("Number of read pairs to sample [100000]"),
+        type=int,
+        default=100000,
     )
     subparser.add_argument(
         "-u",
         "--upper_read_count",
-        metavar = "<int>",
-        help = ("Upper read count of reads to subsample [10000000]"),
-        type = int,
-        default = 10000000,
+        metavar="<int>",
+        help=("Upper read count of reads to subsample [10000000]"),
+        type=int,
+        default=10000000,
     )
     subparser.add_argument(
         "-r",
         "--random_seed",
-        metavar = "<int>",
-        help = ("Random seed for sampling read pairs [1234]"),
-        type = int,
-        default = 1234,
+        metavar="<int>",
+        help=("Random seed for sampling read pairs [1234]"),
+        type=int,
+        default=1234,
     )
     subparser.add_argument(
         "-c",
         "--barcodes",
-        metavar = "<string>",
-        nargs = "+",
-        required = True,
-        help = "Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt BC2:v2:barcodes2.txt ...)",
+        metavar="<string>",
+        nargs="+",
+        required=True,
+        help="Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt BC2:v2:barcodes2.txt ...)",
     )
     subparser.add_argument(
         "-o",
         "--out",
-        metavar = "<file>",
-        help = (
+        metavar="<file>",
+        help=(
             "CSV file to write barcode counts to, also serves as prefix for conserved.tsv and frequencies.tsv files."
         ),
-        type = str,
-        default = "./barcode_counts.csv",
+        type=str,
+        default="./barcode_counts.csv",
     )
     subparser.add_argument(
         "-p",
         "--pickle",
-        metavar = "<file>",
-        help = ("Path to compressed pickle file to use for barcode matching [None]"),
-        type = str,
-        default = None,
+        metavar="<file>",
+        help=("Path to compressed pickle file to use for barcode matching [None]"),
+        type=str,
+        default=None,
     )
     subparser.add_argument(
         "-k",
         "--kmer_length",
-        metavar = "<int>",
-        help = ("K-mer length for building k-mer index for approximate matching"),
-        type = int,
-        default = None,
+        metavar="<int>",
+        help=("K-mer length for building k-mer index for approximate matching"),
+        type=int,
+        default=None,
     )
     subparser.add_argument(
         "-b",
         "--batch_size",
-        metavar = "<int>",
-        help = ("Number of read pairs per batch to process at a time [10000]"),
-        type = int,
-        default = 10000,
+        metavar="<int>",
+        help=("Number of read pairs per batch to process at a time [10000]"),
+        type=int,
+        default=10000,
     )
     subparser.add_argument(
         "-l",
         "--linker_base_frequency",
-        metavar = "<float>",
-        help = ("Nucleotide frequency indicative of linker (fixed) sequence [0.75]"),
-        type = float,
-        default = 0.75,
+        metavar="<float>",
+        help=("Nucleotide frequency indicative of linker (fixed) sequence [0.75]"),
+        type=float,
+        default=0.75,
     )
     subparser.add_argument(
         "-m",
         "--linker_min_length",
-        metavar = "<int>",
-        help = (
+        metavar="<int>",
+        help=(
             "Minimum run of bases exceeding linker_base_frequency to suggest linker sequence [10]"
         ),
-        type = int,
-        default = 10,
+        type=int,
+        default=10,
     )
     subparser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output [false]"
@@ -367,24 +367,24 @@ def validate_seed_args(parser, args):
     logger.info(f"logfile: '{logfile}'")
 
     run_seed(
-        fastqs = [f for f in args.fastqs],
-        num_reads = args.num_reads,
-        random_seed = args.random_seed,
-        upper_read_count = args.upper_read_count,
-        barcodes = args.barcodes,
-        pickle_file = args.pickle,
-        kmer_length = args.kmer_length,
-        output_file = args.out,
-        batches = args.batch_size,
-        linker_base_frequency = args.linker_base_frequency,
-        linker_min_length = args.linker_min_length,
-        verbose = args.verbose,
+        fastqs=[f for f in args.fastqs],
+        num_reads=args.num_reads,
+        random_seed=args.random_seed,
+        upper_read_count=args.upper_read_count,
+        barcodes=args.barcodes,
+        pickle_file=args.pickle,
+        kmer_length=args.kmer_length,
+        output_file=args.out,
+        batches=args.batch_size,
+        linker_base_frequency=args.linker_base_frequency,
+        linker_min_length=args.linker_min_length,
+        verbose=args.verbose,
     )
 
 
 @log_errors
 def process_read_batch(
-    read_batch: List[Tuple[int, str, pysam.FastxRecord]],
+    read_batch: List[Tuple],
     verbose: bool = False,
     matcher: BarcodeMatcherOptimized = None,
     whitelist_key: str = None,
@@ -395,21 +395,31 @@ def process_read_batch(
     logger = logging.getLogger("scarecrow")
     results = []
 
-    for file_index, file_name, read in read_batch:
+    for read1, read2 in read_batch:
         for orientation in ["forward", "reverse"]:
-            read_info = {
-                "file_index": file_index,
-                "file_name": file_name,
-                "header": read.name,
-                "regions": matcher.find_matches(
-                    [(read.sequence, 1)], whitelist_key, orientation, 1
-                ),
-                "seqlen": len(read.sequence),
-            }            
-            results.append(read_info)
+            read_pair_info = {
+                "read1": {
+                    "header": read1.name,
+                    "regions": matcher.find_matches(
+                        [(read1.sequence, 1)], whitelist_key, orientation, 1
+                    ),
+                    "seqlen": len(read1.sequence),
+                },
+                "read2": {
+                    "header": read2.name,
+                    "regions": matcher.find_matches(
+                        [(read2.sequence, 1)], whitelist_key, orientation, 1
+                    ),
+                    "seqlen": len(read2.sequence),
+                },
+            }
+            results.append(read_pair_info)
             if verbose:
                 logger.info(
-                    f"File index:{file_index}\t{file_name}\tRead\t{read.name}\n{read.sequence}\n{read_info['regions']}"
+                    f"Read 1\t{read1.name}\n{read1.sequence}\n{read_pair_info['read1']['regions']}"
+                )
+                logger.info(
+                    f"Read 2\t{read2.name}\n{read2.sequence}\n{read_pair_info['read2']['regions']}"
                 )
 
     # Filter data to ensure no more than one barcode recorded for a given read at a given position and orientation
@@ -423,34 +433,33 @@ def filter_data(data):
     filtered_data = []
 
     for entry in data:
-        file_index = entry["file_index"]
-        file_name = entry["file_name"]
-        header = entry["header"]
-        regions = entry["regions"]
-        seqlen = entry["seqlen"]
+        for read, info in entry.items():  # Access each read within the list
+            header = info["header"]
+            regions = info["regions"]
+            seqlen = info["seqlen"]
 
-        seen = set()
-        filtered_regions = []
+            seen = set()
+            filtered_regions = []
 
-        for region in regions:
-            # Create a key with the unique combination
-            key = (file_index, file_name, header, region.whitelist, region.orientation, region.start)
+            for region in regions:
+                # Create a key with the unique combination
+                key = (header, region.whitelist, region.orientation, region.start)
 
-            # If this combination hasn't been seen before, add it to the result
-            if key not in seen:
-                seen.add(key)
-                filtered_regions.append(region)
+                # If this combination hasn't been seen before, add it to the result
+                if key not in seen:
+                    seen.add(key)
+                    filtered_regions.append(region)
 
-        # Store the filtered regions back into the same structure
-        filtered_data.append(
-            {
-                "file_index": file_index,
-                "file_name": file_name,
-                "header": header,
-                "regions": filtered_regions,
-                "seqlen": seqlen,
-            }
-        )
+            # Store the filtered regions back into the same structure
+            filtered_data.append(
+                {
+                    read: {
+                        "header": header,
+                        "regions": filtered_regions,
+                        "seqlen": seqlen,
+                    }
+                }
+            )
 
     return filtered_data
 
@@ -483,19 +492,20 @@ def run_seed(
     # Initialize matcher based on the chosen method
     if pickle_file:
         matcher = BarcodeMatcherAhoCorasick(
-            barcode_sequences = {k: set(v) for k, v in expected_barcodes.items()},
-            pickle_file = pickle_file,
-            kmer_length = kmer_length,
-            mismatches = 0,
+            barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
+            pickle_file=pickle_file,
+            kmer_length=kmer_length,
+            mismatches=0,
         )
     else:
         matcher = BarcodeMatcherOptimized(
-            barcode_sequences = {k: set(v) for k, v in expected_barcodes.items()},
-            mismatches = 0,
+            barcode_sequences={k: set(v) for k, v in expected_barcodes.items()},
+            mismatches=0,
         )
 
     # Initialize sequence analyzers for each read
-    analyzers = [SequenceFrequencyAnalyzer() for _ in fastqs]
+    read1_analyzer = SequenceFrequencyAnalyzer()
+    read2_analyzer = SequenceFrequencyAnalyzer()
 
     # If subsetting FASTQ, first get total read count
     if num_reads > 0:
@@ -512,16 +522,19 @@ def run_seed(
         logger.info(f"Random seed used: {random_seed}")
 
     # Process files with minimal overhead
-    fastq_handles = [pysam.FastxFile(fastq) for fastq in fastqs]
-    with open(output_file, "w") as out_csv:
+    with (
+        pysam.FastxFile(fastqs[0]) as r1,
+        pysam.FastxFile(fastqs[1]) as r2,
+        open(output_file, "w") as out_csv,
+    ):
         # Write header
         out_csv.write(
-            "file_index\tfile\tread_name\tseqlen\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n"
+            "read\tname\tseqlen\tbarcode_whitelist\tbarcode\torientation\tstart\tend\tmismatches\n"
         )
 
         # Create batches efficiently
         current_batch = []
-        for idx, reads in enumerate(zip(*fastq_handles)):
+        for idx, (read1, read2) in enumerate(zip(r1, r2)):
             if num_reads > 0:
                 # Current read index exceeds max index in subsample so exit
                 if idx > max(sample_indices):
@@ -530,14 +543,17 @@ def run_seed(
                 if idx not in sample_indices:
                     continue
 
-            # Add sequences to analyzers and track file index
-            for file_index, read in enumerate(reads):
-                analyzers[file_index].add_sequence(read.sequence)
-                current_batch.append((file_index, os.path.basename(fastqs[file_index]), read)) 
+            # Add sequences to analyzers
+            read1_analyzer.add_sequence(read1.sequence)
+            read2_analyzer.add_sequence(read2.sequence)
+
+            current_batch.append((read1, read2))
 
             if len(current_batch) >= batches:
                 # Process batch
-                results = process_read_batch(current_batch, verbose, matcher, whitelist_key)
+                results = process_read_batch(
+                    current_batch, verbose, matcher, whitelist_key
+                )
 
                 # Write results
                 for result in results:
@@ -551,57 +567,70 @@ def run_seed(
             for result in results:
                 write_batch_results(result, out_csv)
 
-    logger.info(f"Barcode seeds written to\n\t'{output_file}'")
+    logger.info(f"Barcode seeds written to\n\t{output_file}")
 
     # Write frequency analysis results
     freq_output_base = os.path.splitext(output_file)[0]
-    for file_index, analyzer in enumerate(analyzers):
-        analyzer.write_frequencies(
-            f"{freq_output_base}_file{file_index}_frequencies.tsv", f"file{file_index}"
-        )
+    read1_analyzer.write_frequencies(
+        f"{freq_output_base}_read1_frequencies.tsv", "read1"
+    )
+    read2_analyzer.write_frequencies(
+        f"{freq_output_base}_read2_frequencies.tsv", "read2"
+    )
     logger.info(
-        f"Sequence base frequency results written to:\n\t'{freq_output_base}_file*_frequencies.tsv'"
+        f"Sequence base frequency results written to:\n\t{freq_output_base}_read1_frequencies.tsv\n\t{freq_output_base}_read2_frequencies.tsv"
     )
 
     # Find and write conserved runs
     with open(f"{freq_output_base}_conserved.tsv", "w") as f:
-        f.write("file_index\tstart\tend\tlength\tsequence\tmedian_frequency\n")
+        f.write("read\tstart\tend\tlength\tsequence\tmedian_frequency\n")
 
-        # Analyze each file
-        for file_index, analyzer in enumerate(analyzers):
-            runs = analyzer.find_conserved_runs(
-                linker_base_frequency, linker_min_length
+        # Analyze read1
+        runs = read1_analyzer.find_conserved_runs(
+            linker_base_frequency, linker_min_length
+        )
+        for run in runs:
+            f.write(
+                f"read1\t{run['start']}\t{run['end']}\t{run['length']}\t{run['sequence']}\t{run['median_freq']:.4f}\n"
             )
-            for run in runs:
-                f.write(
-                    f"{file_index}\t{run['start']}\t{run['end']}\t{run['length']}\t{run['sequence']}\t{run['median_freq']:.4f}\n"
-                )
-                logger.info(
-                    f"Possible conserved sequence in file {file_index}:\n\t'{run['start']}-{run['end']}'\t'{run['sequence']}'"
-                )
+            logger.info(
+                f"Possible linker sequence:\n\t'read1:{run['start']}-{run['end']}'\t'{run['sequence']}'"
+            )
+
+        # Analyze read2
+        runs = read2_analyzer.find_conserved_runs(
+            linker_base_frequency, linker_min_length
+        )
+        for run in runs:
+            f.write(
+                f"read2\t{run['start']}\t{run['end']}\t{run['length']}\t{run['sequence']}\t{run['median_freq']:.4f}\n"
+            )
+            logger.info(
+                f"Possible linker sequence:\n\t'read2:{run['start']}-{run['end']}'\t'{run['sequence']}'"
+            )
 
     logger.info(
-        f"Conserved sequence analysis results written to:\n\t'{freq_output_base}_conserved.tsv'"
+        f"Conserved sequence analysis results written to:\n\t{freq_output_base}_conserved.tsv"
     )
-
 
     logger.info("Finished!")
 
 
-def write_batch_results(read_info: Dict, output_handler) -> None:
+def write_batch_results(read_pair: Dict, output_handler) -> None:
     """
-    Write batch results to output file
+    Write batch results to output file efficiently
     """
-    file_index = read_info["file_index"]
-    file_name = read_info["file_name"]
-    header = read_info["header"]
-    seqlen = read_info["seqlen"]
+    for read_key in read_pair:
+        read_info = read_pair[read_key]
+        header = read_info["header"]
+        seqlen = read_info["seqlen"]
 
-    for region in read_info["regions"]:
-        output_handler.write(
-            f"{file_index}\t{file_name}\t{header}\t{seqlen}\t{region.whitelist}\t{region.barcode}\t"
-            f"{region.orientation}\t{region.start}\t{region.end}\t{region.mismatches}\n"
-        )
+        for region in read_info["regions"]:
+            output_handler.write(
+                f"{read_key}\t{header}\t{seqlen}\t{region.whitelist}\t{region.barcode}\t"
+                f"{region.orientation}\t{region.start}\t{region.end}\t{region.mismatches}\n"
+            )
+
 
 def setup_worker_logger(log_file: str = None):
     """Configure logger for worker processes with file output"""

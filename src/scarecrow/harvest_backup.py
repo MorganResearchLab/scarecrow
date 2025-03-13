@@ -13,7 +13,6 @@ import pandas as pd
 from scipy.signal import find_peaks
 import seaborn as sns
 import matplotlib.pyplot as plt
-from collections import defaultdict
 from matplotlib.ticker import MaxNLocator
 from functools import lru_cache
 from scarecrow import __version__
@@ -25,21 +24,16 @@ class ConservedRegion:
     """Represents a conserved region in a read sequence"""
 
     def __init__(
-        self,
-        file_index: int,  # Updated: Use file_index instead of read
-        start: int,
-        end: int,
-        sequence: str,
-        median_frequency: float,
+        self, read: str, start: int, end: int, sequence: str, median_frequency: float
     ):
-        self.file_index = file_index  # Updated: Use file_index instead of read
+        self.read = read
         self.start = start
         self.end = end
         self.sequence = sequence
         self.median_frequency = median_frequency
 
     def __repr__(self) -> str:
-        return f"ConservedRegion(file_index={self.file_index}, start={self.start}, end={self.end})"
+        return f"ConservedRegion(read={self.read}, start={self.start}, end={self.end})"
 
 
 class PeakAnalyzer:
@@ -64,7 +58,7 @@ class PeakAnalyzer:
             df = pd.read_csv(conserved_file, sep="\t")
             conserved_regions = [
                 ConservedRegion(
-                    file_index=row["file_index"],  # Updated: Use file_index
+                    read=row["read"],
                     start=row["start"],
                     end=row["end"],
                     sequence=row["sequence"],
@@ -79,10 +73,10 @@ class PeakAnalyzer:
         """Cached computation of position counts"""
         return pd.Series(positions).value_counts().sort_index()
 
-    def _overlaps_conserved_region(self, file_index: int, start: int, end: int) -> bool:
+    def _overlaps_conserved_region(self, read: str, start: int, end: int) -> bool:
         """Check if a peak overlaps with any conserved region"""
         for region in self.conserved_regions:
-            if region.file_index == file_index and not (end < region.start or start > region.end):
+            if region.read == read and not (end < region.start or start > region.end):
                 return True
         return False
 
@@ -92,34 +86,16 @@ class PeakAnalyzer:
         end_positions: np.ndarray,
         names: np.ndarray,
         barcodes: np.ndarray,
-        file_index: int,
+        read: str,
     ) -> List[Tuple]:
-        """Optimized peak finding with support for single peaks."""
+        """Optimized peak finding with cached computations and conserved region filtering"""
         # Create cache key
-        cache_key = hash((tuple(start_positions), tuple(end_positions), file_index))
+        cache_key = hash((tuple(start_positions), tuple(end_positions), read))
         if cache_key in self._peak_cache:
             return self._peak_cache[cache_key]
 
         # Calculate position counts using cached method
         position_counts = self._compute_position_counts(tuple(start_positions))
-
-        # Handle case where there is only one unique start position
-        if len(position_counts) == 1:
-            start = position_counts.index[0]
-            end = end_positions[start_positions == start][0]
-            count = position_counts.values[0]
-
-            # Calculate barcode diversity
-            unique_barcodes = len(np.unique(barcodes[start_positions == start]))
-            total_barcodes = len(barcodes[start_positions == start])
-            barcode_diversity = round(unique_barcodes / total_barcodes, 4)
-
-            # Return the single peak
-            peaks_with_details = [
-                (start, end, count, 1.0, barcode_diversity)  # read_fraction = 1.0 for single peak
-            ]
-            self._peak_cache[cache_key] = peaks_with_details
-            return peaks_with_details
 
         # Optimize peak finding by pre-allocating arrays
         padded_values = np.zeros(len(position_counts) + 2)
@@ -141,7 +117,7 @@ class PeakAnalyzer:
             end = end_positions[mask][0]
 
             # Skip peaks that overlap with conserved regions
-            if self._overlaps_conserved_region(file_index, start, end):
+            if self._overlaps_conserved_region(read, start, end):
                 continue
 
             # Vectorized operations for peak statistics
@@ -231,7 +207,7 @@ class HarvestOptimizer:
     def _overlaps_existing_peak(
         self,
         start: int,
-        file_index: int,
+        read: str,
         orientation: str,
         selected_peaks: List[Dict],
         min_distance: int,
@@ -239,7 +215,7 @@ class HarvestOptimizer:
         """Check if a peak overlaps with any already selected peak across all whitelists"""
         for peak in selected_peaks:
             if (
-                peak["file_index"] == file_index
+                peak["read"] == read
                 and peak["orientation"] == orientation
                 and abs(start - peak["start"]) < min_distance
             ):
@@ -263,7 +239,7 @@ class HarvestOptimizer:
             # Check if peak overlaps with any existing peak across all whitelists
             if not self._overlaps_existing_peak(
                 row["start"],
-                row["file_index"],
+                row["read"],
                 row["orientation"],
                 existing_peaks,
                 min_distance,
@@ -280,12 +256,7 @@ class HarvestOptimizer:
     def _select_top_peaks(
         self, df: pd.DataFrame, num_barcodes: int, min_distance: int
     ) -> pd.DataFrame:
-        """
-        Select top peaks for each whitelist, ensuring:
-        1. A barcode whitelist is only assigned to one file_index.
-        2. Peaks do not overlap within the same file_index.
-        3. The best peak is selected for each whitelist across all file_index values.
-        """
+        """Select top peaks for each whitelist separately, ensuring no peaks are shared"""
         # Flatten peaks into a dataframe
         peak_data = []
         for _, row in df.iterrows():
@@ -293,9 +264,9 @@ class HarvestOptimizer:
                 peak_data.append(
                     {
                         "barcode_whitelist": row["barcode_whitelist"],
-                        "file_index": row["file_index"],
+                        "read": row["read"],
                         "orientation": row["orientation"],
-                        **peak,  # Unpack peak details (start, end, read_count, etc.)
+                        **peak,  # Unpack peak details
                     }
                 )
 
@@ -304,80 +275,49 @@ class HarvestOptimizer:
 
         peaks_df = pd.DataFrame(peak_data)
 
-        # Group peaks by whitelist and find the best peak for each whitelist across all file_index values
-        whitelist_groups = peaks_df.groupby("barcode_whitelist")
+        # Sort whitelists by total read count to prioritize stronger signals
+        whitelist_priorities = (
+            peaks_df.groupby("barcode_whitelist")["read_count"]
+            .sum()
+            .sort_values(ascending=False)
+        )
 
-        # Track the best peak for each whitelist
-        best_peaks = []
-        for whitelist, group in whitelist_groups:
-            # Sort peaks by read_count (descending) and start position (ascending)
-            sorted_group = group.sort_values(
-                ["read_count", "start"], ascending=[False, True]
-            )
-            # Select the top peak for this whitelist
-            best_peaks.append(sorted_group.iloc[0])
-
-        best_peaks_df = pd.DataFrame(best_peaks)
-
-        # Sort all best peaks by read_count (descending) to prioritize stronger signals
-        best_peaks_df = best_peaks_df.sort_values("read_count", ascending=False)
-
-        # Track selected peaks and assigned whitelists
+        # Select peaks for each whitelist in priority order
         selected_peaks = []
-        assigned_whitelists = set()  # Track whitelists that have already been assigned
-        assigned_file_indices = defaultdict(list)  # Track peaks assigned to each file_index
+        all_selected_peaks = []  # Track all selected peaks across whitelists
 
-        for _, peak in best_peaks_df.iterrows():
-            whitelist = peak["barcode_whitelist"]
-            file_index = peak["file_index"]
-            start = peak["start"]
-            end = peak["end"]
+        for whitelist in whitelist_priorities.index:
+            whitelist_peaks = peaks_df[peaks_df["barcode_whitelist"] == whitelist]
+            whitelist_selected = self._select_peaks_for_whitelist(
+                whitelist_peaks,
+                num_barcodes,
+                min_distance,
+                all_selected_peaks,  # Pass all selected peaks to avoid overlap
+            )
+            selected_peaks.append(whitelist_selected)
 
-            # Skip if the whitelist has already been assigned
-            if whitelist in assigned_whitelists:
-                continue
-
-            # Check if this peak overlaps with any already selected peak in the same file_index
-            overlaps = False
-            for existing_peak in assigned_file_indices[file_index]:
-                if not (end < existing_peak["start"] or start > existing_peak["end"]):
-                    overlaps = True
-                    break
-
-            if not overlaps:
-                # Add this peak to the selected peaks
-                selected_peaks.append(peak)
-                assigned_whitelists.add(whitelist)
-                assigned_file_indices[file_index].append(
-                    {"start": start, "end": end}
-                )
-
-        # Convert selected peaks to a DataFrame
+        # Combine all selected peaks
         if selected_peaks:
-            result_df = pd.DataFrame(selected_peaks)
+            result_df = pd.concat(selected_peaks, ignore_index=True)
+            # Double-check for any overlaps
+            assert self._verify_no_overlaps(result_df, min_distance), (
+                "Found overlapping peaks"
+            )
             return result_df
         return pd.DataFrame()
 
     def _verify_no_overlaps(self, df: pd.DataFrame, min_distance: int = 10) -> bool:
-        """Verify that no peaks overlap within each file_index and orientation group."""
-        # Group by file_index and orientation
-        for (file_index, orientation), group in df.groupby(["file_index", "orientation"]):
+        """Verify that no peaks overlap within each read and orientation"""
+        for (read, orientation), group in df.groupby(["read", "orientation"]):
             starts = group["start"].values
-            ends = group["end"].values
-
-            # Check for overlaps within this group
-            for i in range(len(starts)):
-                for j in range(i + 1, len(starts)):
-                    # Check if the peaks overlap
-                    if not (ends[i] < starts[j] or starts[i] > ends[j]):
-                        # Peaks overlap
+            for i, start1 in enumerate(starts):
+                for start2 in starts[i + 1 :]:
+                    if abs(start1 - start2) < min_distance:
                         self.logger.error(
-                            f"Found overlapping peaks in file {file_index}, orientation {orientation}: "
-                            f"Peak 1 (start={starts[i]}, end={ends[i]}) overlaps with "
-                            f"Peak 2 (start={starts[j]}, end={ends[j]})"
+                            f"Found overlapping peaks: {start1} and {start2} "
+                            f"in read {read}, orientation {orientation}"
                         )
                         return False
-
         return True
 
     @log_errors
@@ -392,9 +332,8 @@ class HarvestOptimizer:
                 file,
                 sep="\t",
                 usecols=[
-                    "file_index",
-                    "file",
-                    "read_name",
+                    "read",
+                    "name",
                     "seqlen",
                     "barcode_whitelist",
                     "barcode",
@@ -421,22 +360,22 @@ class HarvestOptimizer:
         results = []
 
         # Group data efficiently
-        grouped = barcode_data.groupby(["file_index", "barcode_whitelist", "orientation"])
+        grouped = barcode_data.groupby(["read", "barcode_whitelist", "orientation"])
 
-        for (file_index, barcode_whitelist, orientation), group in grouped:
+        for (read, barcode_whitelist, orientation), group in grouped:
             # Convert to numpy arrays for faster processing
             start_arr = group["start"].values
             end_arr = group["end"].values
-            names_arr = group["read_name"].values
+            names_arr = group["name"].values
             barcodes_arr = group["barcode"].values
 
             peaks = self.peak_analyzer.find_peaks_optimized(
-                start_arr, end_arr, names_arr, barcodes_arr, file_index
+                start_arr, end_arr, names_arr, barcodes_arr, read
             )
 
             results.append(
                 {
-                    "file_index": file_index,
+                    "read": read,
                     "barcode_whitelist": barcode_whitelist,
                     "orientation": orientation,
                     "peaks": [
@@ -445,6 +384,7 @@ class HarvestOptimizer:
                             "end": p[1],
                             "read_count": p[2],
                             "read_fraction": p[3],
+                            "barcode_diversity": p[4],
                         }
                         for p in peaks
                     ],
@@ -565,7 +505,7 @@ def run_harvest(
         df = pd.read_csv(conserved_file, sep="\t")
         conserved_regions = [
             ConservedRegion(
-                file_index=row["file_index"],
+                read=row["read"],
                 start=row["start"],
                 end=row["end"],
                 sequence=row["sequence"],
@@ -580,7 +520,7 @@ def run_harvest(
         results.to_csv(output_file, index=False)
 
     # Generate plot with optimized settings
-    pngfile = f"./scarecrow_harvest_{generate_random_string()}"
+    pngfile = f"./scarecrow_harvest_{generate_random_string()}.png"
     plot_peaks_optimized(
         pd.concat([pd.read_csv(f, sep="\t") for f in barcodes], ignore_index=True),
         outfile=pngfile,
@@ -594,20 +534,46 @@ def run_harvest(
 @log_errors
 def plot_peaks_optimized(
     barcode_data: pd.DataFrame,
-    outfile: str = "plot_faceted",
+    outfile: str = "plot_faceted.png",
     dpi: int = 300,
     conserved_regions: Optional[List[ConservedRegion]] = None,
     selected_peaks: Optional[pd.DataFrame] = None,
 ) -> None:
     """Optimized plotting function with conserved region highlighting and peak annotations"""
+    logger = logging.getLogger("scarecrow")
+
+    # Calculate ylim
+    max_count = (
+        barcode_data.groupby(["read", "orientation", "barcode_whitelist"])["start"]
+        .value_counts()
+        .max()
+    )
+    ylim = (0, max_count * 1.2)  # Add 20% padding for labels
+
+    # Create plots using matplotlib's background renderer
+    plt.switch_backend("Agg")
+
+    # Separate data into read1 and read2 for forward and reverse orientations
+    read1_forward = barcode_data[
+        (barcode_data["read"] == "read1") & (barcode_data["orientation"] == "forward")
+    ]
+    read1_reverse = barcode_data[
+        (barcode_data["read"] == "read1") & (barcode_data["orientation"] == "reverse")
+    ]
+    read2_forward = barcode_data[
+        (barcode_data["read"] == "read2") & (barcode_data["orientation"] == "forward")
+    ]
+    read2_reverse = barcode_data[
+        (barcode_data["read"] == "read2") & (barcode_data["orientation"] == "reverse")
+    ]
 
     def _add_conserved_regions(ax, data, ylim):
         """Helper function to add conserved region highlighting"""
         if conserved_regions:
-            file_index = data["file_index"].iloc[0] if not data.empty else None
-            if file_index:
+            read = data["read"].iloc[0] if not data.empty else None
+            if read:
                 for region in conserved_regions:
-                    if region.file_index == file_index:  # Only add regions for matching read
+                    if region.read == read:  # Only add regions for matching read
                         # Add shaded region for conserved sequence
                         ax.axvspan(
                             region.start,
@@ -620,13 +586,13 @@ def plot_peaks_optimized(
     def _add_peak_annotations(ax, data, ylim):
         """Helper function to add peak annotations"""
         if selected_peaks is not None and not data.empty:
-            read = data["file_index"].iloc[0]
+            read = data["read"].iloc[0]
             orientation = data["orientation"].iloc[0]
             whitelist = data["barcode_whitelist"].iloc[0]
 
             # Filter peaks for this specific read and orientation
             peaks = selected_peaks[
-                (selected_peaks["file_index"] == read)
+                (selected_peaks["read"] == read)
                 & (selected_peaks["orientation"] == orientation)
             ]
 
@@ -653,34 +619,13 @@ def plot_peaks_optimized(
     def _create_enhanced_facet_plot(data, ylim):
         """Create facet plot with both conserved regions and peak annotations"""
         if data.empty:
-            logger.warning("No data available for plotting. Skipping this group.")
-            return None
-
-        # Ensure the 'start' column exists
-        if "start" not in data.columns:
-            logger.warning("'start' column not found in data. Skipping this group.")
-            return None
-
-        # Ensure the 'start' column contains valid numeric data
-        if not pd.api.types.is_numeric_dtype(data["start"]):
-            logger.warning("'start' column contains non-numeric data. Skipping this group.")
-            return None
-
-        # Check for NaN or infinite values in the 'start' column
-        if data["start"].isnull().any() or np.isinf(data["start"]).any():
-            logger.warning("'start' column contains NaN or infinite values. Skipping this group.")
-            return None
-
-        # Ensure there are valid start positions to plot
-        if data["start"].isnull().all():
-            logger.warning("All 'start' values are null. Skipping this group.")
             return None
 
         # Use `row` for barcode_whitelist to stack facets vertically
         g = sns.FacetGrid(
             data,
             row="barcode_whitelist",  # Facet by whitelist vertically
-            hue="file_index",  # Use file_index for coloring
+            hue="read",
             margin_titles=True,
             height=3,
             aspect=3,
@@ -688,30 +633,10 @@ def plot_peaks_optimized(
 
         # Optimize plot rendering
         with plt.style.context("fast"):
-            # Calculate the range of 'start' values
-            start_range = data["start"].max() - data["start"].min()
-
-            if start_range == 0:
-                # If all 'start' values are the same, plot a single bar
-                start_value = data["start"].iloc[0]
-                count = len(data)
-
-                # Create a bar plot instead of a histogram
-                def plot_single_bar(data, **kwargs):
-                    plt.bar(start_value, count, width=0.8, align="center")
-
-                g.map(plot_single_bar, "start")
-            else:
-                # Use a default binwidth of 1, but ensure it's smaller than the range
-                binwidth = min(1, start_range)
-                bins = "auto"  # Let seaborn automatically determine the number of bins
-
-                # Plot the histogram
-                g.map(sns.histplot, "start", binwidth=binwidth, bins=bins, kde=False)
+            g.map(sns.histplot, "start", binwidth=1, kde=False)
 
         g.set_axis_labels("Barcode start position", "Count", fontsize=20)
         g.set_titles(row_template="{row_name}", size=20)  # Only row titles are needed
-        g.fig.suptitle(f"File index: {file_index} ({file}), barcode orientation: {orientation}", y=1.02)
 
         if ylim is not None:
             g.set(ylim=ylim)
@@ -749,51 +674,41 @@ def plot_peaks_optimized(
 
         return g
 
-    # Get logger
-    logger = logging.getLogger("scarecrow")
+    # Create individual plots for each read and orientation
+    g1 = _create_enhanced_facet_plot(read1_forward, ylim)
+    g2 = _create_enhanced_facet_plot(read1_reverse, ylim)
+    g3 = _create_enhanced_facet_plot(read2_forward, ylim)
+    g4 = _create_enhanced_facet_plot(read2_reverse, ylim)
 
-    # Calculate ylim
-    max_count = (
-        barcode_data.groupby(["file_index", "file", "orientation", "barcode_whitelist"])["start"]
-        .value_counts()
-        .max()
-    )
-    ylim = (0, max_count * 1.2)  # Add 20% padding for labels
+    # Save temporary files with optimized compression
+    temp_files = []
+    for i, g in enumerate([g1, g2, g3, g4]):
+        if g is not None:
+            temp_file = f"{outfile}.temp_{i}.png"
+            g.savefig(temp_file, dpi=dpi, bbox_inches="tight")
+            temp_files.append(temp_file)
 
-    # Create plots using matplotlib's background renderer
-    plt.switch_backend("Agg")
-
-    # Separate data by file_index and orientation
-    file_groups = barcode_data.groupby(["file_index", "file", "orientation"])
-
-    # Create individual plots for each file and orientation
-    logger.info("Generating plots of barcode count distributions")
-    for (file_index, file, orientation), group in file_groups:
-        if not group.empty:
-            # Create plot for this file and orientation
-            g = _create_enhanced_facet_plot(group, ylim)
-            if g is not None:
-                temp_file = f"{outfile}.file_index_{file_index}_{orientation}.png"
-                g.savefig(temp_file, dpi=dpi, bbox_inches="tight")
-                logger.info(f"- {temp_file}")
-
-"""
     # Create final combined plot
-    fig, axes = plt.subplots(len(file_groups), 1, figsize=(12, 8 * len(file_groups)))
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
 
     # Load and display images in the correct order
-    for i, (file_index, orientation, img_file) in enumerate(temp_files):
+    for i, (img_file, ax, title) in enumerate(
+        [
+            (temp_files[0], axes[0, 0], "Read 1: forward"),
+            (temp_files[1], axes[0, 1], "Read 1: reverse"),
+            (temp_files[2], axes[1, 0], "Read 2: forward"),
+            (temp_files[3], axes[1, 1], "Read 2: reverse"),
+        ]
+    ):
         if os.path.exists(img_file):
             img = plt.imread(img_file)
-            ax = axes[i]
             ax.imshow(img)
             ax.axis("off")
-            ax.set_title(f"File {file_index}: {orientation}", fontsize=12, loc="left")
+            ax.set_title(title, fontsize=12, loc="left")
             os.remove(img_file)
 
     # Save final plot efficiently
     fig.tight_layout(pad=2.0)
     plt.savefig(outfile, dpi=dpi, bbox_inches="tight")
     plt.close()
-    logger.info(f"Barcode count distribution with annotations: {outfile}")"
-"""
+    logger.info(f"Barcode count distribution with annotations: {outfile}")

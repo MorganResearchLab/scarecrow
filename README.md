@@ -20,13 +20,9 @@ A toolkit for preprocessing single cell sequencing data to improve data yield.
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
 
+* harvest
+*   - read_count in table does not match the histogram
 
-* Added functionality to reap.py _get_sequence_with_jitter to tackle potentially clipped barcodes starting at position 1
-*   - this is not applied to the trie method currently
-
-* Compact trie not as efficient as ahocorasick trie so reinstate the previous method
-*   - retain the structure outputs and the memory usage
-*   - will need to check if code needs refactoring for this
 
 # Testing on laptop (WTv2)
 ```bash
@@ -87,10 +83,25 @@ scarecrow samstat --sam ./WTv2/cDNA_trie.sam
 
 # Testing on laptop (Scale)
 ```bash
+FASTQS=(./Scale/*fastq.gz)
+BARCODES=(BC1:lig:./Scale/3lvlRNA_lig.txt
+          BC2:rt:./Scale/3lvlRNA_rt.txt
+          BC3:pcr:./Scale/3lvlRNA_pcr.txt)
+
+# Seed
+for BARCODE in ${BARCODES[@]}
+do
+    ID=${BARCODE%:*:*}
+    WHITELIST=${BARCODE#*:*:}
+    echo ${ID}
+    time scarecrow seed --fastqs ${FASTQS[@]} \
+        -o ./Scale/barcodes_${ID}.csv --barcodes ${BARCODE} -n 0 -u 0
+done
+
 # Harvest (set-based approach)
-FILES=(./Scale/barcodes.BC*.csv)
+FILES=(./Scale/barcodes_BC*.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./Scale/barcodes.BC1_conserved.tsv \
+    --conserved ./Scale/barcodes_BC1_set_conserved.tsv \
     --out ./Scale/barcode_positions.csv
 
 ```
