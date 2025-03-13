@@ -1151,10 +1151,8 @@ def combine_worker_outputs(output, num_workers):
             worker_output = f"{output}_worker_{i}.sam"
             try:
                 with open(worker_output, "r") as infile:
-                    lines = infile.readlines()
-                    outfile.writelines(lines)
-                    total_lines += len(lines)
-                    logger.info(f"Combined {len(lines)} lines from {worker_output}")
+                    shutil.copyfileobj(infile, outfile)
+                    logger.info(f"Combined data from {worker_output}")
                 os.remove(worker_output)
             except FileNotFoundError:
                 logger.warning(
@@ -1163,4 +1161,4 @@ def combine_worker_outputs(output, num_workers):
             except Exception as e:
                 logger.error(f"Error combining {worker_output}: {str(e)}")
 
-    logger.info(f"Total lines written to final output: {total_lines}")
+    logger.info(f"Total data combined into final output: {output}")
