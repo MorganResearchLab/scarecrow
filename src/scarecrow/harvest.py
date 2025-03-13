@@ -294,6 +294,7 @@ class HarvestOptimizer:
                     {
                         "barcode_whitelist": row["barcode_whitelist"],
                         "file_index": row["file_index"],
+                        "file": row["file"],
                         "orientation": row["orientation"],
                         **peak,  # Unpack peak details (start, end, read_count, etc.)
                     }
@@ -330,6 +331,7 @@ class HarvestOptimizer:
         for _, peak in best_peaks_df.iterrows():
             whitelist = peak["barcode_whitelist"]
             file_index = peak["file_index"]
+            file = peak["file"]
             start = peak["start"]
             end = peak["end"]
 
@@ -421,9 +423,9 @@ class HarvestOptimizer:
         results = []
 
         # Group data efficiently
-        grouped = barcode_data.groupby(["file_index", "barcode_whitelist", "orientation"])
+        grouped = barcode_data.groupby(["file_index", "file", "barcode_whitelist", "orientation"])
 
-        for (file_index, barcode_whitelist, orientation), group in grouped:
+        for (file_index, file, barcode_whitelist, orientation), group in grouped:
             # Convert to numpy arrays for faster processing
             start_arr = group["start"].values
             end_arr = group["end"].values
@@ -437,6 +439,7 @@ class HarvestOptimizer:
             results.append(
                 {
                     "file_index": file_index,
+                    "file": file,
                     "barcode_whitelist": barcode_whitelist,
                     "orientation": orientation,
                     "peaks": [
