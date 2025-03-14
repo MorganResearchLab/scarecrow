@@ -426,6 +426,7 @@ class HarvestOptimizer:
         grouped = barcode_data.groupby(["file_index", "file", "barcode_whitelist", "orientation"])
 
         for (file_index, file, barcode_whitelist, orientation), group in grouped:
+
             # Convert to numpy arrays for faster processing
             start_arr = group["start"].values
             end_arr = group["end"].values
@@ -659,24 +660,9 @@ def plot_peaks_optimized(
             logger.warning("No data available for plotting. Skipping this group.")
             return None
 
-        # Ensure the 'start' column exists
-        if "start" not in data.columns:
-            logger.warning("'start' column not found in data. Skipping this group.")
-            return None
-
-        # Ensure the 'start' column contains valid numeric data
-        if not pd.api.types.is_numeric_dtype(data["start"]):
-            logger.warning("'start' column contains non-numeric data. Skipping this group.")
-            return None
-
-        # Check for NaN or infinite values in the 'start' column
-        if data["start"].isnull().any() or np.isinf(data["start"]).any():
-            logger.warning("'start' column contains NaN or infinite values. Skipping this group.")
-            return None
-
-        # Ensure there are valid start positions to plot
-        if data["start"].isnull().all():
-            logger.warning("All 'start' values are null. Skipping this group.")
+        # Ensure the 'start' column exists and is valid
+        if "start" not in data.columns or not pd.api.types.is_numeric_dtype(data["start"]):
+            logger.warning("Invalid 'start' column. Skipping this group.")
             return None
 
         # Use `row` for barcode_whitelist to stack facets vertically
@@ -706,7 +692,7 @@ def plot_peaks_optimized(
                 g.map(plot_single_bar, "start")
             else:
                 # Use a default binwidth of 1, but ensure it's smaller than the range
-                binwidth = min(1, start_range)
+                binwidth = min(0.5, start_range)
                 bins = "auto"  # Let seaborn automatically determine the number of bins
 
                 # Plot the histogram

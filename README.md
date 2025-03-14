@@ -20,8 +20,6 @@ A toolkit for preprocessing single cell sequencing data to improve data yield.
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
 
-* harvest
-*   - read_count in table does not match the histogram
 
 
 # Testing on laptop (WTv2)
@@ -101,9 +99,22 @@ done
 # Harvest (set-based approach)
 FILES=(./Scale/barcodes_BC*.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./Scale/barcodes_BC1_set_conserved.tsv \
+    --conserved ./Scale/barcodes_BC1_conserved.tsv \
     --out ./Scale/barcode_positions.csv
 
+
+# scarecrow reap
+BQ=10
+JITTER=1
+MISMATCH=1
+scarecrow reap --threads 2 --batch_size 50000 \
+                --fastqs ${FASTQS[@]} \
+                -p ./Scale/barcode_positions.csv \
+                --barcode_reverse_order \
+                --barcodes ${BARCODES[@]} \
+                --extract 4:1-76 --umi 3:16-23 \
+                --jitter ${JITTER} --mismatch ${MISMATCH} --base_quality ${BQ} \
+                --out ./Scale/cDNA
 ```
 
 

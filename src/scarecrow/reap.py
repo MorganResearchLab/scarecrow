@@ -1140,7 +1140,7 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
                     total_reads_counter.value += count
                 
                 # Log the total number of reads processed periodically
-                if total_reads_counter.value % 100000 == 0:
+                if total_reads_counter.value % 1000000 == 0:
                     logger.info(f"Total reads processed: {total_reads_counter.value}")
 
                 batch_count += 1
