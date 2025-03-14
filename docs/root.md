@@ -18,4 +18,4 @@
 * [Workflow](workflow.md)
 * Examples
     * [Parse Evercode WTv2](example_evercode.md)
-    * [Scale Bio RNA](scale.md)
+    * [Scale Bio RNA](example_scale.md)
