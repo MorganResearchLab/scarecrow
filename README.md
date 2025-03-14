@@ -20,7 +20,8 @@ A toolkit for preprocessing single cell sequencing data to improve data yield.
 *   - barcode recovery
 *   - alignment (STAR and kallisto)
 
-
+* harvest
+*   - parse plot is missing blue highlight for BC3:v1
 
 # Testing on laptop (WTv2)
 ```bash
@@ -44,9 +45,9 @@ do
 done
 
 # Harvest (set-based approach)
-FILES=(./WTv2/barcodes_BC*_set.csv)
+FILES=(./WTv2/barcodes.BC*.csv)
 scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./WTv2/barcodes_BC1_set_conserved.tsv \
+    --conserved ./WTv2/barcodes.BC1_conserved.tsv \
     --out ./WTv2/barcode_positions_set.csv
 
 # Harvest (trie and kmer index approach)

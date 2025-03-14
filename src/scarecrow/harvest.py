@@ -281,10 +281,8 @@ class HarvestOptimizer:
         self, df: pd.DataFrame, num_barcodes: int, min_distance: int
     ) -> pd.DataFrame:
         """
-        Select top peaks for each whitelist, ensuring:
-        1. A barcode whitelist is only assigned to one file_index.
-        2. Peaks do not overlap within the same file_index.
-        3. The best peak is selected for each whitelist across all file_index values.
+        Select the best peak globally for each barcode_whitelist across all file_index values.
+        Ensure that each peak is only assigned to one barcode_whitelist.
         """
         # Flatten peaks into a dataframe
         peak_data = []
@@ -305,37 +303,23 @@ class HarvestOptimizer:
 
         peaks_df = pd.DataFrame(peak_data)
 
-        # Group peaks by whitelist and find the best peak for each whitelist across all file_index values
-        whitelist_groups = peaks_df.groupby("barcode_whitelist")
-
-        # Track the best peak for each whitelist
-        best_peaks = []
-        for whitelist, group in whitelist_groups:
-            # Sort peaks by read_count (descending) and start position (ascending)
-            sorted_group = group.sort_values(
-                ["read_count", "start"], ascending=[False, True]
-            )
-            # Select the top peak for this whitelist
-            best_peaks.append(sorted_group.iloc[0])
-
-        best_peaks_df = pd.DataFrame(best_peaks)
-
-        # Sort all best peaks by read_count (descending) to prioritize stronger signals
-        best_peaks_df = best_peaks_df.sort_values("read_count", ascending=False)
+        # Sort all peaks by read_count (descending) and start position (ascending)
+        sorted_peaks = peaks_df.sort_values(
+            ["read_count", "start"], ascending=[False, True]
+        )
 
         # Track selected peaks and assigned whitelists
         selected_peaks = []
         assigned_whitelists = set()  # Track whitelists that have already been assigned
         assigned_file_indices = defaultdict(list)  # Track peaks assigned to each file_index
 
-        for _, peak in best_peaks_df.iterrows():
+        for _, peak in sorted_peaks.iterrows():
             whitelist = peak["barcode_whitelist"]
             file_index = peak["file_index"]
-            file = peak["file"]
             start = peak["start"]
             end = peak["end"]
 
-            # Skip if the whitelist has already been assigned
+            # Skip if the whitelist has already been assigned a peak
             if whitelist in assigned_whitelists:
                 continue
 
@@ -349,7 +333,7 @@ class HarvestOptimizer:
             if not overlaps:
                 # Add this peak to the selected peaks
                 selected_peaks.append(peak)
-                assigned_whitelists.add(whitelist)
+                assigned_whitelists.add(whitelist)  # Mark this whitelist as assigned
                 assigned_file_indices[file_index].append(
                     {"start": start, "end": end}
                 )
@@ -584,6 +568,7 @@ def run_harvest(
         results.to_csv(output_file, index=False)
 
     # Generate plot with optimized settings
+    logger.info(f"{results}")
     pngfile = f"./scarecrow_harvest_{generate_random_string()}"
     plot_peaks_optimized(
         pd.concat([pd.read_csv(f, sep="\t") for f in barcodes], ignore_index=True),
@@ -687,7 +672,7 @@ def plot_peaks_optimized(
 
                 # Create a bar plot instead of a histogram
                 def plot_single_bar(data, **kwargs):
-                    plt.bar(start_value, count, width=0.8, align="center")
+                    plt.bar(start_value, count, width = 0.8, align = "center")
 
                 g.map(plot_single_bar, "start")
             else:
@@ -696,14 +681,14 @@ def plot_peaks_optimized(
                 bins = "auto"  # Let seaborn automatically determine the number of bins
 
                 # Plot the histogram
-                g.map(sns.histplot, "start", binwidth=binwidth, bins=bins, kde=False)
+                g.map(sns.histplot, "start", binwidth = binwidth, bins = bins, kde = False)
 
-        g.set_axis_labels("Barcode start position", "Count", fontsize=20)
-        g.set_titles(row_template="{row_name}", size=20)  # Only row titles are needed
-        g.fig.suptitle(f"File index: {file_index} ({file}), barcode orientation: {orientation}", y=1.02)
+        g.set_axis_labels("Barcode start position", "Count", fontsize = 20)
+        g.set_titles(row_template = "{row_name}", size = 20)  # Only row titles are needed
+        g.fig.suptitle(f"File index: {file_index} ({file}), barcode orientation: {orientation}", y = 1.02)
 
         if ylim is not None:
-            g.set(ylim=ylim)
+            g.set(ylim = ylim)
 
         # Optimize axis rendering and add annotations
         for ax, (whitelist, subplot_data) in zip(
