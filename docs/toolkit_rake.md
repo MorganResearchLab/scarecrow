@@ -2,6 +2,8 @@
 
 [root](root.md)
 
+# deprecated
+
 ## scarecrow rake
 The `rake` tool has since been internalized and no longer needs to be called directly. This tool takes a barcode whitelist and calculates all variations of each barcode for n `--mismatches`. The resulting list is structured and output in JSON format.
 

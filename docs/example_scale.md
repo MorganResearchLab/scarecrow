@@ -131,43 +131,77 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 8G --time=12:00:00 -o reap.%j
         --out_sam
 ```
 
-*TBC below*
-
 In addition to generating the SAM file, `scarecrow reap` outputs a `_mismatch_stats.csv` and a `_position_stats.csv`. The mismatch_stats CSV has the following format:
 
 ```bash
 mismatches,count
--3,5654876
--2,5249063
--1,16976272
-0,126774904
-1,11373736
-2,1287519
-3,156456
+-2,5001277
+-1,38931650
+0,293542244
+1,12622956
+2,4992085
+3,361193
+4,419936
+5,18072
 ```
 
 Indicating the number of reads recorded for each sum of mismatches across its barcodes. Negative numbers indicate the number of reads for which no barcode was found (i.e. -1 is one barcode unmatched, -2 is two barcodes unmatched, ...). Although we used `--mismatch 2`, a mismatch count of three is possible if for example each of the three barcodes has one mismatch, or one barcode has two mismatches and another has 1 mismatch.
 
-The position_stats CSV follows a similar format, indicating the count of barcodes starting at each position within `--jitter 2` :
+The position_stats CSV follows a similar format, indicating the count of barcodes starting at each position within `--jitter 1` :
 
 ```bash
 position,count
-9,843639
-10,2986137
-11,162568743
-12,792597
-13,281710
-47,1810251
-48,8885605
-49,154939989
-50,1587644
-51,249337
-77,3125647
-78,12576913
-79,151770266
+-1,1372346
+1,700463986
+2,4231456
+23,4500938
+24,186144490
+25,122020819
+N,48934204
 ```
 
-This illustrates that millions of reads have barcodes not starting at the expected positions.
+This illustrates that millions of reads have barcodes not starting at the expected positions. Note, the Scale Bio RNA library structure is as follows:
+
+``` bash
+# Read 1 (read_3.fastq.gz)  :   LIG (BC2) [1-9] | SPLINT (LINKER) [10-16] | UMI [17-24] | RT (BC1) [25-34]
+# Index 2 (read_1.fastq.gz) :  PCR (BC3) [1-10]  
+```
+
+The ScaleRna workflow uses the linker as an anchor for determining the offset start positions of the UMI and BC1, ackowledging that the linker could start at (0-based) position 8 or 9. 
+
+We observe a significant number of BC1 barcodes starting at position 24. We also note that 99% of BC2 barcodes end with a T nucleotide when BC1 starts at position 24. Manual inspection of read 3 sequences show that the linker sequence (`TCAGAGC`) often shares that `T` nt with BC1. For example, below is the first 10 reads with the linker sequence marked:
+
+```bash
+NACTGGCA`TCAGAGC`GTATCATTAGAGAAGGTTT
+NTACCTAAG`TCAGAGC`ATTTGGCCGAAGATCGAG
+NCAGATAC`TCAGAGC`ACGGGCTATAGATCTACTT
+NCAGCGGT`TCAGAGC`GGAGGTTGCAGTGAGCCGA
+NCTGGACC`TCAGAGC`TGGTGGAATTATTCATTCT
+NTCTTCAGA`TCAGAGC`ATTCAAGCACTATGCAAT
+NACGAGCG`TCAGAGC`CGCGGAGGGACCTTGATAT
+NTCGGAGT`TCAGAGC`GATGACCCCGGATTAGAAT
+NCAAGATCT`TCAGAGC`CTAACTAAACTTAACCTT
+NCAATGCTA`TCAGAGC`AGGCTCTTGCCATTCTCC
+```
+
+In the above example, all of the BC2 sequences (first 9 bases) "truncated" by 1 nt has a barcode match that ends with `T`. This sharing of the `T` nucleotide between BC2 and linker impacts the positions of downstream UMI and BC1 elements. Below is an example:
+
+```bash
+@SRR28867557.450070 A01209:299:HH7MLDRX3:1:2102:24659:1204 length=34
+TGGACCTCTCAGAGCGCTTACCACTCAATAGGTT 
+|||||||||                             BC2     (TGGACCTCT)
+        |||||||.                      Linker  (TCAGAGC)
+                ||||||||              UMI     (CTTACCAC expected position)
+                       ||||||||||.    BC1     (CTCAATAGGT expected based on start 24)
+                      ||||||||||..    BC1     (ACTCAATAGG exact barcode match)
+                      
+```
+
+The ScaleRna workflow appears to overcome this by using linker-anchor offset approach. However, in that approach BC1 would start at position 24, and the resulting BC1 sequence has no exact match in the 3lvlRNA_rt.txt whitelist. By contrast, there is an exact barcode match starting at position 23 which is detected by `scarecrow` when using `--jitter 1` on the assumption that BC1 starts at position 24. However, this will result in a 2 nt overlap between the UMI and BC1. **Consequently, we rely on downstream tools to perform UMI correction**.
+
+
+*TBC below*
+
 
 ### 5. Align with STAR
 

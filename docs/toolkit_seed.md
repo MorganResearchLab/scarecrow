@@ -12,21 +12,23 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz \
     --barcodes BC1:v1:v1_whitelist.txt 
 ```
 
-The `--out` file has the below format. The `read` column indicates the read on which a barcode match was found, `name` is the name retrieved from sequencing read, `barcode_whitelist` contains the first two elements of the string passed to `--barcdoes`, `barcode` is the sequence of the matched barcode, `orientation` is the orientation in which the sequence was found on the read, `start` and `end` are the positions of the alignment, `mismatches` is the number of mismatching bases between the fastq sequence and barcode.
+The `--out` file has the below format. The `file_index` is the 0-based index of the FASTQ file (of files passed via `--fastq`) on which an exact match was identified; the associated FASTQ file for the index is listed under `file`. The `read_name` column indicates the read name of the sequencing read, and `seqlen` indicates the length of the read. The `barcode_whitelist` contains the first two elements of the string passed to `--barcdoes`, `barcode` is the sequence of the matched barcode, `orientation` is the orientation in which the sequence was found on the read, `start` and `end` are the positions of the alignment, `mismatches` is the number of mismatching bases between the fastq sequence and barcode.
 
 ```bash
-read    name    barcode_whitelist       barcode orientation     start   end     mismatches
-read1   SRR28867558.1   ('BC1', 'n99_v5')       CAATTTCC        forward 10      17      1
-read1   SRR28867558.1   ('BC1', 'n99_v5')       AATCTTTC        reverse 19      26      1
-read1   SRR28867558.1   ('BC1', 'n99_v5')       TACTGTCT        reverse 33      40      1
+file_index      file    read_name       seqlen  barcode_whitelist       barcode orientation     start   end     mismatches
+1       SRR28867558_2.fastq.gz  SRR28867558.5   74      BC1:n99_v5      CACTTTCA        reverse 8       15      0
+1       SRR28867558_2.fastq.gz  SRR28867558.5   74      BC1:n99_v5      GTGCTTGA        reverse 24      31      0
+1       SRR28867558_2.fastq.gz  SRR28867558.5   74      BC1:n99_v5      GTGCTTGA        reverse 50      57      0
+2       SRR28867558_3.fastq.gz  SRR28867558.18  86      BC1:n99_v5      GTGCTTGA        forward 63      70      0
+2       SRR28867558_3.fastq.gz  SRR28867558.18  86      BC1:n99_v5      TGTGTATG        forward 79      86      0
 ```
 
-The `--out[-csv]_conserved.tsv` file has the below format. The `read` column indicates the read on which the conserved sequence was identified, `start` and `end` indicate the conserved sequence positions, `length` indicates its length, `sequence` is the conserved sequence, `median_frequency` is the median frequency of the sequence across the reads. Conserved sequences represent linkers, adapters, and other 'fixed' sequences within a read.
+The `--out[-csv]_conserved.tsv` file has the below format. The `file_index` column indicates the 0-based FASTQ file index from which the conserved sequence was identified, `start` and `end` indicate the conserved sequence positions, `length` indicates its length, `sequence` is the conserved sequence, `median_frequency` is the median frequency of the sequence across the reads. Conserved sequences represent linkers, adapters, and other 'fixed' sequences within a read.
 
 ```bash
-read    start   end     length  sequence        median_frequency
-read2   31      48      18      TCGCATCGGCGTACGACT      0.8843
-read2   57      78      22      ATCCACGTGCTTGAGACTGTGG  0.8721
+file_index      start   end     length  sequence        median_frequency
+2       31      48      18      TCGCATCGGCGTACGACT      0.8837
+2       57      78      22      ATCCACGTGCTTGAGACTGTGG  0.8698
 ```
 
 The `--out[-csv]_read[1|2]_frequencies.tsv` file has the below format. The `read` column indicates the sequencing read analysed, the `position` indicates the position along the read, `A`, `C`, `G`, `T`, `N` indicate the frequencies of the observed nucleotides at that position across reads.

@@ -3,15 +3,19 @@
 [root](root.md)
 
 ## scarecrow reap
-The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either a FASTQ file or a SAM file (default) with the prefix `--out`. If writing to SAM then it the input FASTQ data should be trimmed beforehand to remove any adapter sequences. `jitter` is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks. `mismatch` is the maximum number of mismatches between an expected and observed barcode sequence. If 'jitter' extends beyond the start of the sequence, for example if the barcode starts at position 1, then it will clip *n* end bases and insert *n* x N start bases when checking negative positions. `base_quality` will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN` in the sequence header. 
+The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either an interleaved FASTQ file with `--out_fastq` or a SAM file with `--out_sam` (default), with the prefix `--out <prefix>`. If writing to SAM then the input FASTQ data should be trimmed beforehand to remove any adapter sequences. If output as a FASTQ file, a JSON file is also generated which contains the commandline parameters required to process the file with the kallisto-bustools workflow (kb count).
 
-This tool processes reads in batches and so generates a lot of temporary files in the process. These temporary files are removed once the process is complete.
+There are options to set `jitter`, which is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks; `mismatch`, which is the maximum number of mismatches between an expected and observed barcode sequence. If `jitter` extends beyond the start of the sequence, for example if the barcode starts at position 1, then it will clip *n* end bases and insert *n* x `N` start bases when checking negative positions. The `N` bases count towards mismatches. The `base_quality` setting will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN`. 
+
+Files containing barcode mismatch counts (`_mismatch_stats.csv`) and start positions (`_position_stats.csv`) counts are also generated.
+
+This tool processes reads in batches and so generates temporary files in the process. These temporary files are automatically removed once the process is complete.
 
 ```bash
-# Reap target sequence from fastqs (TBC)
 scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz \
     --barcode_positions barcode_positions.csv \
     --barcodes BC1:v1:v1_whitelist.txt BC2:v1:v1_whitelist.txt BC3:n198:n198_whitelist.txt \
+    --out_fastq \
     --out ./cDNA \
     --extract 1:1-64 \
     --umi 2:1-10 \
@@ -21,19 +25,37 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz \
     --threads 16
 ```
 
-Below is an example read written in FASTQ format. Here a barcode has been corrected as `NNNNNNNN` at barcode position `51` with a mismatch count of `-1` indicating no barcode was found within the specified mismatch distance.
+### Example interleaved FASTQ format
+
+The first read contains the barcodes and UMI, while the second read contains the `extract` sequence range.
 
 ```bash
-@LH00509:177:22W5HTLT3:1:1101:47416:1000 1:N:0:CAGATCAC+ATGTGAAG CR=GAGGCTGT_CATCAAGT_CCAGTTCA CY=IIIIIIII_IIIIIIII_IIIIIIII CB=NNNNNNNN_CATCAAGT_CCAGTTCA XP=51_31_11 XM=-1_0_0 UR=NGTTGTCTGT UY=#IIIIIIIII
-AGCCGGCGGGAGCCNCGGGGAGAGTTCTCTTTTCTTTGTGAAGGGCAGGGCGCCCTGGAATGGG
+@SRR28867558.10004 1 VH01123:94:AACNK35M5:1:1101:32149:1625/1
+GAACAGGCGAGCTGAACCTGTTGCCGCCGGGTGG
 +
-IIIIIIIIIIIIII#IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+CCC;CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+
+@SRR28867558.10004 1 VH01123:94:AACNK35M5:1:1101:32149:1625/2
+CTGGCACCAGACTTGCCCTCCAATGGATCCTCGTTAAAGGATTTAAAGTGGACTCATTCCAATTACAGGGCCTC
++
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
 ```
 
-Below is the same read output in SAM format.
+The accompanying JSON identifies the barcode and UMI positions in the custom -x string passed to kb count. In addition it disables barcode whitelist checking (`-w NONE`) and indicates that the FASTQ file is interleaved (`--inleaved`).
 
 ```bash
-LH00509:177:22W5HTLT3:1:1101:47416:1000 4   *   0   255 *   *   0   0   AGCCGGCGGGAGCCNCGGGGAGAGTTCTCTTTTCTTTGTGAAGGGCAGGGCGCCCTGGAATGGG    IIIIIIIIIIIIII#IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII    CR:Z:GAGGCTGT_CATCAAGT_CCAGTTCA CY:Z:IIIIIIII_IIIIIIII_IIIIIIII CB:Z:NNNNNNNN_CATCAAGT_CCAGTTCA XP:Z:51_31_11   XM:Z:-1_0_0 UR:Z:NGTTGTCTGT UY:Z:#IIIIIIIII
+{
+    "description": "scarecrow",
+    "kallisto-bustools": "kb count -i <transcriptome.idx> -g <transcripts_to_genes> -x 0,0,7,0,8,15,0,16,23:0,24,33:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA_set.fastq"
+}
+```
+
+### Example SAM format
+
+The SAM output includes sequence tags for the barcodes and UMI, in addition to barcode start positions (XP) and mismatch counts (XM).
+
+```bash
+SRR28867558.10004       4       *       0       255     *       *       0       0       CTGGCACCAGACTTGCCCTCCAATGGATCCTCGTTAAAGGATTTAAAGTGGACTCATTCCAATTACAGGGCCTC      CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC        CR:Z:GAACAGGC_GAGCTAAA_CCTGTTGC CY:Z:CCC;CCCC_CCCCCCCC_CCCCCCCC CB:Z:GAACAGGC_GAGCTGAA_CCTGTTGC XP:Z:11_49_79     XM:Z:0_1_0      UR:Z:CGCCGGGTGG UY:Z:CCCCCCCCCC
 ```
 
 The sequence tags applied are listed below:
@@ -47,3 +69,38 @@ The sequence tags applied are listed below:
 | XM  | Corrected barcode mismatch count |
 | UR  | UMI sequence |
 | UY  | UMI base qualities |
+
+### Example mismatch_stats format
+
+This reports the count of mismatches observed across reads. In the below example the data has 3 barcodes and has been processed with `--mismatches 2`. Reads with valid barcodes can therefore have from 0 to 6 (2 per barcode) mismatches. Reads with invalid barcodes can therefore contain between 1 and 3 invalid barcodes, indicated by the negative numbers.
+
+```bash
+mismatches,count
+-3,2330
+-2,2112
+-1,8941
+0,75424
+1,6230
+2,3565
+3,588
+4,449
+5,189
+6,172
+```
+
+### Example position_stats format
+
+This reports the count of of barcode start positions observed. In the below example the data has 3 barcodes and has been processed with `--jitter 1`. Invalid barcodes have a position of N, and this count should equal the absolute summed mismatch count of negative mismatch counts (i.e. `3 x 2330 + 2 x 2112 + 1 x 8941`). We observe 3 peaks across the remaining positions, at 11, 49, and 79, corresponding with the expected start positions of the 3 barcodes.
+
+```bash
+position,count
+10,2112
+11,92716
+12,906
+48,5791
+49,87725
+50,1563
+78,8525
+79,80507
+N,20155
+```

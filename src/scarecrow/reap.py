@@ -8,11 +8,13 @@ import csv
 import gc
 import gzip as gz
 import itertools
+import json
 import logging
 import multiprocessing as mp
 import os
 import pandas as pd
 import pysam
+import re
 import shutil
 from argparse import RawTextHelpFormatter
 from collections import Counter, defaultdict
@@ -638,6 +640,31 @@ def run_reap(
         verbose=verbose,
     )
 
+    # Generate JSON file if FASTQ output is enabled
+    if FASTQ:
+        # Parse extract and UMI ranges
+        extract_index, extract_range = extract.split(":")
+        extract_range = parse_range(extract_range)
+        if umi is not None:
+            umi_index, umi_range = umi.split(":")
+            umi_range = parse_range(umi_range)
+        else:
+            umi_range = None
+
+        # Prepare barcode configurations
+        barcode_positions_df = pd.read_csv(barcode_positions)
+        if barcode_reverse_order:
+            barcode_positions_df = barcode_positions_df[::-1].reset_index(drop=True)
+        barcode_configs = prepare_barcode_configs(barcode_positions_df, jitter)
+
+        # Generate JSON
+        json_file = generate_fastq_json(
+            barcode_configs=barcode_configs,
+            umi_range=umi_range,
+            output_prefix=output,
+        )
+        logger.info(f"Generated JSON file: {json_file}")
+
     # gzip
     if FASTQ and gzip:
         logger.info(f"Compressing '{outfile}'")
@@ -750,25 +777,30 @@ def process_read_batch(
             filtered_seq = source_entry.sequence[read_range[0] : read_range[1]]
             filtered_qual = source_entry.quality[read_range[0] : read_range[1]]
 
-        #  Output FASTQ
+        #  Output interleaved FASTQ
         if FASTQ:
-            # Build the header with all components
-            header = f"@{source_entry.name} {source_entry.comment}"
-            header += f" CR={('_').join(original_barcodes)}"
-            header += f" CY={('_').join(barcode_qualities)}"
-            header += f" CB={('_').join(matched_barcodes)}"
-            header += f" XP={('_').join(positions)}"
-            header += f" XM={('_').join(mismatches)}"
+            # Check end of read comment has the paired read identifier (i.e. /1 or /2)            
+            if not re.search(r'/[0-9]$', source_entry.comment):
+                # If it doesn't end with /number, add /
+                source_entry.comment += "/"
+            else:
+                # If it ends with /number, remove number
+                source_entry.comment = re.sub(r'/[0-9]$', '/', source_entry.comment)
 
-            # Add UMI information if specified
-            # Need to check if UMI is on a read with barcodes, if so is it downstream of barcodes, if barcode is jittered then UMI needs to be jittered
+            # R1
+            r1_header = f"@{source_entry.name} {source_entry.comment}1"
+            r1_barcodes = f"{('').join(matched_barcodes)}"
+            r1_quality = f"{('').join(barcode_qualities)}"
             if umi_index is not None:
-                umi_seq = reads[umi_index].sequence[umi_range[0] : umi_range[1]]
-                umi_qual = reads[umi_index].quality[umi_range[0] : umi_range[1]]
-                header += f" UR={umi_seq}"
-                header += f" UY={umi_qual}"
+                umi_sequence = reads[umi_index].sequence[umi_range[0] : umi_range[1]]
+                umi_quality = reads[umi_index].quality[umi_range[0] : umi_range[1]]
+                r1_barcodes += f"{umi_sequence}"
+                r1_quality += f"{umi_quality}"
+            
+            # R2
+            r2_header = f"@{source_entry.name} {source_entry.comment}2"
+            output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
-            output_entries.append(f"{header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
         # Output SAM
         if SAM:
@@ -1187,3 +1219,53 @@ def combine_worker_outputs(output, num_workers):
                 logger.error(f"Error combining {worker_output}: {str(e)}")
 
     logger.info(f"Total data combined into final output: {output}")
+
+
+def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, str], umi_range: Optional[Tuple[int, int]], output_prefix: str) -> None:
+    """
+    Generate a JSON file describing the FASTQ structure for universal compatibility.
+    
+    Args:
+        barcode_configs: List of barcode configurations from `prepare_barcode_configs`.
+        umi_range: Tuple of (start, end) for the UMI sequence, or None if no UMI.
+        extract_range: Tuple of (start, end) for the cDNA sequence.
+        output_prefix: Prefix for the output JSON file.
+    """
+
+    # Barcode information
+    kb_x = None
+    star_x = None
+    current_position = 0
+    whitelists = []
+    for config in barcode_configs:
+        barcode_length = config["end"] - config["start"]
+        end_position = current_position + barcode_length
+        whitelists.append = barcode_files[config["whitelist"]]
+        if kb_x is None:
+            kb_x = f"0,{current_position},{end_position}"
+            star_x = f"0_{current_position}_0_{end_position}"
+        else:
+            kb_x = f"{kb_x},0,{current_position},{end_position}"
+            star_x = f"{star_x} 0_{current_position}_0_{end_position}"
+        current_position = end_position + 1
+    
+    # Add UMI information if present
+    star_umi = None
+    if umi_range is not None:
+        umi_length = umi_range[1] - umi_range[0]
+        kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length - 1}"
+        star_umi = f"0_{current_position},0,{current_position + umi_length - 1}"
+
+    # Write JSON to file
+    json_data = {
+        "description": "scarecrow",
+        "kallisto-bustools": f"kb count -i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x {kb_x}:1,0,0 -w NONE --h5ad --inleaved -o <outdir> {output_prefix}.fastq"
+        }
+# STAR cannot process interleaved FASTQ files, so the reads need splitting beforehand
+#        "STARsolo":f"STAR --genomeDir </path/to/genomeDir> --soloType CB_UMI_Complex --soloBarcodeReadLength 0 --soloCBposition {star_x} --soloUMIposition {star_umi} --soloCBwhitelist {" ".join(whitelists)} --soloCBmatchWLtype Exact --outSAMtype BAM SortedByCoordinate --readFilesIn {output_prefix}.fastq"    
+
+    json_file = f"{output_prefix}.json"
+    with open(json_file, "w") as f:
+        json.dump(json_data, f, indent=4)
+
+    return json_file

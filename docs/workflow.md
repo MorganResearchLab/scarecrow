@@ -4,18 +4,12 @@
 
 # Workflow
 
-There are essentially two ways of approaching the pre-processing of data. The first, "expectation approach", is with prior knowledge of the library structure and expected barcode placement(s) along known read(s), as well as knowing the read and location of the UMI and the amplified sequence. The second, "blind approach", is without knowing the expected location(s) of barcode(s).
+scarecrow is a scRNA-seq pre-processing tool developed to increase the usable data generated from an experiment by idenifying jittered barcodes, correcting mismatches, and outputting the data in a format used by popular third-party tools. 
 
-### Expectation approach
+## Psuedoaligment
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../img/workflow_expectation_dark.svg">
-  <img alt="Workflow" src="../img/workflow_expectation_light.svg">
-</picture>
+If the aim is to perform cell-gene quantification via pseudoalignment using kallisto-bustools, then an interleaved FASTQ file should be generated with `scarecrow reap`. The interleaved FASTQ contains corrected barcodes followed by the UMI in read 1 and the extracted sequence in read 2, and is supplemented by a JSON file that contains the `kb count` parameters required to process the FASTQ file.
 
-### Blind approach
+## Alignment
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../img/workflow_blind_dark.svg">
-  <img alt="Workflow" src="../img/workflow_blind_light.svg">
-</picture>
+If the aim is to perform cell-gene quantification via standard alignment, for example the UMI-tools workflow, then a SAM file should be generated with `scarecrow reap`. The SAM file can be aligned with STAR, annoated with featureCounts, and processed with UMI-tools to generate a counts matrix.
