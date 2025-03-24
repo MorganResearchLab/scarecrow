@@ -46,7 +46,30 @@ The accompanying JSON identifies the barcode and UMI positions in the custom -x 
 ```bash
 {
     "description": "scarecrow",
-    "kallisto-bustools": "kb count -i <transcriptome.idx> -g <transcripts_to_genes> -x 0,0,7,0,8,15,0,16,23:0,24,33:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA_set.fastq"
+    "barcodes": [
+        {
+            "range": "1:0-7",
+            "whitelist": "./WTv2/bc_data_v1.txt"
+        },
+        {
+            "range": "1:8-15",
+            "whitelist": "./WTv2/bc_data_v1.txt"
+        },
+        {
+            "range": "1:16-23",
+            "whitelist": "./WTv2/bc_data_n99_v5.txt"
+        }
+    ],
+    "umi:": [
+        {
+            "range": "1:24,33"
+        }
+    ],
+    "kallisto-bustools": [
+        {
+            "kb count": "-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x 0,0,7,0,8,15,0,16,23:0,24,33:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA_set.fastq"
+        }
+    ]
 }
 ```
 

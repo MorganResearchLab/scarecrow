@@ -3,6 +3,7 @@
 # scarecrow docs
 * [Installation](installation.md)
 * [Introduction](introduction.md)
+* [Workflow](workflow.md)
 * [Troubleshooting](troubleshooting.md)
 * Examples
     * [Parse Evercode WTv2](example_evercode.md)
@@ -15,4 +16,4 @@
     * [`samstat`](toolkit_samstat.md)
     * [`seed`](toolkit_seed.md)
     * [`weed`](toolkit_weed.md)
-* [Workflow](workflow.md)
+

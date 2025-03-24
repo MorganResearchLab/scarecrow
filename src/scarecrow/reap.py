@@ -659,9 +659,10 @@ def run_reap(
 
         # Generate JSON
         json_file = generate_fastq_json(
-            barcode_configs=barcode_configs,
-            umi_range=umi_range,
-            output_prefix=output,
+            barcode_configs = barcode_configs,
+            barcode_files = barcode_files,
+            umi_range = umi_range,
+            output_prefix = output,
         )
         logger.info(f"Generated JSON file: {json_file}")
 
@@ -1231,8 +1232,16 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
         extract_range: Tuple of (start, end) for the cDNA sequence.
         output_prefix: Prefix for the output JSON file.
     """
-
+    # Initialize JSON to file
+    json_data = {
+        "description": "scarecrow",
+        "barcodes": [],
+        "umi:": [],
+        "kallisto-bustools": []
+        }
+    
     # Barcode information
+    barcodes = []
     kb_x = None
     star_x = None
     current_position = 0
@@ -1240,7 +1249,11 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
     for config in barcode_configs:
         barcode_length = config["end"] - config["start"]
         end_position = current_position + barcode_length
-        whitelists.append = barcode_files[config["whitelist"]]
+        #whitelists.append = barcode_files[config["whitelist"]]
+        json_data["barcodes"].append({
+            "range": f"1:{current_position}-{end_position}",
+            "whitelist": f"{barcode_files[config["whitelist"]]}"
+            })
         if kb_x is None:
             kb_x = f"0,{current_position},{end_position}"
             star_x = f"0_{current_position}_0_{end_position}"
@@ -1249,20 +1262,21 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
             star_x = f"{star_x} 0_{current_position}_0_{end_position}"
         current_position = end_position + 1
     
-    # Add UMI information if present
+    # UMI information if present
     star_umi = None
     if umi_range is not None:
         umi_length = umi_range[1] - umi_range[0]
+        json_data["umi:"].append({
+            "range": f"1:{current_position},{current_position + umi_length - 1}"
+        })
         kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length - 1}"
         star_umi = f"0_{current_position},0,{current_position + umi_length - 1}"
 
-    # Write JSON to file
-    json_data = {
-        "description": "scarecrow",
-        "kallisto-bustools": f"kb count -i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x {kb_x}:1,0,0 -w NONE --h5ad --inleaved -o <outdir> {output_prefix}.fastq"
-        }
-# STAR cannot process interleaved FASTQ files, so the reads need splitting beforehand
-#        "STARsolo":f"STAR --genomeDir </path/to/genomeDir> --soloType CB_UMI_Complex --soloBarcodeReadLength 0 --soloCBposition {star_x} --soloUMIposition {star_umi} --soloCBwhitelist {" ".join(whitelists)} --soloCBmatchWLtype Exact --outSAMtype BAM SortedByCoordinate --readFilesIn {output_prefix}.fastq"    
+    
+    json_data["kallisto-bustools"].append({
+        "kb count": f"-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x {kb_x}:1,0,0 -w NONE --h5ad --inleaved -o <outdir> {output_prefix}.fastq"
+    })
+
 
     json_file = f"{output_prefix}.json"
     with open(json_file, "w") as f:
