@@ -19,9 +19,7 @@ import warnings
 from scarecrow.seed import parser_seed, validate_seed_args
 from scarecrow.reap import parser_reap, validate_reap_args
 from scarecrow.harvest import parser_harvest, validate_harvest_args
-from scarecrow.tally import parser_tally, validate_tally_args
 from scarecrow.rake import parser_rake, validate_rake_args
-from scarecrow.samtag import parser_samtag, validate_samtag_args
 from scarecrow.samstat import parser_samstat, validate_samstat_args
 from scarecrow.sam2fastq import parser_sam2fastq, validate_sam2fastq_args
 from scarecrow.sift import parser_sift, validate_sift_args
@@ -61,9 +59,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "seed": parser_seed(subparsers),
         "reap": parser_reap(subparsers),
         "harvest": parser_harvest(subparsers),
-        "tally": parser_tally(subparsers),
         "rake": parser_rake(subparsers),
-        "samtag": parser_samtag(subparsers),
         "samstat": parser_samstat(subparsers),
         "sam2fastq": parser_sam2fastq(subparsers),
         "sift": parser_sift(subparsers),
@@ -91,9 +87,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "seed": validate_seed_args,
         "reap": validate_reap_args,
         "harvest": validate_harvest_args,
-        "tally": validate_tally_args,
         "rake": validate_rake_args,
-        "samtag": validate_samtag_args,
         "samstat": validate_samstat_args,
         "sam2fastq": validate_sam2fastq_args,
         "sift": validate_sift_args,
