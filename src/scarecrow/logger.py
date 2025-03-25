@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+"""
+#!/usr/bin/env python3
+@author: David Wragg
+"""
+
 import logging
 from rich.logging import RichHandler
 from logging.handlers import WatchedFileHandler  # Add this import

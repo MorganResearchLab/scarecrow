@@ -15,5 +15,6 @@
     * [`sam2fastq`](toolkit_sam2fastq.md)    
     * [`samstat`](toolkit_samstat.md)
     * [`seed`](toolkit_seed.md)
+    * [`sift`](toolkit_sift.md)
     * [`weed`](toolkit_weed.md)
 

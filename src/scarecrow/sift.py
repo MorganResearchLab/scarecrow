@@ -75,9 +75,13 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
     if input_file.endswith(".sam"):
         sift_sam(input_file)
     elif input_file.endswith((".fastq", ".fq")):
-        sift_fastq(input_file, json_file)
+        if json_file.endswith((".json")):
+            sift_fastq(input_file, json_file)
+        else:
+            logger.info("Passed JSON file suffix is not .json")
+            raise IOError
     else:
-        logger.info("Input file suffix not .sam or .fastq")
+        logger.info("Input file suffix is not .sam or .fastq")
         raise IOError
 
     logger.info("Finished!")
@@ -126,7 +130,7 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
             with open_func(fastq_file, 'rt') as infile, open(output_fastq, 'wt') as outfile:
                 while True:
                     # Read 4 lines (one record)
-                    lines = [infile.readline() for _ in range(9)] # Is 9 due to blank line between reads
+                    lines = [infile.readline() for _ in range(8)]
                     if not lines[0]:  # end of file
                         break
                     

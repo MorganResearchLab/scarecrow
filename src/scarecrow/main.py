@@ -1,6 +1,8 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+#!/usr/bin/env python3
+@author: David Wragg
+
 scarecrow
 
 A toolkit for pre-processing single-cell sequencing data.

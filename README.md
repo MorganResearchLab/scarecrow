@@ -10,7 +10,6 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Todo
 
-* sam2fastq needs refactoring to match the new FASTQ format spat out by reap
 * Input validation
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction
@@ -61,7 +60,7 @@ BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_set.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA_set --threads 2 --out_fastq
+    --out ./WTv2/cDNA --threads 2 --out_sam
 
 # Reap (trie and kmer index approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.pkl.gz
@@ -97,6 +96,8 @@ umi_tools dedup --stdin ./WTv2/cDNA_set.sam --output-stats=./WTv2/umi_tools/cDNA
 
 
 ```
+
+
 
 
 # Testing on laptop (Scale)

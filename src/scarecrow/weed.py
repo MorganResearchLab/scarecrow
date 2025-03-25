@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+#!/usr/bin/env python3
 @author: David Wragg
-Refactored for on-demand FASTQ tag extraction and multiprocessing
 """
 
 import pysam
@@ -28,13 +27,13 @@ def parser_weed(parser):
     subparser = parser.add_parser(
         "weed",
         description="""
-Update SAM file with barcode and UMI tags from scarecrow reap fastq header.
+Weeds out a sequence index from a FASTQ header and appends to barcode tags (CR, CY, CB) in corresponding SAM file.
 
 Example:
 scarecrow samtag --fastq in.fastq --sam in.sam
 ---
 """,
-        help="Update SAM file with barcode and UMI tags from scarecrow reap fastq header",
+        help="Update SAM file with barcode tag from a FASTQ sequence header",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(

@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+#!/usr/bin/env python3
 @author: David Wragg
 """
 
@@ -252,7 +252,7 @@ def parser_seed(parser):
     subparser = parser.add_parser(
         "seed",
         description="""
-Search reads in FASTQ files for barcodes in whitelists, record exact matches and conserved sequences
+Search reads in FASTQ files for barcodes in whitelists, record exact matches and conserved sequences.
 
 Example:
 

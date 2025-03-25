@@ -18,21 +18,21 @@ def parser_samstat(parser):
     subparser = parser.add_parser(
         "samstat",
         description="""
-Tally barcode and barcode combination counts in fastq output of scarecrow reap.
+Generate barcode metrics from SAM file including position and mismatch counts.
 
 Example:
 
-scarecrow sam2fastq --sam cdna.sam
+scarecrow samstat --sam cDNA.sam
 ---
 """,
-        help="Extracts reads from SAM and writes to FASTQ retaining read tags in sequence header.",
+        help="Generate barcode metrics from SAM file including position and mismatch counts",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
         "-s",
         "--sam",
         metavar="<file>",
-        help=("SAM file to extract reads from"),
+        help=("SAM file to process"),
         type=str,
         required=True,
         default=[],
