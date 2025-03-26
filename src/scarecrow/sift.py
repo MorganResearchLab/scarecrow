@@ -94,6 +94,7 @@ def sift_sam(sam_file: str = None):
     logger = logging.getLogger("scarecrow")
     if Path(sam_file).exists():
         output_sam = sam_file.replace(".sam", "_sift.sam")
+        logger.info(f"Sifting '{sam_file}', results will be written to '{output_sam}")
         with pysam.AlignmentFile(sam_file, "r", check_sq=False) as sam, pysam.AlignmentFile(output_sam, "w", template=sam) as outfile:
             # Force reading even if header is missing
             for read in sam.fetch(until_eof=True):
@@ -126,7 +127,7 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
             # Open input and output files
             output_fastq = fastq_file.replace(".fastq", "_sift.fastq")
             open_func = gzip.open if fastq_file.endswith('.gz') else open
-
+            logger.info(f"Sifting '{fastq_file}', results will be written to '{output_fastq}' and '{json_file}'")
             with open_func(fastq_file, 'rt') as infile, open(output_fastq, 'wt') as outfile:
                 while True:
                     # Read 4 lines (one record)

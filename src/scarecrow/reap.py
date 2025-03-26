@@ -412,7 +412,7 @@ scarecrow reap --threads16\n\t--fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_posi
         type=str,
         default="extracted",
     )
-    # Add a mutually exclusive group
+    # Add a mutually exclusive group for output format
     out_format = subparser.add_mutually_exclusive_group(required=False)
     out_format.add_argument(
         "--out_sam", action="store_true", help="Write output to SAM format [default]"
@@ -501,10 +501,26 @@ scarecrow reap --threads16\n\t--fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_posi
         help="Reverse retrieval order of barcodes in barcode positions file [false]",
     )
     subparser.add_argument(
-        "-z", "--gzip", action="store_true", help="Compress (gzip) fastq output [false]"
+        "-z", "--gzip", 
+        action="store_true", 
+        help="Compress (gzip) fastq output [false]"
     )
     subparser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose output [false]"
+        "-v", "--verbose", 
+        action="store_true", 
+        help="Enable verbose output [false]"
+    )
+    # Add a mutually exclusive group for library defaults
+    lib_format = subparser.add_mutually_exclusive_group(required=False)
+    lib_format.add_argument(
+        "--scale_rna",
+        action="store_true",
+        help="Use defaults for Scale RNA data [--jitter 1] and [--mismatches 2]",
+    )
+    lib_format.add_argument(
+        "--evercode_wtv2",
+        action="store_true",
+        help="Use defaults for Parse Evercode WTv2 data [--jitter 2] and [--mismatches 2]",
     )
     return subparser
 
@@ -518,6 +534,17 @@ def validate_reap_args(parser, args) -> None:
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
+
+    # Check for defaults
+    if args.evercode_wtv2:
+        logger.info(f"Using Parse Evercode WTv2 defaults: --jitter 2 --mismatches 2")
+        args.jitter = 2
+        args.mismatches = 2
+    if args.scale_rna:
+        logger.info(f"Using Scale RNA defaults: --jitter 1 --mismatches 2")
+        args.jitter = 1
+        args.mismatches = 2
+
     logger.info(f"{args}\n")
 
     # Check input files exist
@@ -540,6 +567,7 @@ def validate_reap_args(parser, args) -> None:
     if not os.path.exists(outpath) and outpath != "":
         logger.error(f"Output directory {outpath} does not exist")
         raise FileNotFoundError
+    
 
     run_reap(
         fastqs=[f for f in args.fastqs],

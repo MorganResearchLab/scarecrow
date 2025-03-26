@@ -11,6 +11,7 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 ### Todo
 
 * Input validation
+* Search negative space at 3' end of read for clipped barcodes?
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction
 * Benchmark different assays (SPLiTseq, Parse, Scale) and methods (split-pipe, scarecrow, scaleRna)
