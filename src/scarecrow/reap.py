@@ -510,6 +510,11 @@ scarecrow reap --threads16\n\t--fastqs R1.fastq.gz R2.fastq.gz\n\t--barcode_posi
         action="store_true", 
         help="Enable verbose output [false]"
     )
+    subparser.add_argument(
+        "-s", "--sift", 
+        action="store_true", 
+        help="Sift output to skip writing reads with any invalid barcodes [false]"
+    )
     # Add a mutually exclusive group for library defaults
     lib_format = subparser.add_mutually_exclusive_group(required=False)
     lib_format.add_argument(
@@ -586,6 +591,7 @@ def validate_reap_args(parser, args) -> None:
         SAM=args.out_sam,
         verbose=args.verbose,
         gzip=args.gzip,
+        sift=args.sift,
         args_string=" ".join(
             f"--{k} {v}" for k, v in vars(args).items() if v is not None
         ),
@@ -610,6 +616,7 @@ def run_reap(
     SAM: bool = True,
     verbose: bool = False,
     gzip: bool = False,
+    sift: bool = False,
     args_string: str = None,
 ) -> None:
     """
@@ -667,6 +674,7 @@ def run_reap(
         FASTQ=FASTQ,
         SAM=SAM,
         verbose=verbose,
+        sift=sift
     )
 
     # Generate JSON file if FASTQ output is enabled
@@ -720,6 +728,7 @@ def process_read_batch(
     FASTQ: bool = False,
     SAM: bool = True,
     verbose: bool = False,
+    sift: bool = False
 ) -> List[str]:
     """
     Modified process_read_batch to handle any number of FASTQ files.
@@ -792,6 +801,11 @@ def process_read_batch(
 
         # Update statistics
         stats.update(mismatches, positions)
+
+        # Check if we need to sift (skip writing reads with any barcode with an N)
+        # if this test is true, then the loop continues with the next iteration, skipping FASTQ and SAM output
+        if sift and any('N' in barcode for barcode in matched_barcodes):
+            continue
 
         # Create output entry
         source_entry = reads[read_index]
@@ -911,6 +925,7 @@ def extract_sequences(
     FASTQ: bool = False,
     SAM: bool = True,
     verbose: bool = False,
+    sift: bool = False
 ) -> None:
     """
     Modified to track stats
@@ -966,6 +981,7 @@ def extract_sequences(
         FASTQ,
         SAM,
         verbose,
+        sift
     )
 
     # Create a queue for batch communication
@@ -1161,6 +1177,7 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
             FASTQ,
             SAM,
             verbose,
+            sift
         ) = constant_args
         matcher = BarcodeMatcherOptimized(
             barcode_files=barcode_files,
@@ -1194,6 +1211,7 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
                     FASTQ,
                     SAM,
                     verbose,
+                    sift
                 )
                 outfile.writelines(entries)
 
