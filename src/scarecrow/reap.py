@@ -1295,10 +1295,10 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
     whitelists = []
     for config in barcode_configs:
         barcode_length = config["end"] - config["start"]
-        end_position = current_position + barcode_length
+        end_position = current_position + barcode_length + 1
         #whitelists.append = barcode_files[config["whitelist"]]
         json_data["barcodes"].append({
-            "range": f"1:{current_position}-{end_position}",
+            "range": f"1:{current_position + 1}-{end_position}",
             "whitelist": f"{barcode_files[config["whitelist"]]}"
             })
         if kb_x is None:
@@ -1307,17 +1307,17 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
         else:
             kb_x = f"{kb_x},0,{current_position},{end_position}"
             star_x = f"{star_x} 0_{current_position}_0_{end_position}"
-        current_position = end_position + 1
+        current_position = end_position
     
     # UMI information if present
     star_umi = None
     if umi_range is not None:
         umi_length = umi_range[1] - umi_range[0]
         json_data["umi:"].append({
-            "range": f"1:{current_position},{current_position + umi_length - 1}"
+            "range": f"1:{current_position + 1}-{current_position + umi_length}"
         })
-        kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length - 1}"
-        star_umi = f"0_{current_position},0,{current_position + umi_length - 1}"
+        kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length}"
+        star_umi = f"0_{current_position},0,{current_position + umi_length}"
 
     
     json_data["kallisto-bustools"].append({

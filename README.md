@@ -10,6 +10,7 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Todo
 
+* Kallisto -x may be 1-based not 0-based, currently checking
 * Input validation
 * Search negative space at 3' end of read for clipped barcodes?
 * Jitter does not currently apply to UMI or insert sequence

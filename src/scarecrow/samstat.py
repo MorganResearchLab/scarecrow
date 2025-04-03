@@ -46,7 +46,7 @@ def validate_samstat_args(parser, args) -> None:
     """
     # Global logger setup
     logfile = "{}_{}.{}".format(
-        "./scarecrow_sam2fastq", generate_random_string(), "log"
+        "./scarecrow_samstat", generate_random_string(), "log"
     )
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
