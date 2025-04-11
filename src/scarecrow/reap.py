@@ -198,8 +198,8 @@ class BarcodeMatcherOptimized:
         else:
             # Default to set-based method
             # NULL barcode
-            self.logger.info(f"subseq: {sub_sequence}")
-            NA_barcode = 'N' * len(sub_sequence[0][0])
+            if sub_sequence and sub_sequence[0]:
+                NA_barcode = 'N' * len(sub_sequence[0][0])
             
             # Check whitelist available
             if whitelist not in self.matchers:
