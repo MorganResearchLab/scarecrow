@@ -200,6 +200,8 @@ class BarcodeMatcherOptimized:
             # NULL barcode
             if sub_sequence and sub_sequence[0]:
                 NA_barcode = 'N' * len(sub_sequence[0][0])
+            else:
+                NA_barcode = 'N'
             
             # Check whitelist available
             if whitelist not in self.matchers:
