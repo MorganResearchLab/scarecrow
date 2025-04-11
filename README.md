@@ -13,6 +13,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 * FASTQ output
   - corrected barcode quality scores are written, with N quality for negative space bases
   - this may cause an issue with some software as N is not a Phred quality score
+* sam2fastq
+  - needs updating with the fixes applied to reap for fastq output
 * Input validation needs coding
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction
