@@ -197,11 +197,15 @@ class BarcodeMatcherOptimized:
 
         else:
             # Default to set-based method
+            # NULL barcode
+            NA_barcode = 'N' * len(sub_sequence[0][0])
+            
+            # Check whitelist available
             if whitelist not in self.matchers:
                 self.logger.warning(
                     f"Whitelist '{whitelist}' not found in available whitelists: {list(self.matchers.keys())}"
                 )
-                return "NNNNNNNN", -1, "N"
+                return NA_barcode, -1, "N"
 
             # self.logger.info(f"-> start:{original_start} end:{original_end} jitter:{jitter}")
             # self.logger.info(f"{sub_sequence}")
@@ -228,7 +232,7 @@ class BarcodeMatcherOptimized:
                 else:
                     # Multiple exact matches with the same distance
                     # self.logger.info(f"Multiple matches")
-                    return "NNNNNNNN", -1, "N"
+                    return NA_barcode, -1, "N"
 
             # If no exact match was found, check mismatch lookup
             # self.logger.info(f"subs_sequence: {sub_sequence}")
@@ -272,12 +276,12 @@ class BarcodeMatcherOptimized:
                     else:
                         # Multiple matches in the best group
                         # self.logger.info("Multiple mismatch matches with the same distance, returning no match")
-                        return "NNNNNNNN", -1, "N"
+                        return NA_barcode, -1, "N"
 
             # No match found
             # self.logger.info("No match found")
-            null_match = "N" * len(next(iter(self.matchers[whitelist]["exact"])))
-            return null_match, -1, "N"
+            #null_match = "N" * len(next(iter(self.matchers[whitelist]["exact"])))
+            return NA_barcode, -1, "N"
 
     def _get_sequence_with_jitter(
         self, full_sequence: str, start: int, end: int, jitter: int
@@ -748,6 +752,7 @@ def process_read_batch(
         matched_barcodes = []  # CB
         positions = []  # XP
         mismatches = []  # XM
+        matched_qualities = [] # XQ
 
         for config in barcode_configs:
             whitelist = config["whitelist"]
@@ -760,7 +765,7 @@ def process_read_batch(
             original_barcode = seq[start - 1 : end]
             barcode_quality = qual[start - 1 : end]
             original_barcodes.append(original_barcode)
-            barcode_qualities.append(barcode_quality)
+            barcode_qualities.append(barcode_quality)            
 
             if verbose:
                 logger.info(
@@ -768,7 +773,7 @@ def process_read_batch(
                 )
                 logger.info(f"Sequence: {seq}")
                 logger.info(
-                    f"Looking for barcode in range {start}-{end} with jitter {jitter}"
+                    f"Looking for {original_barcode} + {barcode_quality} in range {start}-{end} with jitter {jitter}"
                 )
             # logger.info(f"{reads[config['file_index']].name}")
             if matcher.trie_matcher or whitelist in matcher.matchers.keys():
@@ -789,6 +794,15 @@ def process_read_batch(
                     )
 
                 matched_barcodes.append(matched_barcode)
+                # Get qualities of matched barcode
+                qualities = 'N' * len(matched_barcode)
+                if isinstance(adj_position, int):
+                    if adj_position >= 0:
+                        qualities = qual[ adj_position - 1 : adj_position - 1 + len(matched_barcode) ]
+                    else:
+                        qualities = ('').join(['N' * abs(adj_position), qual[0:len(matched_barcode) - abs(adj_position)]])
+                matched_qualities.append(qualities)                
+                # Update stats
                 positions.append(str(adj_position))
                 mismatches.append(str(mismatch_count))
             else:
@@ -796,6 +810,7 @@ def process_read_batch(
                     f"Whitelist {whitelist} not found in matcher {matcher.matchers.keys()}"
                 )
                 matched_barcodes.append("null")
+                matched_qualities.append("null")
                 positions.append(str(start))
                 mismatches.append("NA")
 
@@ -834,13 +849,13 @@ def process_read_batch(
             # R1
             r1_header = f"@{source_entry.name} {source_entry.comment}1"
             r1_barcodes = f"{('').join(matched_barcodes)}"
-            r1_quality = f"{('').join(barcode_qualities)}"
+            r1_quality = f"{('').join(matched_qualities)}"
             if umi_index is not None:
                 umi_sequence = reads[umi_index].sequence[umi_range[0] : umi_range[1]]
                 umi_quality = reads[umi_index].quality[umi_range[0] : umi_range[1]]
                 r1_barcodes += f"{umi_sequence}"
                 r1_quality += f"{umi_quality}"
-            
+                
             # R2
             r2_header = f"@{source_entry.name} {source_entry.comment}2"
             output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
@@ -865,6 +880,7 @@ def process_read_batch(
             tags.append(f"CR:Z:{'_'.join(original_barcodes)}")
             tags.append(f"CY:Z:{'_'.join(barcode_qualities)}")
             tags.append(f"CB:Z:{'_'.join(matched_barcodes)}")
+            tags.append(f"XQ:Z:{'_'.join(matched_qualities)}")
             tags.append(f"XP:Z:{'_'.join(positions)}")
             tags.append(f"XM:Z:{'_'.join(mismatches)}")
 

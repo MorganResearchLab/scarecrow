@@ -3,7 +3,7 @@
 [root](root.md)
 
 ## scarecrow reap
-The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either an interleaved FASTQ file with `--out_fastq` or a SAM file with `--out_sam` (default), with the prefix `--out <prefix>`. If writing to SAM then the input FASTQ data should be trimmed beforehand to remove any adapter sequences. If output as a FASTQ file, a JSON file is also generated which contains the commandline parameters required to process the file with the kallisto-bustools workflow (kb count).
+The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either an interleaved FASTQ file with `--out_fastq` or a SAM file with `--out_sam` (default), with the prefix `--out <prefix>`. If writing to SAM then the input FASTQ data should be trimmed beforehand to remove any adapter sequences. If output as a FASTQ file, a JSON file is also generated which contains the commandline parameters required to process the file with the kallisto-bustools workflow (kb count). 
 
 There are options to set `jitter`, which is the flanking distance to extend the barcode search from the start and end positions of the barcode peaks; `mismatch`, which is the maximum number of mismatches between an expected and observed barcode sequence. If `jitter` extends beyond the start of the sequence, for example if the barcode starts at position 1, then it will clip *n* end bases and insert *n* x `N` start bases when checking negative positions. The `N` bases count towards mismatches. The `base_quality` setting will mask bases as `N` if their Phred quality score is below the specified number, this is performed before barcode matching and can significantly reduce the number of matched barcodes if set too high. Where a barcode match is not identified the barcode is recorded as `NNNNNNN`. An additional flag, `--sift` can be used to skip writing any reads that have invalid barcodes (i.e. any corrected barcode containing an `N`).
 
@@ -27,7 +27,7 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz \
 
 ### Example interleaved FASTQ format
 
-The first read contains the barcodes and UMI, while the second read contains the `extract` sequence range.
+The first read contains the barcodes and UMI, while the second read contains the `extract` sequence range. The barcodes and quality scores derive from the corrected barcodes.
 
 ```bash
 @SRR28867558.10004 1 VH01123:94:AACNK35M5:1:1101:32149:1625/1
@@ -88,6 +88,7 @@ The sequence tags applied are listed below:
 | CR  | Uncorrected barcode sequence at expected position |
 | CY  | Uncorrected barcode base qualities |
 | CB  | Corrected barcode sequence accounting for jitter |
+| XQ  | Corrected barcode base qualities (N quality applied to bases in negative space) |
 | XP  | Corrected barcode start position |
 | XM  | Corrected barcode mismatch count |
 | UR  | UMI sequence |
