@@ -803,7 +803,7 @@ def process_read_batch(
                     if adj_position >= 0:
                         qualities = qual[ adj_position - 1 : adj_position - 1 + len(matched_barcode) ]
                     else:
-                        qualities = ('').join(['N' * abs(adj_position), qual[0:len(matched_barcode) - abs(adj_position)]])
+                        qualities = ('').join(['!' * abs(adj_position), qual[0:len(matched_barcode) - abs(adj_position)]])
                 matched_qualities.append(qualities)                
                 # Update stats
                 positions.append(str(adj_position))
