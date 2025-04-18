@@ -5,8 +5,8 @@
 # Example: Parse Evercode WTv2
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../img/parse_dark.svg">
-  <img alt="Parse Evercode WTv2 library structure" src="../img/parse_light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="../img/parse_dark_v2.svg">
+  <img alt="Parse Evercode WTv2 library structure" src="../img/parse_light_v2.svg">
 </picture>
 
 Library structure

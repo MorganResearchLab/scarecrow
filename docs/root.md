@@ -13,7 +13,7 @@
     * [`harvest`](toolkit_harvest.md)
     * [`reap`](toolkit_reap.md)
     * [`sam2fastq`](toolkit_sam2fastq.md)    
-    * [`samstat`](toolkit_samstat.md)
+    * [`stats`](toolkit_stats.md)
     * [`seed`](toolkit_seed.md)
     * [`sift`](toolkit_sift.md)
     * [`weed`](toolkit_weed.md)

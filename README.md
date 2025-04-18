@@ -10,9 +10,6 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* samstat
-  - Need to be able to generate similar stats from FASTQ output
-  - Would require FASTQ output header be modified to record XP, XM, CR, CB, UR
 * Input validation needs coding
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction
