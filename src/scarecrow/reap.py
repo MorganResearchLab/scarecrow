@@ -656,16 +656,12 @@ def run_reap(
         outfile = f"{output}.fastq"
     if SAM:
         outfile = f"{output}.sam"
-        with open(outfile, "w") as file:
-            file.write("@HD\tVN:1.6\n")
-            file.write(
-                f"@PG\tID:reap\tPN:scarecrow\tVN:{__version__}\tDS:{args_string}\n"
-            )
 
     logger.info(f"Results will be written to '{outfile}'")
 
     # Extract sequences
     extract_sequences(
+        args_string,
         fastq_files=[f for f in fastqs],
         barcode_positions_file=barcode_positions,
         barcode_reverse_order=barcode_reverse_order,
@@ -839,18 +835,40 @@ def process_read_batch(
             filtered_seq = source_entry.sequence[read_range[0] : read_range[1]]
             filtered_qual = source_entry.quality[read_range[0] : read_range[1]]
 
+
+        """
+        Should probably check if UMI or cDNA is on a read with barcodes
+            if so, is it downstream of barcodes?
+            if barcode is jittered then UMI/cDNA needs to be jittered
+        """            
+
         #  Output interleaved FASTQ
         if FASTQ:
             # Check end of read comment has the paired read identifier (i.e. /1 or /2)            
-            if not re.search(r'/[0-9]$', source_entry.comment):
-                # If it doesn't end with /number, add /
-                source_entry.comment += "/"
-            else:
+            #if not re.search(r'/[0-9]$', source_entry.comment):
+            #    # If it doesn't end with /number, add /
+            #    source_entry.comment += "/"
+            #else:
+            if re.search(r'/[0-9]$', source_entry.comment):
                 # If it ends with /number, remove number
-                source_entry.comment = re.sub(r'/[0-9]$', '/', source_entry.comment)
+                source_entry.comment = re.sub(r'/[0-9]$', '', source_entry.comment)
+
+            tags = []
+            tags.append(f"CR:{'_'.join(original_barcodes)}")
+            tags.append(f"CY:{'_'.join(barcode_qualities)}")
+            tags.append(f"CB:{'_'.join(matched_barcodes)}")
+            tags.append(f"XQ:{'_'.join(matched_qualities)}")
+            tags.append(f"XP:{'_'.join(positions)}")
+            tags.append(f"XM:{'_'.join(mismatches)}")
+            # Add UMI information if specified
+            if umi_index is not None:
+                umi_seq = reads[umi_index].sequence[umi_range[0] : umi_range[1]]
+                umi_qual = reads[umi_index].quality[umi_range[0] : umi_range[1]]
+                tags.append(f"UR:{umi_seq}")
+                tags.append(f"UY:{umi_qual}")
 
             # R1
-            r1_header = f"@{source_entry.name} {source_entry.comment}1"
+            r1_header = f"@{source_entry.name} {source_entry.comment} {':'.join(tags)}/1"
             r1_barcodes = f"{('').join(matched_barcodes)}"
             r1_quality = f"{('').join(matched_qualities)}"
             if umi_index is not None:
@@ -860,7 +878,7 @@ def process_read_batch(
                 r1_quality += f"{umi_quality}"
                 
             # R2
-            r2_header = f"@{source_entry.name} {source_entry.comment}2"
+            r2_header = f"@{source_entry.name} {source_entry.comment} {':'.join(tags)}/2"
             output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
 
@@ -878,20 +896,13 @@ def process_read_batch(
             seq = filtered_seq  # SEQ
             qual = filtered_qual  # QUAL
 
-            # Optional tags
             tags = []
-            tags.append(f"CR:Z:{'_'.join(original_barcodes)}")
-            tags.append(f"CY:Z:{'_'.join(barcode_qualities)}")
-            tags.append(f"CB:Z:{'_'.join(matched_barcodes)}")
-            tags.append(f"XQ:Z:{'_'.join(matched_qualities)}")
-            tags.append(f"XP:Z:{'_'.join(positions)}")
-            tags.append(f"XM:Z:{'_'.join(mismatches)}")
-
-            """
-            Need to check if UMI is on a read with barcodes
-                if so, is it downstream of barcodes
-                if barcode is jittered then UMI needs to be jittered
-            """
+            tags.append(f"CR:Z:{','.join(original_barcodes)}")
+            tags.append(f"CY:Z:{','.join(barcode_qualities)}")
+            tags.append(f"CB:Z:{','.join(matched_barcodes)}")
+            tags.append(f"XQ:Z:{','.join(matched_qualities)}")
+            tags.append(f"XP:Z:{','.join(positions)}")
+            tags.append(f"XM:Z:{','.join(mismatches)}")
 
             # Add UMI information if specified
             if umi_index is not None:
@@ -929,6 +940,7 @@ def process_read_batch(
 
 @log_errors
 def extract_sequences(
+    args_string: str = None,
     fastq_files: List[str] = None,
     barcode_positions_file: str = None,
     barcode_reverse_order: bool = False,
@@ -1050,7 +1062,7 @@ def extract_sequences(
     master_stats.write_stats(output)
 
     # Combine worker output files into a single file
-    combine_worker_outputs(output, threads)
+    combine_worker_outputs(output, threads, args_string)
     
     # Log the final total number of reads processed
     logger.info(f"Total reads processed: {total_reads_counter.value}")
@@ -1264,13 +1276,21 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
 
 
 @log_errors
-def combine_worker_outputs(output, num_workers):
+def combine_worker_outputs(output, num_workers, args_string):
     """
     Combine output files from all workers into a single file.
     """
     logger = logging.getLogger("scarecrow")
     total_lines = 0
+
     with open(output, "w") as outfile:
+        if str(output).endswith('.sam'):
+            outfile.write("@HD\tVN:1.6\n")
+            escaped_cmd = args_string.replace("\t", " ").replace("\n", " ")
+            outfile.write(
+                f"@PG\tID:reap\tPN:scarecrow\tVN:{__version__}\tDS:{escaped_cmd}\n"
+            )
+
         for i in range(num_workers):
             worker_output = f"{output}_worker_{i}.sam"
             try:
