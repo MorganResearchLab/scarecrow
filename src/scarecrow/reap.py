@@ -794,7 +794,7 @@ def process_read_batch(
 
                 matched_barcodes.append(matched_barcode)
                 # Get qualities of matched barcode
-                qualities = 'N' * len(matched_barcode)
+                qualities = '!' * len(matched_barcode)
                 if isinstance(adj_position, int):
                     if adj_position >= 0:
                         qualities = qual[ adj_position - 1 : adj_position - 1 + len(matched_barcode) ]
