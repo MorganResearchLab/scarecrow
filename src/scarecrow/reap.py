@@ -134,7 +134,7 @@ class BarcodeMatcherOptimized:
         """
         Find best matching barcode using precomputed exact and mismatch data
         Returns: Tuple of (barcode, mismatch_count, position)
-        Always returns a tuple, using 'null' for no match
+        Always returns a tuple, using 'N*barcode len' for no match
         """
 
         # Apply quality filtering if needed
@@ -808,8 +808,8 @@ def process_read_batch(
                 logger.warning(
                     f"Whitelist {whitelist} not found in matcher {matcher.matchers.keys()}"
                 )
-                matched_barcodes.append("null")
-                matched_qualities.append("null")
+                matched_barcodes.append('N' * len(original_barcode))
+                matched_qualities.append('!' * len(original_barcode))
                 positions.append(str(start))
                 mismatches.append("NA")
 
