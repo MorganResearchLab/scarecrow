@@ -124,7 +124,8 @@ def validate_weed_args(parser, args):
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
-    logger.info(f"outpath: '{outpath}'")
+    logger.info(f"{args}\n")
+
 
     run_weed(
         fastq_file=args.fastq,
