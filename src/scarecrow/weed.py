@@ -471,12 +471,12 @@ def process_chunk(args):
                         cb_tag = read.get_tag("CB") if read.has_tag("CB") else ""
                         xm_tag = read.get_tag("XM") if read.has_tag("XM") else ""
                         xp_tag = read.get_tag("XP") if read.has_tag("XP") else ""
-                        read.set_tag("CR", f"{cr_tag}_{barcode}")
-                        read.set_tag("CY", f"{cy_tag}_{'!' * len(barcode)}")
+                        read.set_tag("CR", f"{cr_tag},{barcode}")
+                        read.set_tag("CY", f"{cy_tag},{'!' * len(barcode)}")
                         if matched_barcode:
-                            read.set_tag("CB", f"{cb_tag}_{matched_barcode}")
-                            read.set_tag("XM", f"{xm_tag}_{mismatch_count}")
-                            read.set_tag("XP", f"{xp_tag}_0")
+                            read.set_tag("CB", f"{cb_tag},{matched_barcode}")
+                            read.set_tag("XM", f"{xm_tag},{mismatch_count}")
+                            read.set_tag("XP", f"{xp_tag},0")
 
                 out_sam.write(read)  # Write the modified read to the output SAM file
 
