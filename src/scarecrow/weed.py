@@ -130,7 +130,7 @@ def validate_weed_args(parser, args):
         fastq_file=args.fastq,
         barcode_index=args.barcode_index,
         barcodes=args.barcodes,
-        infile=args.infile,
+        bam_file=args.infile,
         out_file=args.out,
         outpath=outpath,
         rnd_string=rnd_string,
