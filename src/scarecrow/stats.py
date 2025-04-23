@@ -22,7 +22,7 @@ Generate barcode metrics from SAM or FASTQ read tags/header, including position 
 
 Example:
 
-scarecrow stats --sam cDNA.sam
+scarecrow stats --in cDNA.sam
 ---
 """,
         help="Generate barcode metrics from SAM or FASTQ read tags/header, including position and mismatch counts",

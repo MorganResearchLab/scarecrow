@@ -23,7 +23,7 @@ Sift a SAM file to remove reads with invalid barcodes.
 
 Example:
 
-scarecrow sift --sam cdna.sam
+scarecrow sift --in cdna.sam
 ---
 """,
         help="Removes reads with invalid barcodes from SAM file.",
@@ -31,7 +31,8 @@ scarecrow sift --sam cdna.sam
     )
     subparser.add_argument(
         "-i",
-        "--infile",
+        "--in",
+        dest="infile",
         metavar="<file>",
         help=("Interleaved FASTQ file or SAM file to sift for valid barcodes"),
         type=str,

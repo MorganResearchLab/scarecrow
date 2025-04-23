@@ -10,6 +10,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
+* Change pngs from harvest to output to barcode_positions basename rather than log basename
+* weed needs updating to work on SAM or FASTQ not just SAM
 * Input validation needs coding
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction

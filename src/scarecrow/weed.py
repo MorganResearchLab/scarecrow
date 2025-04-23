@@ -30,7 +30,7 @@ def parser_weed(parser):
 Weeds out a sequence index from a FASTQ header and appends to barcode tags (CR, CY, CB) in corresponding SAM file.
 
 Example:
-scarecrow samtag --fastq in.fastq --sam in.sam
+scarecrow weed --fastq in.fastq --in in.sam --barcode_index 1 --barcodes BC3:P7:BC3.txt --mismatches 1
 ---
 """,
         help="Update SAM file with barcode tag from a FASTQ sequence header",
@@ -45,7 +45,7 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         required=True,
     )
     subparser.add_argument(
-        "-i",
+        "-x",
         "--barcode_index",
         metavar="<file>",
         help=("Barcode index to extract (i.e. first sequence in header is -i 1) [1]"),
@@ -61,8 +61,9 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         help="A single barcode whitelist file in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt)",
     )
     subparser.add_argument(
-        "-s",
-        "--sam",
+        "-i",
+        "--in",
+        dest="infile",
         metavar="<file>",
         help=("Path to SAM file to update barcode tags"),
         type=str,
@@ -74,7 +75,6 @@ scarecrow samtag --fastq in.fastq --sam in.sam
         metavar="<file>",
         help=("Path to SAM file to output"),
         type=str,
-        default="samtag.sam",
     )
     subparser.add_argument(
         "-m",
@@ -130,7 +130,7 @@ def validate_weed_args(parser, args):
         fastq_file=args.fastq,
         barcode_index=args.barcode_index,
         barcodes=args.barcodes,
-        bam_file=args.sam,
+        infile=args.infile,
         out_file=args.out,
         outpath=outpath,
         rnd_string=rnd_string,
