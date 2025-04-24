@@ -10,6 +10,7 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
+* PIGZ compressed FASTQ file not being read by stats
 * Change pngs from harvest to output to barcode_positions basename rather than log basename
 * FASTQ to SAM might be handy
 * SAM (after weed) to FASTQ - need to check FASTQ and JSON output to ensure weeded barcode is present and correct
