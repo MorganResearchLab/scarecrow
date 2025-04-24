@@ -13,7 +13,7 @@ The tool looks for the sequence at the specified barcode index (i.e. in the abov
 
 ```bash
 scarecrow weed --fastq R2.fastq.gz \
-    --sam extracted.sam \
+    --in extracted.sam \
     --barcodes BC1:v1:v1_whitelist.txt \
     --barcode_index 1 \
     --mismatches 1 \
