@@ -22,6 +22,7 @@ from scarecrow.harvest import parser_harvest, validate_harvest_args
 from scarecrow.rake import parser_rake, validate_rake_args
 from scarecrow.stats import parser_stats, validate_stats_args
 from scarecrow.sam2fastq import parser_sam2fastq, validate_sam2fastq_args
+from scarecrow.recast import parser_recast, validate_recast_args
 from scarecrow.sift import parser_sift, validate_sift_args
 from scarecrow.encode import parser_encode, validate_encode_args
 from scarecrow.weed import parser_weed, validate_weed_args
@@ -62,6 +63,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "rake": parser_rake(subparsers),
         "stats": parser_stats(subparsers),
         "sam2fastq": parser_sam2fastq(subparsers),
+        "recast": parser_recast(subparsers),
         "sift": parser_sift(subparsers),
         "encode": parser_encode(subparsers),
         "weed": parser_weed(subparsers),
@@ -90,6 +92,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "rake": validate_rake_args,
         "stats": validate_stats_args,
         "sam2fastq": validate_sam2fastq_args,
+        "recast": validate_recast_args,
         "sift": validate_sift_args,
         "encode": validate_encode_args,
         "weed": validate_weed_args,

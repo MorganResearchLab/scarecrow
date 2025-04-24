@@ -1031,7 +1031,7 @@ def extract_sequences(
     # Start worker processes
     workers = []
     for i in range(threads):
-        worker_output = f"{output}_worker_{i}.sam"  # Each worker writes to its own file
+        worker_output = f"{output}_worker_{i}.chunk"  # Each worker writes to its own file
         worker = Process(
             target = worker_process,
             args = (queue, barcode_files, worker_output, constant_args, stats_queue, total_reads_counter),
@@ -1288,11 +1288,11 @@ def combine_worker_outputs(output, num_workers, args_string):
             outfile.write("@HD\tVN:1.6\n")
             escaped_cmd = args_string.replace("\t", " ").replace("\n", " ")
             outfile.write(
-                f"@PG\tID:reap\tPN:scarecrow\tVN:{__version__}\tDS:{escaped_cmd}\n"
+                f"@PG\tID:reap\tPN:scarecrow\tVN:{__version__}\tCL:{escaped_cmd}\n"
             )
 
         for i in range(num_workers):
-            worker_output = f"{output}_worker_{i}.sam"
+            worker_output = f"{output}_worker_{i}.chunk"
             try:
                 with open(worker_output, "r") as infile:
                     shutil.copyfileobj(infile, outfile)

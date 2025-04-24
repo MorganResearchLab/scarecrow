@@ -12,9 +12,9 @@
     * [`encode`](toolkit_encode.md)
     * [`harvest`](toolkit_harvest.md)
     * [`reap`](toolkit_reap.md)
-    * [`sam2fastq`](toolkit_sam2fastq.md)    
-    * [`stats`](toolkit_stats.md)
+    * [`recast`](toolkit_recast.md)    
     * [`seed`](toolkit_seed.md)
     * [`sift`](toolkit_sift.md)
+    * [`stats`](toolkit_stats.md)
     * [`weed`](toolkit_weed.md)
 

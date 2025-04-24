@@ -10,8 +10,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* FASTQ to SAM would be handy
-* reap chunk file has SAM suffix regardless of -out_format, should rename to avoid confusion
+* Possible issue with harvest returning 1-based instead of 0-based file index in some instances
+* Check stats generated from reshaped SAM and FASTQ are consistent
 * SAM (after weed) to FASTQ - need to check FASTQ and JSON output to ensure weeded barcode is present and correct
 * Input validation needs coding
 * Jitter does not currently apply to UMI or insert sequence
