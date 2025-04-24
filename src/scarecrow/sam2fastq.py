@@ -91,7 +91,7 @@ def run_sam2fastq(sam_file: str = None) -> None:
                     # Track lengths for JSON generation
                     if barcode and not barcode_lengths:
                         # Split barcode by underscores
-                        barcode_parts = barcode.split('_')
+                        barcode_parts = barcode.split(',')
                         barcode_lengths = [len(part)-1 for part in barcode_parts]
                     
                     if umi and umi_length is None:
@@ -99,11 +99,11 @@ def run_sam2fastq(sam_file: str = None) -> None:
 
                     # R1 (barcode + UMI)
                     r1_header = f"@{read.query_name}/1"
-                    r1_seq = barcode.replace("_", "")
-                    r1_qual = tags.get("CY", "F" * len(r1_seq)).replace("_", "")  # Default to high quality if no quality scores
+                    r1_seq = barcode.replace(",", "")
+                    r1_qual = tags.get("CY", "F" * len(r1_seq)).replace(",", "")  # Default to high quality if no quality scores
                     if umi:
                         r1_seq += umi                    
-                        r1_qual += tags.get("UY", "F" * umi_length).replace("_", "")  # Default to high quality if no quality scores
+                        r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")  # Default to high quality if no quality scores
                     
                     # R2 (sequence from SAM)
                     r2_header = f"@{read.query_name}/2"
