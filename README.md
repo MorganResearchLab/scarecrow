@@ -10,9 +10,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* PIGZ compressed FASTQ file not being read by stats
-* Change pngs from harvest to output to barcode_positions basename rather than log basename
-* FASTQ to SAM might be handy
+* FASTQ to SAM would be handy
+* reap chunk file has SAM suffix regardless of -out_format, should rename to avoid confusion
 * SAM (after weed) to FASTQ - need to check FASTQ and JSON output to ensure weeded barcode is present and correct
 * Input validation needs coding
 * Jitter does not currently apply to UMI or insert sequence

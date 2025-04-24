@@ -8,6 +8,7 @@ from argparse import RawTextHelpFormatter
 import logging
 import os
 from typing import List, Dict, Tuple, Optional
+from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks
@@ -568,7 +569,7 @@ def run_harvest(
 
     # Generate plot with optimized settings
     logger.info(f"{results}")
-    pngfile = f"./scarecrow_harvest_{generate_random_string()}"
+    pngfile = Path(output_file).with_suffix('')
     plot_peaks_optimized(
         pd.concat([pd.read_csv(f, sep="\t") for f in barcodes], ignore_index=True),
         outfile=pngfile,
@@ -749,24 +750,3 @@ def plot_peaks_optimized(
                 temp_file = f"{outfile}.file_index_{file_index}_{orientation}.png"
                 g.savefig(temp_file, dpi=dpi, bbox_inches="tight")
                 logger.info(f"- {temp_file}")
-
-"""
-    # Create final combined plot
-    fig, axes = plt.subplots(len(file_groups), 1, figsize=(12, 8 * len(file_groups)))
-
-    # Load and display images in the correct order
-    for i, (file_index, orientation, img_file) in enumerate(temp_files):
-        if os.path.exists(img_file):
-            img = plt.imread(img_file)
-            ax = axes[i]
-            ax.imshow(img)
-            ax.axis("off")
-            ax.set_title(f"File {file_index}: {orientation}", fontsize=12, loc="left")
-            os.remove(img_file)
-
-    # Save final plot efficiently
-    fig.tight_layout(pad=2.0)
-    plt.savefig(outfile, dpi=dpi, bbox_inches="tight")
-    plt.close()
-    logger.info(f"Barcode count distribution with annotations: {outfile}")"
-"""
