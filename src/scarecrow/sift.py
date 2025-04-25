@@ -75,7 +75,7 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
     # Validate file exists
     if input_file.endswith(".sam"):
         sift_sam(input_file)
-    elif input_file.endswith((".fastq", ".fq")):
+    elif input_file.endswith((".fastq", ".fq", ".fastq.gz", ".fq.gz")):
         if json_file.endswith((".json")):
             sift_fastq(input_file, json_file)
         else:
@@ -128,7 +128,7 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
             # Open input and output files
             output_fastq = fastq_file.replace(".fastq", "_sift.fastq")
             open_func = gzip.open if fastq_file.endswith('.gz') else open
-            logger.info(f"Sifting '{fastq_file}', results will be written to '{output_fastq}' and '{json_file}'")
+            logger.info(f"Sifting '{fastq_file}', results will be written to '{output_fastq}' and '{json_file}'")            
             with open_func(fastq_file, 'rt') as infile, open(output_fastq, 'wt') as outfile:
                 while True:
                     # Read 4 lines (one record)
