@@ -5,6 +5,7 @@
 """
 
 import re
+import gzip
 import json
 import pysam
 import logging
@@ -78,7 +79,7 @@ def run_recast(infile: str = None, args_string: str = None) -> None:
         logger.info(f"Will generate JSON file: '{json_file}'")
         run_sam2fastq(sam_file=infile, fastq_file=fastq_file, json_file=json_file)
 
-    elif infile.lower().endswith(('.fastq', '.fq')):
+    elif infile.lower().endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
         # FASTQ to SAM conversion
         output_sam = input_path.with_suffix('.sam').as_posix()
         logger.info(f"Converting FASTQ '{infile}' to SAM '{output_sam}'")
@@ -170,8 +171,9 @@ def run_fastq2sam(fastq_file: str = None, output_sam: str = None, args_string: s
                      'VN': __version__,
                      'CL': escaped_cmd}] }
 
+    open_func = gzip.open if fastq_file.endswith('.gz') else open
     with pysam.AlignmentFile(output_sam, "wh", header=header) as sam_out:
-        with open(fastq_file, "r") as fq:
+        with open_func(fastq_file, 'rt') as fq:
             while True:
                 # Read R1 (header contains all tags)
                 r1_header = fq.readline().strip()

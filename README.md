@@ -14,6 +14,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 * Check stats generated from reshaped SAM and FASTQ are consistent
 * SAM (after weed) to FASTQ - need to check FASTQ and JSON output to ensure weeded barcode is present and correct
 * Input validation needs coding
+  - sift needs to validate JSON present for FASTQ, etc...
+  - sift writes uncompressed so need to strip gz suffix from outfile
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read and downstream then may need position updating before extraction
 * Docs need updating
