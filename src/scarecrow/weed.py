@@ -466,14 +466,15 @@ def process_chunk(args):
 
                     # Update read tags
                     if barcode:
-                        # Update CR and CY tags
                         cr_tag = read.get_tag("CR") if read.has_tag("CR") else ""
                         cy_tag = read.get_tag("CY") if read.has_tag("CY") else ""
                         cb_tag = read.get_tag("CB") if read.has_tag("CB") else ""
                         xm_tag = read.get_tag("XM") if read.has_tag("XM") else ""
                         xp_tag = read.get_tag("XP") if read.has_tag("XP") else ""
+                        xq_tag = read.get_tag("XQ") if read.has_tag("XQ") else ""
                         read.set_tag("CR", f"{cr_tag},{barcode}")
                         read.set_tag("CY", f"{cy_tag},{'!' * len(barcode)}")
+                        read.set_tag("XQ", f"{xq_tag},{'!' * len(barcode)}")
                         if matched_barcode:
                             read.set_tag("CB", f"{cb_tag},{matched_barcode}")
                             read.set_tag("XM", f"{xm_tag},{mismatch_count}")
