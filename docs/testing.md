@@ -14,9 +14,6 @@ do
     echo ${ID}
     time scarecrow seed --fastqs ${R1} ${R2} \
         -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0
-    time scarecrow seed --fastqs ${R1} ${R2} \
-        -o ./WTv2/barcodes_${ID}_trie.csv --barcodes ${BARCODE} -n 0 -u 0 \
-        --pickle ${WHITELIST}.${ID}.pkl.gz -k 2
 done
 
 # Harvest (set-based approach)
@@ -25,12 +22,6 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --conserved ./WTv2/barcodes.BC1_conserved.tsv \
     --out ./WTv2/barcode_positions_set.csv
 
-# Harvest (trie and kmer index approach)
-FILES=(./WTv2/barcodes_BC*_trie.csv)
-scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
-    --conserved ./WTv2/barcodes_BC1_trie_conserved.tsv \
-    --out ./WTv2/barcode_positions_trie.csv
-
 # Reap (set-based approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
           BC2:v1:./WTv2/bc_data_v1.txt
@@ -38,7 +29,7 @@ BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_set.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
-    --out ./WTv2/cDNA --threads 2 --out_fastq
+    --out ./WTv2/cDNA --threads 2 --out_sam
 
 # Reap (trie and kmer index approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.pkl.gz

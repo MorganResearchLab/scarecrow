@@ -185,6 +185,7 @@ def generate_json_from_fastq(fastq_file: str, json_file: str) -> None:
     try:
         with open(json_file, "w") as f:
             json.dump(json_data, f, indent=4)
+            f.write('\n')
         logger.info(f"Successfully generated JSON file: {json_file}")
     except Exception as e:
         logger.error(f"Error writing JSON file: {str(e)}")

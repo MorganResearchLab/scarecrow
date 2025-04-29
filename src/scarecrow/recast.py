@@ -81,6 +81,9 @@ def run_recast(infile: str = None, args_string: str = None) -> None:
 
     elif infile.lower().endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
         # FASTQ to SAM conversion
+        base_path = input_path
+        if infile.lower().endswith('.gz'):
+            base_path = input_path.with_suffix('')  # Remove .gz
         output_sam = input_path.with_suffix('.sam').as_posix()
         logger.info(f"Converting FASTQ '{infile}' to SAM '{output_sam}'")
         run_fastq2sam(fastq_file=infile, output_sam=output_sam, args_string=args_string)
@@ -288,3 +291,4 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
     # Write JSON file
     with open(json_file, "w") as f:
         json.dump(json_data, f, indent=4)
+        f.write('\n') 

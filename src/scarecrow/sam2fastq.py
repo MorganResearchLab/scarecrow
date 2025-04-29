@@ -178,4 +178,5 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
     # Write JSON file
     with open(json_file, "w") as f:
         json.dump(json_data, f, indent=4)
+        f.write('\n') 
 

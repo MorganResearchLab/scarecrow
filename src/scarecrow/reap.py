@@ -1367,5 +1367,6 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
     json_file = f"{output_prefix}.json"
     with open(json_file, "w") as f:
         json.dump(json_data, f, indent=4)
+        f.write('\n')
 
     return json_file

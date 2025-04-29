@@ -11,6 +11,7 @@
 * Toolkit
     * [`encode`](toolkit_encode.md)
     * [`harvest`](toolkit_harvest.md)
+    * [`json`](toolkit_json.md)
     * [`reap`](toolkit_reap.md)
     * [`recast`](toolkit_recast.md)    
     * [`seed`](toolkit_seed.md)
