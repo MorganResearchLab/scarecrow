@@ -68,6 +68,7 @@ def run_json(infile: str = None) -> None:
     if infile:
         if Path(infile).exists():
             json_file = infile.replace(".fastq", ".json")
+            json_file = json_file[:-3] if json_file.endswith('.gz') else json_file
             logger.info(f"Generating JSON file '{json_file}' from '{infile}'")
             generate_json_from_fastq(fastq_file=infile, json_file=json_file)
 
