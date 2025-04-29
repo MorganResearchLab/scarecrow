@@ -207,7 +207,6 @@ def run_fastq2sam(fastq_file: str = None, output_sam: str = None, args_string: s
                 
                 sam_out.write(record)
 
-
 def parse_tags_from_header(header: str) -> list:
     """
     Parse SAM tags from FASTQ header string.
