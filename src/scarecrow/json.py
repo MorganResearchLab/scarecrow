@@ -5,7 +5,7 @@
 """
 
 import json
-import pysam
+import gzip
 import logging
 from pathlib import Path
 from argparse import RawTextHelpFormatter
