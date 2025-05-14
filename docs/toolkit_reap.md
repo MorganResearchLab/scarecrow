@@ -29,47 +29,46 @@ scarecrow reap --fastqs R1.fastq.gz R2.fastq.gz \
 
 ### Example interleaved FASTQ format
 
-The first read contains the barcodes and UMI, while the second read contains the `extract` sequence range. The barcodes and quality scores derive from the corrected barcodes.
+The first read contains the barcodes and UMI, while the second read contains the `extract` sequence range. The barcodes and quality scores derive from the corrected barcodes. The sequence headers include the SAM read tags (see below) to facilitate the option to `recast` to SAM file format if required.
 
 ```bash
-@SRR28867558.10004 1 VH01123:94:AACNK35M5:1:1101:32149:1625/1
-GAACAGGCGAGCTGAACCTGTTGCCGCCGGGTGG
+@SRR28867558.10002 1 VH01123:94:AACNK35M5:1:1101:31391:1625 CR:CTGGCATA_GAGCTGAA_CCTGTTGC:CY:CCCCCCC;_CCCCCCCC_CCCCCCCC:CB:CTGGCATA_GAGCTGAA_CCTGTTGC:XQ:CCCCCCC;_CCCCCCCC_CCCCCCCC:XP:11_49_79:XM:0_0_0:UR:CGCGGAGGTT:UY:CCCCCCCCCC/1
+CTGGCATAGAGCTGAACCTGTTGCCGCGGAGGTT
 +
-CCC;CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
-
-@SRR28867558.10004 1 VH01123:94:AACNK35M5:1:1101:32149:1625/2
-CTGGCACCAGACTTGCCCTCCAATGGATCCTCGTTAAAGGATTTAAAGTGGACTCATTCCAATTACAGGGCCTC
+CCCCCCC;CCCCCCCCCCCCCCCCCCCCCCCCCC
+@SRR28867558.10002 1 VH01123:94:AACNK35M5:1:1101:31391:1625 CR:CTGGCATA_GAGCTGAA_CCTGTTGC:CY:CCCCCCC;_CCCCCCCC_CCCCCCCC:CB:CTGGCATA_GAGCTGAA_CCTGTTGC:XQ:CCCCCCC;_CCCCCCCC_CCCCCCCC:XP:11_49_79:XM:0_0_0:UR:CGCGGAGGTT:UY:CCCCCCCCCC/2
+GTTTCATATGTTGGCCAGGCTGGTCTCAAACTCCTGACCTCGTGAT
 +
-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+CCCCCCCCCCCCCCCCCCCCCCCCCCCCC-CCCCCCCCCCCCCCCC
 ```
 
-The accompanying JSON identifies the barcode and UMI positions in the custom -x string passed to kb count. In addition it disables barcode whitelist checking (`-w NONE`) and indicates that the FASTQ file is interleaved (`--inleaved`).
+The accompanying JSON identifies the barcode and UMI positions for the interleaved fastq file, required for the custom -x string of `kb count`. In addition, the `kb count` string disables barcode whitelist checking (`-w NONE`) and indicates that the FASTQ file is interleaved (`--inleaved`).
 
 ```bash
 {
     "description": "scarecrow",
     "barcodes": [
         {
-            "range": "1:0-7",
-            "whitelist": "./WTv2/bc_data_v1.txt"
+            "range": "1:1-8",
+            "whitelist": ""
         },
         {
-            "range": "1:8-15",
-            "whitelist": "./WTv2/bc_data_v1.txt"
+            "range": "1:9-16",
+            "whitelist": ""
         },
         {
-            "range": "1:16-23",
-            "whitelist": "./WTv2/bc_data_n99_v5.txt"
+            "range": "1:17-24",
+            "whitelist": ""
         }
     ],
-    "umi:": [
+    "umi": [
         {
-            "range": "1:24,33"
+            "range": "1:25-34"
         }
     ],
     "kallisto-bustools": [
         {
-            "kb count": "-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x 0,0,7,0,8,15,0,16,23:0,24,33:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA_set.fastq"
+            "kb count": "-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x 0,0,8,0,8,16,0,16,24:0,24,34:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA.fastq"
         }
     ]
 }
@@ -80,7 +79,7 @@ The accompanying JSON identifies the barcode and UMI positions in the custom -x 
 The SAM output includes sequence tags for the barcodes and UMI, in addition to barcode start positions (XP) and mismatch counts (XM).
 
 ```bash
-SRR28867558.10004       4       *       0       255     *       *       0       0       CTGGCACCAGACTTGCCCTCCAATGGATCCTCGTTAAAGGATTTAAAGTGGACTCATTCCAATTACAGGGCCTC      CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC        CR:Z:GAACAGGC_GAGCTAAA_CCTGTTGC CY:Z:CCC;CCCC_CCCCCCCC_CCCCCCCC CB:Z:GAACAGGC_GAGCTGAA_CCTGTTGC XP:Z:11_49_79     XM:Z:0_1_0      UR:Z:CGCCGGGTGG UY:Z:CCCCCCCCCC
+SRR28867558.10002       4       *       0       255     *       *       0       0       GTTTCATATGTTGGCCAGGCTGGTCTCAAACTCCTGACCTCGTGAT  CCCCCCCCCCCCCCCCCCCCCCCCCCCCC-CCCCCCCCCCCCCCCC    CR:Z:CTGGCATA,GAGCTGAA,CCTGTTGC CY:Z:CCCCCCC;,CCCCCCCC,CCCCCCCC CB:Z:CTGGCATA,GAGCTGAA,CCTGTTGC XQ:Z:CCCCCCC;,CCCCCCCC,CCCCCCCC   XP:Z:11,49,79   XM:Z:0,0,0      UR:Z:CGCGGAGGTT UY:Z:CCCCCCCCCC
 ```
 
 The sequence tags applied are listed below:
