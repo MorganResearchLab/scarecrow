@@ -164,29 +164,29 @@ def parse_fastq_tags(fastq_file: str = None) -> Tuple[
                 value = header[value_start:value_end]
                 return value.split('_') if value else None
 
-            # Process CR tag (3 underscore-separated values)
+            # Process CR tag
             cr_parts = get_tag_parts('CR')
-            if cr_parts and len(cr_parts) == 3:
+            if cr_parts:
                 for idx, barcode in enumerate(cr_parts):
                     CR_counts[idx][barcode] += 1
                 combined_CR_counts["_".join(cr_parts)] += 1  # Store with commas to match SAM
 
-            # Process CB tag (3 underscore-separated values)
+            # Process CB tag
             cb_parts = get_tag_parts('CB')
-            if cb_parts and len(cb_parts) == 3:
+            if cb_parts:
                 for idx, barcode in enumerate(cb_parts):
                     CB_counts[idx][barcode] += 1
                 combined_CB_counts["_".join(cb_parts)] += 1  # Store with commas to match SAM
 
-            # Process XP tag (3 underscore-separated values)
+            # Process XP tag
             xp_parts = get_tag_parts('XP')
-            if xp_parts and len(xp_parts) == 3:
+            if xp_parts:
                 for idx, pos in enumerate(xp_parts):
                     XP_counts[idx][pos] += 1
 
-            # Process XM tag (3 underscore-separated values)
+            # Process XM tag
             xm_parts = get_tag_parts('XM')
-            if xm_parts and len(xm_parts) == 3:
+            if xm_parts:
                 for idx, mm in enumerate(xm_parts):
                     XM_counts[idx][mm] += 1
 

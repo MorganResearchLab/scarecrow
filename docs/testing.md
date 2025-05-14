@@ -160,9 +160,13 @@ scarecrow reap --fastqs ${R1} ${R2} -j 2 -m 3 -q 10 \
     --out ./cDNA_v2 --threads 1 
 
 scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.gz \
-    --sam cDNA_v2.sam \
-    -i 1 \
+    --in cDNA_v2.sam \
+    -x 1 \
     --out cDNA_v2_fix.sam \
     -m 1 \
-    --barcodes BC3:P7:./BC3.txt &> debug.log
+    --barcodes BC3:P7:./BC3.txt
+
+scarecrow recast --in cDNA_v2_fix.sam
+scarecrow stats --in cDNA_v2_fix.sam
+scarecrow stats --in cDNA_v2_fix.fastq
 ```
