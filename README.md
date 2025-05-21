@@ -10,7 +10,7 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* Input validation needs coding  
+* Input validation needs coding (done: seed)
 * Docs need updating (esp examples)
 * Possible issue with harvest returning 1-based instead of 0-based file index in some instances
 * Jitter does not currently apply to UMI or insert sequence
