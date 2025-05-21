@@ -8,7 +8,7 @@ import os
 import pysam
 import logging
 import random
-from argparse import RawTextHelpFormatter
+from argparse import ArgumentTypeError, RawTextHelpFormatter
 from collections import defaultdict, namedtuple
 from functools import lru_cache
 from typing import List, Dict, Set, Tuple
@@ -359,6 +359,60 @@ def validate_seed_args(parser, args):
     """
     Validate arguments
     """
+
+    # Type checking for all arguments
+    try:
+        # Check fastqs - should be list of strings
+        if not isinstance(args.fastqs, list) or not all(isinstance(f, str) for f in args.fastqs):
+            raise TypeError("--fastqs must be a list of file paths")
+        
+        # Check that all FASTQ files exist and are readable
+        for fastq in args.fastqs:
+            if not os.path.exists(fastq):
+                raise ArgumentTypeError(f"FASTQ file does not exist: {fastq}")
+            if not os.access(fastq, os.R_OK):
+                raise ArgumentTypeError(f"FASTQ file is not readable: {fastq}")
+
+        # Check numeric parameters
+        if not isinstance(args.num_reads, int):
+            raise TypeError("--num_reads must be a positive integer")
+        if not isinstance(args.upper_read_count, int):
+            raise TypeError("--upper_read_count must be a positive integer")
+        if not isinstance(args.random_seed, int):
+            raise TypeError("--random_seed must be an integer")
+        if not isinstance(args.batch_size, int) or args.batch_size <= 0:
+            raise TypeError("--batch_size must be a positive integer")
+        if not isinstance(args.linker_min_length, int) or args.linker_min_length <= 0:
+            raise TypeError("--linker_min_length must be a positive integer")
+        
+        # Check float parameters
+        if not isinstance(args.linker_base_frequency, float) or not (0 <= args.linker_base_frequency <= 1):
+            raise TypeError("--linker_base_frequency must be a float between 0 and 1")
+        
+        # Check barcodes format
+        if not isinstance(args.barcodes, list) or not all(isinstance(bc, str) for bc in args.barcodes):
+            raise TypeError("--barcodes must be a list of strings in format 'name:version:file'")
+        
+        # Check output file is string
+        if not isinstance(args.out, str):
+            raise TypeError("--out must be a string file path")
+
+        # Check if output directory exists
+        output_dir = os.path.dirname(os.path.abspath(args.out)) or '.'
+        if not os.path.exists(output_dir):
+            raise ArgumentTypeError(f"Output directory does not exist: {output_dir}")
+        if not os.access(output_dir, os.W_OK):
+            raise ArgumentTypeError(f"No write permissions for output directory: {output_dir}")
+
+        # Check optional parameters
+        if args.pickle is not None and not isinstance(args.pickle, str):
+            raise TypeError("--pickle must be a string file path or None")
+        if args.kmer_length is not None and (not isinstance(args.kmer_length, int) or args.kmer_length <= 0):
+            raise TypeError("--kmer_length must be a positive integer or None")
+        
+            
+    except TypeError as e:
+        parser.error(str(e))
 
     # Global logger setup
     logfile = f"./scarecrow_seed_{generate_random_string()}.log"
