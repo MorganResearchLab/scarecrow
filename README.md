@@ -10,7 +10,6 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* Input validation needs coding (done: seed, harvest, reap)
 * Docs need updating (esp examples)
 * Possible issue with harvest returning 1-based instead of 0-based file index in some instances
   - WTv2 test data gives barcode_positions_set.csv file_index 2 (reap returns error, but works with file_index 1)

@@ -4,13 +4,14 @@
 @author: David Wragg
 """
 
+import os
 import gzip
 import json
 import pysam
 import logging
 from collections import defaultdict
 from pathlib import Path
-from argparse import RawTextHelpFormatter
+from argparse import ArgumentTypeError, RawTextHelpFormatter
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
@@ -72,6 +73,54 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
     """
     logger = logging.getLogger("scarecrow")
 
+    try:
+        # Validate input file
+        if not isinstance(input_file, str):
+            raise TypeError("Input file path must be a string")
+        
+        input_path = Path(input_file)
+        if not input_path.exists():
+            raise FileNotFoundError(f"Input file does not exist: {input_file}")
+        if not os.access(input_file, os.R_OK):
+            raise PermissionError(f"Input file is not readable: {input_file}")
+
+        # Validate file extensions
+        valid_sam_extensions = {'.sam'}
+        valid_fastq_extensions = {'.fastq', '.fq', '.fastq.gz', '.fq.gz'}
+        
+        input_ext = input_path.suffix.lower()
+        if input_ext in valid_sam_extensions:
+            sift_sam(input_file)
+
+        elif input_ext in valid_fastq_extensions:
+            # Validate JSON file for FASTQ input
+            if not isinstance(json_file, str):
+                raise TypeError("JSON file path must be a string when processing FASTQ")
+            
+            json_path = Path(json_file)
+            if not json_path.exists():
+                raise FileNotFoundError(f"JSON file does not exist: {json_file}")
+            if not os.access(json_file, os.R_OK):
+                raise PermissionError(f"JSON file is not readable: {json_file}")
+            if not json_path.suffix.lower() == '.json':
+                raise ValueError(f"JSON file must have .json extension: {json_file}")
+                
+            sift_fastq(input_file, json_file)
+            
+        else:
+            valid_extensions = valid_sam_extensions.union(valid_fastq_extensions)
+            raise ValueError(
+                f"Input file has invalid extension. Must be one of: {', '.join(valid_extensions)}"
+            )
+
+    except (TypeError, ValueError, FileNotFoundError, PermissionError) as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during validation: {str(e)}")
+        raise
+
+    """
     # Validate file exists
     if Path(input_file).exists():
         if input_file.endswith(".sam"):
@@ -90,6 +139,7 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
             raise IOError
     else:
         raise FileNotFoundError
+    """
 
     logger.info("Finished!")
 

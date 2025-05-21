@@ -13,7 +13,7 @@ import sqlite3
 import logging
 from typing import Optional
 from pathlib import Path
-from argparse import RawTextHelpFormatter
+from argparse import ArgumentTypeError, RawTextHelpFormatter
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.reap import parse_seed_arguments, BarcodeMatcherOptimized
@@ -111,6 +111,69 @@ def validate_weed_args(parser, args):
     """
     Validate and run samtag processing
     """
+
+    try:
+        # Validate input files
+        if not isinstance(args.fastq, str):
+            raise TypeError("--fastq must be a file path string")
+        if not os.path.exists(args.fastq):
+            raise ArgumentTypeError(f"FASTQ file does not exist: {args.fastq}")
+        if not os.access(args.fastq, os.R_OK):
+            raise ArgumentTypeError(f"FASTQ file is not readable: {args.fastq}")
+        if not args.fastq.lower().endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz')):
+            raise ArgumentTypeError("FASTQ file must have .fastq, .fq, .fastq.gz, or .fq.gz extension")
+
+        if not isinstance(args.infile, str):
+            raise TypeError("--in must be a file path string")
+        if not os.path.exists(args.infile):
+            raise ArgumentTypeError(f"SAM file does not exist: {args.infile}")
+        if not os.access(args.infile, os.R_OK):
+            raise ArgumentTypeError(f"SAM file is not readable: {args.infile}")
+        if not args.infile.lower().endswith('.sam'):
+            raise ArgumentTypeError("Input file must have .sam extension")
+
+        # Validate barcode whitelist
+        if not isinstance(args.barcodes, str):
+            raise TypeError("--barcodes must be a string in format 'name:version:file'")
+        try:
+            barcode_name, whitelist_name, whitelist_file = args.barcodes.split(':')
+            if not os.path.exists(whitelist_file):
+                raise ArgumentTypeError(f"Barcode whitelist file does not exist: {whitelist_file}")
+            if not os.access(whitelist_file, os.R_OK):
+                raise ArgumentTypeError(f"Barcode whitelist file is not readable: {whitelist_file}")
+        except ValueError:
+            raise ArgumentTypeError("--barcodes must be in format 'name:version:file'")
+
+        # Validate numeric parameters
+        if not isinstance(args.barcode_index, int) or args.barcode_index <= 0:
+            raise TypeError("--barcode_index must be a positive integer")
+        if not isinstance(args.mismatches, int) or args.mismatches < 0:
+            raise TypeError("--mismatches must be a non-negative integer")
+        if args.base_quality is not None and (not isinstance(args.base_quality, int) or args.base_quality < 0):
+            raise TypeError("--base_quality must be a non-negative integer or None")
+        if not isinstance(args.threads, int) or args.threads <= 0:
+            raise TypeError("--threads must be a positive integer")
+
+        # Validate output file
+        if args.out is not None:
+            if not isinstance(args.out, str):
+                raise TypeError("--out must be a string file path")
+            output_dir = os.path.dirname(os.path.abspath(args.out)) or '.'
+            if not os.path.exists(output_dir):
+                raise ArgumentTypeError(f"Output directory does not exist: {output_dir}")
+            if not os.access(output_dir, os.W_OK):
+                raise ArgumentTypeError(f"No write permissions for output directory: {output_dir}")
+            if not args.out.lower().endswith('.sam'):
+                raise ArgumentTypeError("Output file must have .sam extension")
+
+        # Validate boolean parameter
+        if not isinstance(args.verbose, bool):
+            raise TypeError("--verbose must be a boolean")
+
+    except (TypeError, ArgumentTypeError) as e:
+        parser.error(str(e))
+
+
     # Get outfile dirname for writing temp chunk files to
     outpath = os.path.dirname(args.out)
     if not outpath:

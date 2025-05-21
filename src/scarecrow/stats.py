@@ -4,6 +4,7 @@
 @author: David Wragg
 """
 
+import os
 import pysam
 import gzip
 import logging
@@ -64,6 +65,76 @@ def run_stats(in_file: str = None) -> None:
     """
     logger = logging.getLogger("scarecrow")
 
+    try:
+        # Validate input file
+        if not isinstance(in_file, str):
+            raise TypeError("Input file path must be a string")
+        
+        in_path = Path(in_file)
+        if not in_path.exists():
+            raise FileNotFoundError(f"Input file does not exist: {in_file}")
+        if not os.access(in_file, os.R_OK):
+            raise PermissionError(f"Input file is not readable: {in_file}")
+
+        # Define valid file extensions
+        valid_extensions = {
+            '.sam': parse_sam_tags,
+            '.fastq': parse_fastq_tags,
+            '.fq': parse_fastq_tags,
+            '.fastq.gz': parse_fastq_tags,
+            '.fq.gz': parse_fastq_tags
+        }
+
+        # Check file extension
+        file_ext = in_path.suffix.lower()
+        if file_ext == '.gz':
+            # Handle double extensions for gzipped files
+            file_ext = ''.join(in_path.suffixes[-2:]).lower()
+
+        if file_ext not in valid_extensions:
+            raise ValueError(
+                f"Input file has invalid extension. Must be one of: {', '.join(valid_extensions.keys())}"
+            )
+
+        # Process file based on extension
+        parser_func = valid_extensions[file_ext]
+        counts_list = list(parser_func(in_file))
+
+        if not counts_list:
+            raise ValueError("No counts data was generated from the input file")
+
+        # Define output metrics
+        metric_names = [
+            "CR_counts",
+            "CB_counts",
+            "XP_counts",
+            "XM_counts",
+            "UR_counts",
+            "combined_CR_counts",
+            "combined_CB_counts",
+        ]
+
+        # Write output files
+        for name, counts in zip(metric_names, counts_list):
+            try:
+                out_file = f"{in_file}.{name}.txt"
+                if "combined" in name:
+                    write_combined_counts_to_file(counts, out_file)
+                else:
+                    write_counts_to_file(counts, out_file)
+                logger.info(f"{name} written to '{out_file}'")
+            except Exception as e:
+                logger.error(f"Failed to write {name}: {str(e)}")
+                raise
+
+    except (TypeError, ValueError, FileNotFoundError, PermissionError) as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error during processing: {str(e)}")
+        raise
+
+    """
     # List of accepted file types
     suffixes = ['.fastq.gz', '.fq.gz', '.fastq', '.fq', '.sam']
     suffix = next((s for s in suffixes if str(in_file).endswith(s)), None)
@@ -103,6 +174,7 @@ def run_stats(in_file: str = None) -> None:
         else:
             raise ValueError(f"Unsupported file type for {in_file}")
 
+    """
 
     logger.info("Finished!")
 
