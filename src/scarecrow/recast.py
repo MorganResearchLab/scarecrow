@@ -54,7 +54,7 @@ def validate_recast_args(parser, args) -> None:
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
-    
+
     run_recast(infile=args.infile, args_string=" ".join(f"--{k} {v}" for k, v in vars(args).items() if v is not None))
 
 
@@ -71,7 +71,7 @@ def run_recast(infile: str = None, args_string: str = None) -> None:
         logger.error(f"Input file '{infile}' does not exist")
         return
 
-    if infile.lower().endswith('.sam'):
+    if infile.lower().endswith(('.sam', '.bam')):
         # SAM to FASTQ conversion
         fastq_file = input_path.with_suffix('.fastq').as_posix()
         json_file = input_path.with_suffix('.json').as_posix()
@@ -113,17 +113,17 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
         for read in sam.fetch(until_eof=True):
             # Extract tags
             tags = {k: str(v) for k, v in read.tags}
-            
+
             # Get barcode (CB tag) and UMI (UR tag)
             barcode = tags.get("CB", "")
             umi = tags.get("UR", "")
-            
+
             # Track lengths for JSON generation
             if barcode and not barcode_lengths:
                 # Split barcode by commas
                 barcode_parts = barcode.split(',')
                 barcode_lengths = [len(part) for part in barcode_parts]
-            
+
             if umi and umi_length is None:
                 umi_length = len(umi)
 
@@ -132,20 +132,20 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
             for tag, value in read.tags:
                 header_parts.append(f"{tag}:{value.replace(",","_")}")
             header = f"@{read.query_name} " + ":".join(header_parts)
-            
+
             # R1 (header contains all tags)
             r1_header = f"{header}/1"
             r1_seq = barcode.replace(",", "")
             r1_qual = tags.get("XQ", "F" * len(r1_seq)).replace(",", "")
             if umi:
-                r1_seq += umi                    
+                r1_seq += umi
                 r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")
-            
+
             # R2 (sequence from SAM)
             r2_header = f"{header}/2"
             r2_seq = read.query_sequence
             r2_qual = "".join(chr(q + 33) for q in read.query_qualities)
-            
+
             # Write interleaved FASTQ
             fq.write(f"{r1_header}\n{r1_seq}\n+\n{r1_qual}\n")
             fq.write(f"{r2_header}\n{r2_seq}\n+\n{r2_qual}\n")
@@ -169,7 +169,7 @@ def run_fastq2sam(fastq_file: str = None, output_sam: str = None, args_string: s
     # Prepare SAM header (minimal by default)
     escaped_cmd = args_string.replace("\t", " ").replace("\n", " ")
     header = {'HD': {'VN': '1.6'},
-              'PG': [{'ID': 'reap', 
+              'PG': [{'ID': 'reap',
                      'PN': 'scarecrow',
                      'VN': __version__,
                      'CL': escaped_cmd}] }
@@ -182,24 +182,24 @@ def run_fastq2sam(fastq_file: str = None, output_sam: str = None, args_string: s
                 r1_header = fq.readline().strip()
                 if not r1_header:  # End of file
                     break
-                
+
                 # Skip R1 sequence and qualities (not needed)
                 _ = fq.readline()  # Sequence
                 _ = fq.readline()  # '+'
                 _ = fq.readline()  # Qualities
-                
+
                 # Read R2 (actual sequence to include in SAM)
                 r2_header = fq.readline().strip()
                 r2_seq = fq.readline().strip()
                 _ = fq.readline()  # '+'
                 r2_qual = fq.readline().strip()
-                
+
                 # Extract read name (before first space)
                 read_name = r1_header.split(' ')[0][1:]  # Remove @
-                
+
                 # Parse all tags from header
                 tags = parse_tags_from_header(r1_header)
-                
+
                 # Create SAM record
                 record = pysam.AlignedSegment()
                 record.query_name = read_name
@@ -207,22 +207,22 @@ def run_fastq2sam(fastq_file: str = None, output_sam: str = None, args_string: s
                 record.query_qualities = pysam.qualitystring_to_array(r2_qual)
                 record.flag = 4  # unmapped
                 record.tags = tags
-                
+
                 sam_out.write(record)
 
 def parse_tags_from_header(header: str) -> list:
     """
     Parse SAM tags from FASTQ header string.
-    
+
     Header format example:
     @SRR28867558.10001 CR:...:CY:...:CB:...:XQ:...:XP:...:XM:...:UR:...:UY:.../1
-    
+
     Returns:
         List of (tag, value) pairs for SAM record
     """
     # Extract all tag:value pairs from header
     tag_matches = re.findall(r'([A-Za-z]{2}):([^:]+)(?=:|$)', header.split(' ', 1)[1])
-    
+
     tags = []
     for tag, value in tag_matches:
         # Handle different tag types appropriately
@@ -239,7 +239,7 @@ def parse_tags_from_header(header: str) -> list:
         else:
             # Default string handling
             tags.append((tag, value))
-    
+
     return tags
 
 
@@ -253,19 +253,19 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
         "umi": [],
         "kallisto-bustools": []
     }
-    
+
     # Barcode information
     current_position = 0
     kb_x = None
     star_x = None
-    
+
     for i, length in enumerate(barcode_lengths):
         end_position = current_position + length
         json_data["barcodes"].append({
             "range": f"1:{current_position + 1}-{end_position}",
             "whitelist": ""  # Empty since we don't have whitelist info from SAM
         })
-        
+
         if kb_x is None:
             kb_x = f"0,{current_position},{end_position}"
             star_x = f"0_{current_position}_0_{end_position}"
@@ -273,7 +273,7 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
             kb_x = f"{kb_x},0,{current_position},{end_position}"
             star_x = f"{star_x} 0_{current_position}_0_{end_position}"
         current_position = end_position
-    
+
     # UMI information if present
     star_umi = None
     if umi_length is not None:
@@ -282,7 +282,7 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
         })
         kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length}"
         star_umi = f"0_{current_position},0,{current_position + umi_length}"
-    
+
     # Add kallisto-bustools command template
     json_data["kallisto-bustools"].append({
         "kb count": f"-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x {kb_x}:1,0,0 -w NONE --h5ad --inleaved -o <outdir> {fastq_file}"
@@ -291,4 +291,4 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
     # Write JSON file
     with open(json_file, "w") as f:
         json.dump(json_data, f, indent=4)
-        f.write('\n') 
+        f.write('\n')
