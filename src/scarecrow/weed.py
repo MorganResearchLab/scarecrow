@@ -18,7 +18,7 @@ from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.reap import parse_seed_arguments, BarcodeMatcherOptimized
 from scarecrow.tools import generate_random_string
-
+from scarecrow.reap import setup_worker_logger
 
 def parser_weed(parser):
     """
@@ -85,6 +85,14 @@ scarecrow weed --fastq in.fastq --in in.sam --barcode_index 1 --barcodes BC3:P7:
         help="Number of allowed mismatches in barcode [1]",
     )
     subparser.add_argument(
+        "-j",
+        "--jitter",
+        metavar="<int>",
+        type=int,
+        default=1,
+        help="Barcode position jitter [1]",
+    )
+    subparser.add_argument(
         "-q",
         "--base_quality",
         metavar="<int>",
@@ -149,6 +157,8 @@ def validate_weed_args(parser, args):
             raise TypeError("--barcode_index must be a positive integer")
         if not isinstance(args.mismatches, int) or args.mismatches < 0:
             raise TypeError("--mismatches must be a non-negative integer")
+        if not isinstance(args.jitter, int) or args.jitter < 0:
+            raise TypeError("--jitter must be a non-negative integer")
         if args.base_quality is not None and (not isinstance(args.base_quality, int) or args.base_quality < 0):
             raise TypeError("--base_quality must be a non-negative integer or None")
         if not isinstance(args.threads, int) or args.threads <= 0:
@@ -199,6 +209,7 @@ def validate_weed_args(parser, args):
         outpath=outpath,
         rnd_string=rnd_string,
         mismatches=args.mismatches,
+        jitter=args.jitter,
         base_quality=args.base_quality,
         verbose=args.verbose,
         threads=args.threads,
@@ -259,6 +270,7 @@ def run_weed(
     outpath: str = None,
     rnd_string: str = None,
     mismatches: int = 1,
+    jitter: int = 1,
     base_quality: int = 10,
     verbose: bool = False,
     threads: Optional[int] = None,
@@ -279,7 +291,7 @@ def run_weed(
     # Create or load the FASTQ index
     index_db = f"{fastq_file}.db"
     if not os.path.exists(index_db):
-        logger.info("Creating FASTQ index")
+        logger.info(f"Creating FASTQ index for '{fastq_file}'")
         create_fastq_index(fastq_file, index_db)
         logger.info("FASTQ index created.")
     else:
@@ -317,7 +329,9 @@ def run_weed(
                 f"{outpath}{rnd_string}_chunk_{i}.sam",
                 barcode_index,
                 matcher,
+                jitter,
                 whitelist,
+                verbose
             )
             for i, chunk in enumerate(bam_chunks)
         ]
@@ -481,9 +495,10 @@ def get_barcode_from_fastq(
 
 def process_chunk(args):
     """Process a chunk of the BAM file and add tags from the FASTQ file."""
-    bam_chunk, fastq_file, index_db, output_sam, barcode_index, matcher, whitelist = (
+    bam_chunk, fastq_file, index_db, output_sam, barcode_index, matcher, jitter, whitelist, verbose = (
         args
     )
+    logger = setup_worker_logger()  # Ensure the logger is set up
 
     # Connect to the SQLite database
     conn = sqlite3.connect(index_db)
@@ -510,8 +525,9 @@ def process_chunk(args):
 
                     # Search for barcode in forward orientation
                     matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                        barcode, None, whitelist, "forward", 1, len(barcode), 0, None
+                        barcode, None, whitelist, "forward", 1, len(barcode), jitter, None
                     )
+
                     # If none found, search in reverse orientation
                     if "NN" in matched_barcode:
                         matched_barcode, mismatch_count, adj_position = (
@@ -522,11 +538,12 @@ def process_chunk(args):
                                 "reverse",
                                 1,
                                 len(barcode),
-                                0,
+                                jitter,
                                 None,
                             )
                         )
-
+                    if verbose:
+                        logger.info(f"{matched_barcode}")
                     # Update read tags
                     if barcode:
                         cr_tag = read.get_tag("CR") if read.has_tag("CR") else ""

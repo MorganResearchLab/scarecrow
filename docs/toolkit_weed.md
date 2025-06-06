@@ -17,5 +17,6 @@ scarecrow weed --fastq R2.fastq.gz \
     --barcodes BC1:v1:v1_whitelist.txt \
     --barcode_index 1 \
     --mismatches 1 \
+    --jitter 1 \
     --out final.sam
 ```
