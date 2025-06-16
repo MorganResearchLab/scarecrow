@@ -105,7 +105,7 @@ BC1:n99_v5,2,SRR28867558_3.fastq.gz,forward,79,86,7447,0.8
 
 Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will also record barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and [*optionally*] UMI data (sequence, quailties). The output can be either SAM format (default) or FASTQ. The range to `--extract` includes the read (`1` or `2`) followed by the positional range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting output as required. Finally, `--sift` indicates that we do not wish to retain any reads for which any barcode failed to return a match after accounting for jitter and mismatches. These 'invalid' barcodes include those that are ambiguous - in other words barcodes who return multiple equidistant matches with the same number of mismatches.
 
-Note, we're running this on a SLURM HPC and it takes around 58 mins using 16 cores.
+Note, we're running this on a SLURM HPC and it takes around an hour using 16 cores.
 
 ```bash
 mkdir -p ${PROJECT}/extracted
@@ -129,6 +129,7 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:00:00 -o reap.%
         --out ${PROJECT}/extracted/${OUT} \
         --out_fastq --sift
 ```
+2510368 (rerun after patching BQ) (check head --l 172 on fastq once finished)
 
 In addition to generating an interleaved FASTQ file, it outputs a JSON file indicating the barcode and UMI positions on read 1, and the parameters required to use the file with the `kb count` tool of `kallisto-bustools`. In addition, the tools outputs a `_mismatch_stats.csv` and a `_position_stats.csv` file. The mismatch_stats CSV has the following format:
 
@@ -209,11 +210,15 @@ sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out
         -o ${PROJECT}/extracted/${OUT}_trimmed.fastq \
         ${PROJECT}/extracted/${OUT}.fastq
 ```
-2510323
+
 ==> cutadapt.2510323.err <==
 Error in FASTQ file at line 172: Length of sequence and qualities differ
 
-
+@SRR28867558.23 VH01123:94:AACNK35M5:1:1101:60325:1019 length=74 CR:GATAGACA_AGCACCTC_TTCAGATC:CY:C-CCCCCC_CCCCCCCC_CCCCC;CC:CB:GATAGACA_AGCACCTC_TCTGATCC:XQ:C-CCCCCC_CCCCCCCC_CCCC;CC:XP:11_49_80:XM:0_0_2:UR:GTTCGAGGGT:UY:CCCCCCCCCC/1
+GATAGACAAGCACCTCTCTGATCCGTTCGAGGGT
++
+C-CCCCCCCCCCCCCCCCCC;CCCCCCCCCCCC
+missing 1 qual at end
 
 
 

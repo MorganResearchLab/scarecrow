@@ -903,7 +903,7 @@ def process_read_batch(
                     if adj_position >= 0:
                         qualities = qual[ adj_position - 1 : adj_position - 1 + len(matched_barcode) ]
                         if(len(qualities) < len(original_barcode)):
-                            qualities = ('').join(qualities, ['!' * len(original_barcode) - len(qualities)])
+                            qualities = ('').join(qualities, ['!' * (len(original_barcode) - len(qualities))])
                     else:
                         qualities = ('').join(['!' * abs(adj_position), qual[0:len(matched_barcode) - abs(adj_position)]])
                 matched_qualities.append(qualities)
