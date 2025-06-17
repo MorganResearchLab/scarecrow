@@ -1003,12 +1003,12 @@ def process_read_batch(
             qual = filtered_qual  # QUAL
 
             tags = []
-            tags.append(f"CR:Z:{','.join(original_barcodes)}")
-            tags.append(f"CY:Z:{','.join(barcode_qualities)}")
-            tags.append(f"CB:Z:{','.join(matched_barcodes)}")
-            tags.append(f"XQ:Z:{','.join(matched_qualities)}")
-            tags.append(f"XP:Z:{','.join(positions)}")
-            tags.append(f"XM:Z:{','.join(mismatches)}")
+            tags.append(f"CR:Z:{'_'.join(original_barcodes)}")
+            tags.append(f"CY:Z:{'_'.join(barcode_qualities)}")
+            tags.append(f"CB:Z:{'_'.join(matched_barcodes)}")
+            tags.append(f"XQ:Z:{'_'.join(matched_qualities)}")
+            tags.append(f"XP:Z:{'_'.join(positions)}")
+            tags.append(f"XM:Z:{'_'.join(mismatches)}")
 
             # Add UMI information if specified
             if umi_index is not None:

@@ -121,7 +121,7 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
             # Track lengths for JSON generation
             if barcode and not barcode_lengths:
                 # Split barcode by commas
-                barcode_parts = barcode.split(',')
+                barcode_parts = barcode.split('_')
                 barcode_lengths = [len(part) for part in barcode_parts]
 
             if umi and umi_length is None:
@@ -130,16 +130,20 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
             # Construct comprehensive header with all tags
             header_parts = []
             for tag, value in read.tags:
-                header_parts.append(f"{tag}:{value.replace(",","_")}")
+                #header_parts.append(f"{tag}:{value.replace(",","_")}")
+                header_parts.append(f"{tag}:{value}")
             header = f"@{read.query_name} " + ":".join(header_parts)
 
             # R1 (header contains all tags)
             r1_header = f"{header}/1"
-            r1_seq = barcode.replace(",", "")
-            r1_qual = tags.get("XQ", "F" * len(r1_seq)).replace(",", "")
+            r1_seq = barcode.replace("_", "")
+            #r1_seq = barcode.replace(",", "")
+            #r1_qual = tags.get("XQ", "F" * len(r1_seq)).replace(",", "")
+            r1_qual = tags.get("XQ", "F" * len(r1_seq))
             if umi:
                 r1_seq += umi
-                r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")
+                #r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")
+                r1_qual += tags.get("UY", "F" * umi_length)
 
             # R2 (sequence from SAM)
             r2_header = f"{header}/2"
@@ -228,14 +232,17 @@ def parse_tags_from_header(header: str) -> list:
         # Handle different tag types appropriately
         if tag in ['CB', 'CR', 'UR']:
             # These are string values
-            tags.append((tag, value.replace("_",",")))
+            #tags.append((tag, value.replace("_",",")))
+            tags.append((tag, value))
         elif tag in ['CY', 'UY']:
             # Quality strings
-            tags.append((tag, value.replace("_",",")))
+            #tags.append((tag, value.replace("_",",")))
+            tags.append((tag, value))
         elif tag in ['XM', 'XP']:
             # Numeric or complex values
             if '_' in value:
-                tags.append((tag, value.replace("_",",")))
+                #tags.append((tag, value.replace("_",",")))
+                tags.append((tag, value))
         else:
             # Default string handling
             tags.append((tag, value))
