@@ -10,8 +10,6 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* recast SAM -> FASTQ is converting comma from read tag to underscore, which is not appropriate as comma is a valid quality score
-  - avoid using recast for SAM to FASTQ conversion until issue resolved
 * harvest image files from Scale have indices 0,1,2,2,3,3 whilst Parse correctly show 1,1,2,2
 * Update docs
 * Unit tests

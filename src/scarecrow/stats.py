@@ -69,7 +69,7 @@ def run_stats(in_file: str = None) -> None:
         # Validate input file
         if not isinstance(in_file, str):
             raise TypeError("Input file path must be a string")
-        
+
         in_path = Path(in_file)
         if not in_path.exists():
             raise FileNotFoundError(f"Input file does not exist: {in_file}")
@@ -149,15 +149,15 @@ def run_stats(in_file: str = None) -> None:
         "combined_CR_counts",
         "combined_CB_counts",
     ]
-    
+
     # Validate file exists
     if Path(in_file).exists():
-        
-        if suffix == '.sam':            
+
+        if suffix == '.sam':
             counts_list = list(parse_sam_tags(in_file))
 
         elif suffix in ['.fastq', '.fq', '.fastq.gz', '.fq.gz']:
-            counts_list = list(parse_fastq_tags(in_file))        
+            counts_list = list(parse_fastq_tags(in_file))
 
         if counts_list:
             # Iterate through results and write each to file
@@ -206,14 +206,14 @@ def parse_fastq_tags(fastq_file: str = None) -> Tuple[
 
     # Handle gzipped or plain fastq
     open_func = gzip.open if fastq_file.endswith('.gz') else open
-    
+
     with open_func(fastq_file, 'rt') as f:
         while True:
             # Read R1 header
             header = f.readline().strip()
             if not header:
                 break
-            
+
             # Skip R1 sequence/quality and R2 entirely
             for _ in range(7):
                 f.readline()
@@ -223,16 +223,16 @@ def parse_fastq_tags(fastq_file: str = None) -> Tuple[
                 tag_pos = header.find(tag_name + ':')
                 if tag_pos == -1:
                     return None
-                
+
                 value_start = tag_pos + len(tag_name) + 1
                 value_end = len(header)
-                
+
                 # Find next tag or end of string
                 for end_marker in [':', '/']:
                     end_pos = header.find(end_marker, value_start)
                     if end_pos != -1:
                         value_end = min(value_end, end_pos)
-                
+
                 value = header[value_start:value_end]
                 return value.split('_') if value else None
 
@@ -315,33 +315,33 @@ def parse_sam_tags(sam_file: str = None) -> Tuple[
 
             # Process CR tag
             if "CR" in tags:
-                CR_barcodes = tags["CR"].split(",")
+                CR_barcodes = tags["CR"].split("_")
                 for idx, barcode in enumerate(CR_barcodes):
                     CR_counts[idx][barcode] += 1
                 combined_CR_counts["_".join(CR_barcodes)] += 1
 
             # Process CB tag
             if "CB" in tags:
-                CB_barcodes = tags["CB"].split(",")
+                CB_barcodes = tags["CB"].split("_")
                 for idx, barcode in enumerate(CB_barcodes):
                     CB_counts[idx][barcode] += 1
                 combined_CB_counts["_".join(CB_barcodes)] += 1
 
             # Process XP tag
             if "XP" in tags:
-                XP_barcodes = tags["XP"].split(",")
+                XP_barcodes = tags["XP"].split("_")
                 for idx, barcode in enumerate(XP_barcodes):
                     XP_counts[idx][barcode] += 1
 
             # Process XM tag
             if "XM" in tags:
-                XM_barcodes = tags["XM"].split(",")
+                XM_barcodes = tags["XM"].split("_")
                 for idx, barcode in enumerate(XM_barcodes):
                     XM_counts[idx][barcode] += 1
 
             # Process UR tag
             if "UR" in tags:
-                UR_barcodes = tags["UR"].split(",")
+                UR_barcodes = tags["UR"].split("_")
                 for idx, barcode in enumerate(UR_barcodes):
                     UR_counts[idx][barcode] += 1
 
