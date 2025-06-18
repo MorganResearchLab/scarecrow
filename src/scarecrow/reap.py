@@ -974,7 +974,7 @@ def process_read_batch(
                 tags.append(f"UY={umi_qual}")
 
             # R1
-            r1_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)}/1"
+            r1_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)} /1"
             r1_barcodes = f"{('').join(matched_barcodes)}"
             r1_quality = f"{('').join(matched_qualities)}"
             if umi_index is not None:
@@ -984,7 +984,7 @@ def process_read_batch(
                 r1_quality += f"{umi_quality}"
 
             # R2
-            r2_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)}/2"
+            r2_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)} /2"
             output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
 

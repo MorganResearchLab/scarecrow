@@ -14,6 +14,7 @@ from argparse import RawTextHelpFormatter
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
+from dataclasses import fields
 
 
 def parser_recast(parser):
@@ -120,7 +121,7 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
 
             # Track lengths for JSON generation
             if barcode and not barcode_lengths:
-                # Split barcode by commas
+                # Split barcode
                 barcode_parts = barcode.split('_')
                 barcode_lengths = [len(part) for part in barcode_parts]
 
@@ -130,23 +131,19 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
             # Construct comprehensive header with all tags
             header_parts = []
             for tag, value in read.tags:
-                #header_parts.append(f"{tag}:{value.replace(",","_")}")
-                header_parts.append(f"{tag}:{value}")
-            header = f"@{read.query_name} " + ":".join(header_parts)
+                header_parts.append(f"{tag}={value}")
+            header = f"@{read.query_name} " + " ".join(header_parts)
 
             # R1 (header contains all tags)
-            r1_header = f"{header}/1"
+            r1_header = f"{header} /1"
             r1_seq = barcode.replace("_", "")
-            #r1_seq = barcode.replace(",", "")
-            #r1_qual = tags.get("XQ", "F" * len(r1_seq)).replace(",", "")
             r1_qual = tags.get("XQ", "F" * len(r1_seq))
             if umi:
                 r1_seq += umi
-                #r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")
                 r1_qual += tags.get("UY", "F" * umi_length)
 
             # R2 (sequence from SAM)
-            r2_header = f"{header}/2"
+            r2_header = f"{header} /2"
             r2_seq = read.query_sequence
             r2_qual = "".join(chr(q + 33) for q in read.query_qualities)
 
@@ -219,37 +216,24 @@ def parse_tags_from_header(header: str) -> list:
     Parse SAM tags from FASTQ header string.
 
     Header format example:
-    @SRR28867558.10001 CR:...:CY:...:CB:...:XQ:...:XP:...:XM:...:UR:...:UY:.../1
+    @SRR28867558.10001 CR=... CY=... CB=... XQ=... XP=... XM=... UR=... UY=... /1
 
     Returns:
         List of (tag, value) pairs for SAM record
     """
-    logger = logging.getLogger("scarecrow")
-
-    # Extract all tag:value pairs from header
-    tag_matches = re.findall(r'([A-Za-z]{2}):([^:]+)(?=:|$)', header.split(' ', 1)[1])
-    logger.info(f"{header}\n{tag_matches}")
+    #logger = logging.getLogger("scarecrow")
     tags = []
-    for tag, value in tag_matches:
-        #logger.info(f"{header}\ntag: {tag}; value: {value}")
-
-        # Handle different tag types appropriately
-        if tag in ['CB', 'CR', 'UR']:
-            # These are string values
-            #tags.append((tag, value.replace("_",",")))
-            tags.append((tag, value))
-        elif tag in ['CY', 'UY']:
-            # Quality strings
-            #tags.append((tag, value.replace("_",",")))
-            tags.append((tag, value))
-        elif tag in ['XM', 'XP']:
-            # Numeric or complex values
-            if '_' in value:
-                #tags.append((tag, value.replace("_",",")))
-                tags.append((tag, value))
-        else:
-            # Default string handling
-            tags.append((tag, value))
+    fields = header.split()
+    #logger.info(f"{header}")
+    allowed_keys = {"CB", "CR", "CY", "XP", "XM", "UY", "UR"}
+    for field in fields:
+        if '=' in field:
+            key, _, value = field.partition('=')
+            if key in allowed_keys:
+                # Remove trailing /<number> if present
+                value = re.sub(r'/\d+$', '', value)
+                tags.append((key,value))
+    #logger.info(f"{tags}")
 
     return tags
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scarecrow"
-version = "0.1.2"
+version = "0.1.3"
 description = "Your package description"
 authors = [{name = "David Wragg", email = "david.wragg@abdn.ac.uk"}]
 requires-python = ">=3.7"
