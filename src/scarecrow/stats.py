@@ -204,6 +204,8 @@ def parse_fastq_tags(fastq_file: str = None) -> Tuple[
     combined_CR_counts = defaultdict(int)
     combined_CB_counts = defaultdict(int)
 
+    allowed_keys = {"CR", "CB", "XP", "XM", "UR"}
+
     # Handle gzipped or plain fastq
     open_func = gzip.open if fastq_file.endswith('.gz') else open
 
@@ -218,54 +220,44 @@ def parse_fastq_tags(fastq_file: str = None) -> Tuple[
             for _ in range(7):
                 f.readline()
 
-            # Extract tag values with proper underscore handling
-            def get_tag_parts(tag_name):
-                tag_pos = header.find(tag_name + ':')
-                if tag_pos == -1:
-                    return None
-
-                value_start = tag_pos + len(tag_name) + 1
-                value_end = len(header)
-
-                # Find next tag or end of string
-                for end_marker in [':', '/']:
-                    end_pos = header.find(end_marker, value_start)
-                    if end_pos != -1:
-                        value_end = min(value_end, end_pos)
-
-                value = header[value_start:value_end]
-                return value.split('_') if value else None
+            # Extract tag=value pairs
+            fields = header.split()
+            tag_dict = {}
+            for field in fields:
+                if '=' in field:
+                    key, _, value = field.partition('=')
+                    if key in allowed_keys:
+                        tag_dict[key] = value
 
             # Process CR tag
-            cr_parts = get_tag_parts('CR')
-            if cr_parts:
+            if 'CR' in tag_dict:
+                cr_parts = tag_dict['CR'].split('_')
                 for idx, barcode in enumerate(cr_parts):
                     CR_counts[idx][barcode] += 1
-                combined_CR_counts["_".join(cr_parts)] += 1  # Store with commas to match SAM
+                combined_CR_counts["_".join(cr_parts)] += 1
 
             # Process CB tag
-            cb_parts = get_tag_parts('CB')
-            if cb_parts:
+            if 'CB' in tag_dict:
+                cb_parts = tag_dict['CB'].split('_')
                 for idx, barcode in enumerate(cb_parts):
                     CB_counts[idx][barcode] += 1
-                combined_CB_counts["_".join(cb_parts)] += 1  # Store with commas to match SAM
+                combined_CB_counts["_".join(cb_parts)] += 1
 
             # Process XP tag
-            xp_parts = get_tag_parts('XP')
-            if xp_parts:
+            if 'XP' in tag_dict:
+                xp_parts = tag_dict['XP'].split('_')
                 for idx, pos in enumerate(xp_parts):
                     XP_counts[idx][pos] += 1
 
             # Process XM tag
-            xm_parts = get_tag_parts('XM')
-            if xm_parts:
+            if 'XM' in tag_dict:
+                xm_parts = tag_dict['XM'].split('_')
                 for idx, mm in enumerate(xm_parts):
                     XM_counts[idx][mm] += 1
 
-            # Process UR tag (single value)
-            ur_val = get_tag_parts('UR')
-            if ur_val:
-                UR_counts[0][ur_val[0]] += 1
+            # Process UR tag (single-value)
+            if 'UR' in tag_dict:
+                UR_counts[0][tag_dict['UR']] += 1
 
     return (
         CR_counts,

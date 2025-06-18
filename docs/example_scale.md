@@ -130,12 +130,7 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 8G --time=12:00:00 -o reap.%j
         --out_fastq
 ```
 
-# 2511327 (running after patching reap to change FASTQ header format)
-
-# <---------------------------------------------------------------------- here
-
-
-In addition to generating the SAM file, `scarecrow reap` outputs a `_mismatch_stats.csv` and a `_position_stats.csv`. The mismatch_stats CSV has the following format:
+In addition to generating the FASTQ file, `scarecrow reap` outputs a `_mismatch_stats.csv` and a `_position_stats.csv`. The mismatch_stats CSV has the following format:
 
 ```bash
 mismatches,count
@@ -212,7 +207,8 @@ In the [Parse example](./example_everdoe.md) we applied the `--sift` option to f
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
 sbatch -p uoa-compute --ntasks 1 --mem 2G --time=12:00:00 -o sift.%j.out -e sift.%j.err \
-            scarecrow sift --in ${PROJECT}/extracted/${OUT}.sam
+            scarecrow sift --in ${PROJECT}/extracted/${OUT}.fastq \
+                --json ${PROJECT}/extracted/${OUT}.json
 ```
 
 
@@ -222,8 +218,10 @@ sbatch -p uoa-compute --ntasks 1 --mem 2G --time=12:00:00 -o sift.%j.out -e sift
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
 sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o stats.%j.out -e stats.%j.err \
-            scarecrow stats --in ${PROJECT}/extracted/${OUT}_sift.sam
+            scarecrow stats --in ${PROJECT}/extracted/${OUT}_sift.fastq
 ```
+# needs rerunning
+
 
 
 
@@ -254,7 +252,7 @@ NF && $0 !~ /^#/ {
     print seq
   }
 }
-' ${CONTAMINANTS} > ./${PROJECT}/contaminants.fasta
+' ${CONTAMINANTS} > ${PROJECT}/contaminants.fasta
 
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
@@ -265,6 +263,9 @@ sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out
         -o ${PROJECT}/extracted/${OUT}_trimmed.fastq \
         ${PROJECT}/extracted/${OUT}_sift.fastq
 ```
+
+# 2511427
+# <---------------------------------------------------------------------- here
 
 
 

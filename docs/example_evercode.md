@@ -346,10 +346,12 @@ do
   sbatch scarecrow/scripts/wget.sh ${PROJECT}/spipe ${ACC}
 done
 
-# Fix read indices
+# Fix read indices (need to be identical, ie both /1)
 sbatch -p uoa-compute ./scripts/fixfq_1.sh --in ${PROJECT}/spipe/SRR28867558_1.fastq.gz --out ${PROJECT}/spipe/SRR28867558_1.fq.gz
 sbatch -p uoa-compute ./scripts/fixfq_2.sh --in ${PROJECT}/spipe/SRR28867558_2.fastq.gz --out ${PROJECT}/spipe/SRR28867558_2.fq.gz
-2511258, 2511259 (running)
+
+# 2511424:2511425
+# <-------------------------------------------------------------------------------- here
 
 
 sbatch -p uoa-compute --ntasks 16 --mem 48G \
@@ -359,6 +361,8 @@ sbatch -p uoa-compute --ntasks 16 --mem 48G \
     --output_dir ${PROJECT}/spipe \
     --genome_dir /uoa/scratch/users/s14dw4/spipe/genomes/hg38 \
     --samp_list ${PROJECT}/spipe/samples.txt
+
+
 
 # also need to test the SRA downloaded FASTQS by fixing read names as above and running spipe
 
