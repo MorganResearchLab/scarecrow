@@ -127,10 +127,20 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 8G --time=12:00:00 -o reap.%j
         --mismatch ${MISMATCH} \
         --base_quality ${BQ} \
         --out ${PROJECT}/extracted/${OUT} \
-        --out_fastq
+        --out_sam
 ```
 
-# 2511127 (running, after check the output for the read with the incorrect quality values at BC3: @SRR28867557.2)
+# 2511184 (running, after check the output for the read with the pre-patch incorrect quality values at BC3: @SRR28867557.2 A)
+# FASTQ output has the correct quality codes, here is the pre-patch SAM output
+
+
+# If the SAM output returns the correct quality codes, test recast in each direction (rename files before!)
+sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o recast.%j.out -e recast.%j.err \
+            scarecrow recast --in ${PROJECT}/extracted/SRR28867557_1_patched.fastq
+# 2511193 (running, check BC3 quals after)
+sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o recast.%j.out -e recast.%j.err \
+            scarecrow recast --in ${PROJECT}/extracted/SRR28867557_1_outsam.sam
+# 2511251 (running, check BC3 quals after)
 # <---------------------------------------------------------------------- here
 
 In addition to generating the SAM file, `scarecrow reap` outputs a `_mismatch_stats.csv` and a `_position_stats.csv`. The mismatch_stats CSV has the following format:
@@ -269,7 +279,7 @@ Error in FASTQ file at line 12: Length of sequence and qualities differ
 
 
 3rd XQ values in header string not corrext (should be :FF:FF,:FF and the comma needs to retain)
-The XQ values below the sequence for the same barcode are also incorrect but different to thos ein the header
+The XQ values below the sequence for the same barcode are also incorrect but different to those in the header
 
 @SRR28867557.2 CR:TCCGGCTTAT_NTACCTAAG_CGAAGATCGA:CY:FFFFFFFFFF_#FFFFFFFF_F:FF:FF_:F:CB:TCCGGCTTAT_TTACCTAAG_GAAGATCGAG:XQ:FFFFFFFFFF_#FFFFFFFF_:FF:FF_:FF:XP:1_1_25:XM:0_1_0:UR:ATTTGGCC:UY:FF:F::FF/1
 TCCGGCTTAT TTACCTAAG GAAGATCGAG ATTTGGCC

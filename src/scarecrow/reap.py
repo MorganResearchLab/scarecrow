@@ -960,21 +960,21 @@ def process_read_batch(
                 source_entry.comment = re.sub(r'/[0-9]$', '', source_entry.comment)
 
             tags = []
-            tags.append(f"CR:{'_'.join(original_barcodes)}")
-            tags.append(f"CY:{'_'.join(barcode_qualities)}")
-            tags.append(f"CB:{'_'.join(matched_barcodes)}")
-            tags.append(f"XQ:{'_'.join(matched_qualities)}")
-            tags.append(f"XP:{'_'.join(positions)}")
-            tags.append(f"XM:{'_'.join(mismatches)}")
+            tags.append(f"CR={'_'.join(original_barcodes)}")
+            tags.append(f"CY={'_'.join(barcode_qualities)}")
+            tags.append(f"CB={'_'.join(matched_barcodes)}")
+            tags.append(f"XQ={'_'.join(matched_qualities)}")
+            tags.append(f"XP={'_'.join(positions)}")
+            tags.append(f"XM={'_'.join(mismatches)}")
             # Add UMI information if specified
             if umi_index is not None:
                 umi_seq = reads[umi_index].sequence[umi_range[0] : umi_range[1]]
                 umi_qual = reads[umi_index].quality[umi_range[0] : umi_range[1]]
-                tags.append(f"UR:{umi_seq}")
-                tags.append(f"UY:{umi_qual}")
+                tags.append(f"UR={umi_seq}")
+                tags.append(f"UY={umi_qual}")
 
             # R1
-            r1_header = f"@{source_entry.name} {source_entry.comment} {':'.join(tags)}/1"
+            r1_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)}/1"
             r1_barcodes = f"{('').join(matched_barcodes)}"
             r1_quality = f"{('').join(matched_qualities)}"
             if umi_index is not None:
@@ -984,7 +984,7 @@ def process_read_batch(
                 r1_quality += f"{umi_quality}"
 
             # R2
-            r2_header = f"@{source_entry.name} {source_entry.comment} {':'.join(tags)}/2"
+            r2_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)}/2"
             output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
 

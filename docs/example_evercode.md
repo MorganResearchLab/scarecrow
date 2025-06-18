@@ -211,9 +211,6 @@ sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out
         ${PROJECT}/extracted/${OUT}_nosift.fastq
 ```
 
-# 2511138 (running cutadapt on nosift, to be able to compare STAR output to splitpipe)
-
-# <---------------------------------------------------------------------- here
 
 
 ```bash
@@ -292,7 +289,7 @@ Once the recast has completed, we can run STAR. Here we run it on the HPC to tak
 
 ```bash
 GENOME=/uoa/scratch/users/s14dw4/spipe/genomes/hg38
-sbatch --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
     ./scarecrow/scripts/star_align_sam_parse.sh \
         --genome ${GENOME} \
         --sam ${PROJECT}/extracted/SRR28867558_1_trimmed.sam \
@@ -304,22 +301,68 @@ sbatch --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
 sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o recast.%j.out -e recast.%j.err \
-            scarecrow recast --in ${PROJECT}/extracted/${OUT}.fastq
+            scarecrow recast --in ${PROJECT}/extracted/${OUT}_nosift.fastq
 GENOME=/uoa/scratch/users/s14dw4/spipe/genomes/hg38
-sbatch --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
     ./scarecrow/scripts/star_align_sam_parse.sh \
         --genome ${GENOME} \
-        --sam ${PROJECT}/extracted/SRR28867558_1_trimmed.sam \
+        --sam ${PROJECT}/extracted/SRR28867558_1_nosift.sam \
         --out ${PROJECT}/star_parttrim
 ```
+# 2511237 (compare STAR output to splitpipe after)
+# <---------------------------------------------------------------------- here
 
-
+nosift notrim                       Number of input reads |       167474772
+nosift notrim                Uniquely mapped reads number |       87954272
+nosift notrim clip                  Number of input reads |       167474772
+nosift notrim clip           Uniquely mapped reads number |       89267453
 pre-trim                            Number of input reads |       148646935
 pre-trim                     Uniquely mapped reads number |       79810510
 part-trim                           Number of input reads |       148646935
 part-trim                    Uniquely mapped reads number |       79810510
 full-trim                           Number of input reads |       137466372
 full-trim                    Uniquely mapped reads number |       73831591
+
+
+
+# spipe star output (original)
+Number of input reads                   |       136124356
+Uniquely mapped reads number            |       92166679
+Number of reads mapped to multiple loci |       4729686
+Number of reads mapped to too many loci |       33066454
+Number of reads unmapped: too short     |       5146638
+Number of reads unmapped: other         |       1014899
+
+# ------------------------------------------------------------------------------------------------------
+# split-pipe: Parse Evercode WTv2
+# ------------------------------------------------------------------------------------------------------
+conda deactivate
+mamba activate spipe
+mkdir -p ${PROJECT}/spipe
+
+ACCS=($( grep "Parse" scarecrow/ena.tsv | cut -f5 - | uniq))
+for ACC in ${ACCS[@]}
+do
+  sbatch scarecrow/scripts/wget.sh ${PROJECT}/spipe ${ACC}
+done
+
+# Fix read indices
+sbatch -p uoa-compute ./scripts/fixfq_1.sh --in ${PROJECT}/spipe/SRR28867558_1.fastq.gz --out ${PROJECT}/spipe/SRR28867558_1.fq.gz
+sbatch -p uoa-compute ./scripts/fixfq_2.sh --in ${PROJECT}/spipe/SRR28867558_2.fastq.gz --out ${PROJECT}/spipe/SRR28867558_2.fq.gz
+2511258, 2511259 (running)
+
+
+sbatch -p uoa-compute --ntasks 16 --mem 48G \
+  split-pipe --mode all --chemistry v2 \
+    --fq1 ${PROJECT}/spipe/SRR28867558_1.fq.gz \
+    --fq2 ${PROJECT}/spipe/SRR28867558_2.fq.gz \
+    --output_dir ${PROJECT}/spipe \
+    --genome_dir /uoa/scratch/users/s14dw4/spipe/genomes/hg38 \
+    --samp_list ${PROJECT}/spipe/samples.txt
+
+# also need to test the SRA downloaded FASTQS by fixing read names as above and running spipe
+
+
 
 
 

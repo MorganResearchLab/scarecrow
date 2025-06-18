@@ -224,11 +224,15 @@ def parse_tags_from_header(header: str) -> list:
     Returns:
         List of (tag, value) pairs for SAM record
     """
+    logger = logging.getLogger("scarecrow")
+
     # Extract all tag:value pairs from header
     tag_matches = re.findall(r'([A-Za-z]{2}):([^:]+)(?=:|$)', header.split(' ', 1)[1])
-
+    logger.info(f"{header}\n{tag_matches}")
     tags = []
     for tag, value in tag_matches:
+        #logger.info(f"{header}\ntag: {tag}; value: {value}")
+
         # Handle different tag types appropriately
         if tag in ['CB', 'CR', 'UR']:
             # These are string values

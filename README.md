@@ -10,7 +10,7 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### Issues
 
-* harvest image files from Scale have indices 0,1,2,2,3,3 whilst Parse correctly show 1,1,2,2
+* Harvest image files from Scale have indices 0,1,2,2,3,3 whilst Parse correctly show 1,1,2,2
 * Update docs
 * Unit tests
 * Jitter does not currently apply to UMI or insert sequence
@@ -19,3 +19,4 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 ### Wishlist
 
 * Some tools would benefit from multi-threading (i.e. recast, stats)
+* Weed should be refactored to work on FASTQ as well as SAM
