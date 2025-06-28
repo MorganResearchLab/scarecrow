@@ -38,7 +38,7 @@ gzip ${PROJECT}/fastq/${ACC}_3.fastq # Barcodes and UMI
 
 ### 1. Identify barcode seeds
 
-This step requires barcode whitelists associated with the assay being used. Parse Bioscience customers can access the whitelists for the different assays by downloading their splitpipe pipeline. The whitelists are csv files in a barcodes directory (e.g. ./software/ParseBiosciences-Pipeline.1.4.1/splitpipe/barcodes/barcode_data_v1.csv). We only require the barcode sequence for scarecrow, so this needs cutting from the file (i.e. `cut -d',' -f2 barcode_data_v1.csv | sed '1d' > barcode_data_v1.txt`). Once the whitelists are generated, they can be defined as colon-delimited strings (`<barcode index>:<whitelist name>:<whitelist file>`) in a bash array for later use.
+This step requires barcode whitelists associated with the assay being used. Parse Bioscience customers can access the whitelists for the different assays by downloading their splitpipe pipeline. The whitelists are csv files in a barcodes directory (e.g. ./software/ParseBiosciences-Pipeline.1.4.1/splitpipe/barcodes/barcode_data_v1.csv). We only require the barcode sequence for scarecrow, so this needs cutting from the file (i.e. `cut -d',' -f2 barcode_data_v1.csv | sed '1d' > barcode_data_v1.txt`). Once the whitelists are generated, they can be defined as colon-delimited strings (`<barcode index>:<whitelist name>:<whitelist file>`) in a bash array for later use. For convenience, we have provided in the `scarecrow` repo the below [barcode files](../barcodes/Parse)
 
 ```bash
 BARCODES=(BC1:n99_v5:${PROJECT}/barcode_whitelists/bc_data_n99_v5.txt
@@ -104,18 +104,17 @@ BC1:n99_v5,2,SRR28867558_3.fastq.gz,forward,79,86,7447,0.8
 
 ### 3. Reap sequence data ###
 
-Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will also record barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and UMI data (sequence, quailties). The output can be either SAM format (default) or FASTQ. The range to `--extract` includes the read index (e.g. `1` or `2`) followed by the positional range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold, below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. We recommend using the default `10` and applying additional quality filtering to the resulting output as required. Finally, `--sift` indicates that we do not wish to retain any reads for which any barcode failed to return a match after accounting for jitter and mismatches. These 'invalid' barcodes include those that are ambiguous - in other words barcodes that return multiple equidistant matches with the same number of mismatches.
+Now that the barcode positions have been characterised we can extract the target sequence with `scarecrow reap`. This will also record barcode metadata (sequence, qualities, corrected sequence, positions, mismatches) and UMI data (sequence, quailties). The output can be either SAM format (default) or FASTQ. The range to `--extract` includes the read index (e.g. `1` or `2`) followed by the positional range, and `--umi` follows the same format to indicate where the UMI sequence is. The `--jitter` parameter indicates the number of flanking bases to extend the barcode start position by when looking for a match. The `--mismatch` parameter indicates the maximum number of mismatches permitted when matching the barcode against a whitelist - also known as the edit distance. The `--base_quality` parameter base quality threshold, below which bases are masked as `N`, this step occurs before barcode matching and can significantly reduce the number of valid barcodes if set too high. For a fair comparison with the Parse splitpipe workflow we do not apply any base quality masking in this instance.
 
 We're running this on a SLURM HPC and it takes around an hour using 16 cores.
 
 ```bash
-mkdir -p ${PROJECT}/extracted
 THREADS=16
-BQ=10
-JITTER=2
+JITTER=0
 MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
+mkdir -p ${PROJECT}/extracted/J${JITTER}M${MISMATCH}
 sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
     scarecrow reap \
         --threads ${THREADS} \
@@ -126,10 +125,10 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:00:00 -o reap.%
         --extract 2:1-74 --umi 3:1-10 \
         --jitter ${JITTER} \
         --mismatch ${MISMATCH} \
-        --base_quality ${BQ} \
-        --out ${PROJECT}/extracted/${OUT}_nosift \
+        --out ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
 ```
+
 
 In addition to generating an interleaved FASTQ file, it outputs a JSON file indicating the barcode and UMI positions on read 1, and the parameters required to use the file with the `kb count` tool of `kallisto-bustools`. In addition, the tools outputs a `_mismatch_stats.csv` and a `_position_stats.csv` file. The mismatch_stats CSV has the following format:
 
@@ -174,9 +173,21 @@ N,28026204
 This illustrates that millions of reads have barcodes not starting at the expected positions.
 
 
-### 4. Trim TSO sequences
+### 4. Sift reads with invalid barcodes
 
-To improve downstream alignment results it is highly recommended to trim the reads to remove and adapter sequences or template switching oligo (TSO) sequences. Not all reads possess these sequences, and those that do will not necessarily share the same start position. There is a contaminants list in the Parse splitpipe repo which can be formatted for use with cutadapt and supplemented with the Parse TSO sequence `AACGCAGAGTGAATGGG`.
+Reads with one or more invalid barcode are uninformative in downstream analyses as they could not be confidently demultiplexed. We can filter these reads out either by using the `--sift` flag when running `reap`, or by using the `sift` tool afterwards. Here we demonstrate `sift` after running `reap`. As we are providing a `scarecrow` FASTQ input we also need to provide the accompanying JSON file. If a `scarecrow` SAM input is provided then no JSON file is required.
+
+```bash
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*.fastq
+FASTQ=${PROJECT}/extracted/J2M2/*.fastq
+sbatch -p uoa-compute --ntasks 1 --mem 2G --time=12:00:00 -o sift.%j.out -e sift.%j.err \
+            scarecrow sift --in ${FASTQ} --json ${FASTQ%.fastq}.json
+```
+
+
+### 5. Trim TSO sequences
+
+To improve downstream alignment results it is highly recommended to trim the reads to remove and adapter sequences or template switching oligo (TSO) sequences. Not all reads possess these sequences, and those that do will not necessarily share the same start position. There is an updated fastqc contaminants list in the Parse splitpipe repo, which we can format for use with cutadapt and supplement with the Parse TSO sequence `AACGCAGAGTGAATGGG`. Below illustrates how this was achieved, and for convenience we have included in the `scarecrow` repo the processed [contaminants list](../contaminants/contaminants.fasta). Note, we use the `-G` rather than the `-g` flag for `cutadapt` because the sequence to be trimmed is on the read 2 output by `scarecrow`, rather than read 1 - which now sotres the barcode and UMI sequences.
 
 ```bash
 CONTAMINANTS=./software/ParseBiosciences-Pipeline.1.4.1/splitpipe/scripts/config/fastqc-contaminant_list.txt
@@ -196,55 +207,30 @@ NF && $0 !~ /^#/ {
     print seq
   }
 }
-' ${CONTAMINANTS} > ./${PROJECT}/contaminants.fasta
+' ${CONTAMINANTS} > ${PROJECT}/contaminants.fasta
 
 # Add Parse Bio TSO sequence to contaminants
 sed -i '$ a >Parse Bio TSO sequence\nAACGCAGAGTGAATGGG' ./${PROJECT}/contaminants.fasta
 
-FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.fastq*})
-
-sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \
+FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_sift.fastq)
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \
     cutadapt --cores 4 --trim-n --minimum-length 30 --interleaved \
-        -g file:./${PROJECT}/contaminants.fasta \
-        -o ${PROJECT}/extracted/${OUT}_nosift_trimmed.fastq \
-        ${PROJECT}/extracted/${OUT}_nosift.fastq
+        -G file:${PROJECT}/contaminants.fasta \
+        -o ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ%_sift.fastq}_trimmed.fastq \
+        ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ}
 ```
 
 
+### 6. Generate barcode statistics
 
 ```bash
-=== Summary ===
-
-Total read pairs processed:        148,646,935
-  Read 1 with adapter:              70,860,801 (47.7%)
-
-== Read fate breakdown ==
-Pairs that were too short:          11,180,563 (7.5%)
-Pairs written (passing filters):   137,466,372 (92.5%)
-```
-
-# part-trim
-```bash
-# Trim upstream of and inlcuding TSO primer before aligning
-sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \
-    cutadapt --cores 4 --trim-n --minimum-length 30 --interleaved -g AACGCAGAGTGAATGGG \
-        -o ${PROJECT}/extracted/${OUT}_trimmed.fastq \
-        ${PROJECT}/extracted/${OUT}.fastq
-```
-
-
-### 5. Generate barcode statistics
-
-```bash
-FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.fastq*})
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o stats.%j.out -e stats.%j.err \
-            scarecrow stats --in ${PROJECT}/extracted/${OUT}_trimmed.fastq
+            scarecrow stats --in ${FASTQ}
 ```
 
 
-### 6. Generate count matrix via kallisto-bustools
+### 7. Generate count matrix via kallisto-bustools
 
 Next we can generate a count matrix using `kallisto`. There is a script in the scarecrow repo, [kallisto.sh](../src/HPC/kallisto.sh), that parses the JSON file generated by `reap` to retrieve the `-x` string required for running the FASTQ file with `kb count`. This requires the JSON sed-like processor, [`jq`](https://jqlang.org), to be installed. This enables the `-x` flag to be extracted as follows:
 
@@ -255,83 +241,103 @@ XSTR=$(${jq} -r '."kallisto-bustools"[0]."kb count" | capture("-x (?<x>[^ ]+)").
 The `kallisto.sh` script requires the `kallisto` `--index` and `--genes` for the reference assembly in question, in addition to the FASTQ and JSON files generated by `scarecrow`.
 
 ```bash
-#conda deactivate
-#mamba activate kallisto
-
-THREADS=8
-FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.fastq*})
-
-mkdir -p ${PROJECT}/kallisto
-
-sbatch --ntasks 1 --cpus-per-task ${THREADS} --mem 4G --time=12:00:00 -p uoa-compute \
+conda deactivate
+mamba activate kallisto
+mkdir -p ${PROJECT}/kallisto/J${JITTER}M${MISMATCH}
+FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq)
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 \
     ~/sharedscratch/scarecrow/scripts/kallisto.sh \
         --index /uoa/scratch/users/s14dw4/software/kallisto/hg38/transcriptome.idx \
         --genes /uoa/scratch/users/s14dw4/software/kallisto/hg38/transcripts_to_genes.txt \
-        --fastq ${PROJECT}/extracted/${OUT}_trimmed.fastq \
-        --json ${PROJECT}/extracted/${OUT}.json \
-        --out ${PROJECT}/kallisto/${OUT}
+        --fastq ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ} \
+        --json ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ%_trimmed.fastq}.json \
+        --out ${PROJECT}/kallisto/J${JITTER}M${MISMATCH}/${FASTQ%.fastq}
 ```
 
+# 2519038 (J0)
+# 2519039 (J2)
+# <------------------------------------------------------------------------------------------------ here (2)
 
-### 7. Generate count matrix via STAR and umi-tools
 
-Here we demonstrate aligning with `STAR` from `scarecow` SAM format, to retain the read tag information. First we `recast` from FASTQ to SAM.
+### 8. Generate count matrix via STAR and umi-tools
+
+Before aligning with STAR, if we wish to incoprorate the barcode and UMI read tags we should first recast the FASTQ file to SAM format.
 
 ```bash
-FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.fastq*})
-sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o recast.%j.out -e recast.%j.err \
-            scarecrow recast --in ${PROJECT}/extracted/${OUT}_trimmed.fastq
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq
+sbatch -p uoa-compute --ntasks 1 --mem 2G --time=24:00:00 -o recast.%j.out -e recast.%j.err \
+            scarecrow recast --in ${FASTQ}
 ```
 
-Once the recast has completed, we can run STAR. Here we run it on the HPC to take advantage of using lots of threads.
+
+Next, we align with `STAR` from `scarecow` SAM format. For fair comparison with the Parse split-pipe results, we include the `--clip3pAdapterSeq` used in their pipeline.
+
+```bash
+mkdir -p ${OUT}
+ID=$(basename ${SAM%.sam})
+/uoa/scratch/users/s14dw4/software/STAR --runThreadN ${SLURM_CPUS_PER_TASK} \
+        --genomeDir ${GENOME} \
+        --readFilesIn ${SAM} \
+        --readFilesType SAM SE \
+        --outFileNamePrefix ${OUT}/${ID}. \
+        --outSAMtype BAM Unsorted \
+        --clip3pAdapterSeq CCACAGTCTCAAGCACGTGGAT \
+        --outFilterMultimapNmax 3
+```
+
+The script is run on the HPC as follows:
 
 ```bash
 GENOME=/uoa/scratch/users/s14dw4/spipe/genomes/hg38
+SAM=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.sam
 sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
     ./scarecrow/scripts/star_align_sam_parse.sh \
         --genome ${GENOME} \
-        --sam ${PROJECT}/extracted/SRR28867558_1_trimmed.sam \
+        --sam ${SAM} \
         --out ${PROJECT}/star
 ```
 
-# Testing impact of cutadapt pre-trimming
+
+
+
+# BQ0 contaminants trimmed (FASTQ)
+#  Number of input reads |       160199644
+#  Uniquely mapped reads number |       107348879
+#  Number of reads mapped to multiple loci |       5754316
+#  Number of reads mapped to too many loci |       39543827
+
+
+
+
+Next step is to run `umi-tools`. The reference GTF file we use for this has a slighltly different config naming convention to the reference we used for alignment with `STAR`. To address this issue we generate an alias file for use with `featureCounts` from the `subread` package, see the `umi-tools` [single-cell tutorial](https://umi-tools.readthedocs.io/en/latest/Single_cell_tutorial.html) for more details. We have included a script in the `scarecrow` repo, [umi_tools.sh](../src/HPC/umi_tools.sh) which runs `featureCounts` followed by `umi-tools count` to generate a counts matrix.
+
 ```bash
-FASTQS=(${PROJECT}/fastq/*.fastq.gz)
-OUT=$(basename ${FASTQS[0]%.fastq*})
-sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o recast.%j.out -e recast.%j.err \
-            scarecrow recast --in ${PROJECT}/extracted/${OUT}_nosift.fastq
-GENOME=/uoa/scratch/users/s14dw4/spipe/genomes/hg38
-sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
-    ./scarecrow/scripts/star_align_sam_parse.sh \
-        --genome ${GENOME} \
-        --sam ${PROJECT}/extracted/SRR28867558_1_nosift.sam \
-        --out ${PROJECT}/star_parttrim
+# UMI deduplication
+# - requires pip install umi_tools
+# - subread (https://subread.sourceforge.net) (module available on Maxwell)
+# - samtools
+conda deactivate
+mamba activate samtools_env
+THREADS=8
+GTF=/uoa/scratch/shared/Morgan_Lab/common_resources/cellranger/reference/refdata-gex-GRCh38-2020-A/genes/genes.gtf
+BAM=${PROJECT}/star/*.bam
+
+# Need to create contig look-up as GTF does not have hg38_ prefix to contigs
+mkdir -p ${PROJECT}/umi_tools
+samtools view -H ${BAM} | cut -f2 | grep "^SN" | sed 's/SN://g' | \
+    awk '{split($0, TIG, "_"); print TIG[2]","$0;}' > ${PROJECT}/umi_tools/alias.file
+
+# Run UMI-tools
+sbatch --partition uoa-compute ./scarecrow/scripts/umi_tools.sh \
+    --bam ${BAM} \
+    --gtf ${GTF} \
+    --out ${PROJECT}/umi_tools \
+    --alias ${PROJECT}/umi_tools/alias.file
 ```
-# 2511237 (compare STAR output to splitpipe after)
-# <---------------------------------------------------------------------- here
-
-nosift notrim                       Number of input reads |       167474772
-nosift notrim                Uniquely mapped reads number |       87954272
-nosift notrim clip                  Number of input reads |       167474772
-nosift notrim clip           Uniquely mapped reads number |       89267453
-pre-trim                            Number of input reads |       148646935
-pre-trim                     Uniquely mapped reads number |       79810510
-part-trim                           Number of input reads |       148646935
-part-trim                    Uniquely mapped reads number |       79810510
-full-trim                           Number of input reads |       137466372
-full-trim                    Uniquely mapped reads number |       73831591
 
 
 
-# spipe star output (original)
-Number of input reads                   |       136124356
-Uniquely mapped reads number            |       92166679
-Number of reads mapped to multiple loci |       4729686
-Number of reads mapped to too many loci |       33066454
-Number of reads unmapped: too short     |       5146638
-Number of reads unmapped: other         |       1014899
+
 
 # ------------------------------------------------------------------------------------------------------
 # split-pipe: Parse Evercode WTv2
@@ -340,31 +346,40 @@ conda deactivate
 mamba activate spipe
 mkdir -p ${PROJECT}/spipe
 
-ACCS=($( grep "Parse" scarecrow/ena.tsv | cut -f5 - | uniq))
-for ACC in ${ACCS[@]}
+# Add read id to fastq files otherwise splitpipe won't work
+FASTQS=(${PROJECT}/fastq/*fastq.gz)
+for FASTQ in ${FASTQS[@]}
 do
-  sbatch scarecrow/scripts/wget.sh ${PROJECT}/spipe ${ACC}
+    ID=$(basename ${FASTQ%.fastq.gz})
+    sbatch ./scarecrow/scripts/fastq-AddReadNo.sh \
+        --in_fq ${FASTQ} \
+        --out_fq ${PROJECT}/fastq/${ID%_*}_R${ID#*_}.fastq \
+        --read_id $((${ID#*_}-1))
 done
 
-# Fix read indices (need to be identical, ie both /1)
-sbatch -p uoa-compute ./scripts/fixfq_1.sh --in ${PROJECT}/spipe/SRR28867558_1.fastq.gz --out ${PROJECT}/spipe/SRR28867558_1.fq.gz
-sbatch -p uoa-compute ./scripts/fixfq_2.sh --in ${PROJECT}/spipe/SRR28867558_2.fastq.gz --out ${PROJECT}/spipe/SRR28867558_2.fq.gz
-
-# 2511424:2511425
-# <-------------------------------------------------------------------------------- here
-
-
+mkdir -p ${PROJECT}/spipe
 sbatch -p uoa-compute --ntasks 16 --mem 48G \
   split-pipe --mode all --chemistry v2 \
-    --fq1 ${PROJECT}/spipe/SRR28867558_1.fq.gz \
-    --fq2 ${PROJECT}/spipe/SRR28867558_2.fq.gz \
+    --fq1 ${PROJECT}/fastq/SRR28867558_R2.fastq.gz \
+    --fq2 ${PROJECT}/fastq/SRR28867558_R3.fastq.gz \
     --output_dir ${PROJECT}/spipe \
     --genome_dir /uoa/scratch/users/s14dw4/spipe/genomes/hg38 \
     --samp_list ${PROJECT}/spipe/samples.txt
 
+# SRA reads
+#   Number of input reads |       136124356 (i.e. reads with valid barcodes)
+#   Uniquely mapped reads number |       92166679
+#   Number of reads mapped to multiple loci |       4729686
+#   Number of reads mapped to too many loci |       33066454
 
 
-# also need to test the SRA downloaded FASTQS by fixing read names as above and running spipe
+# Check scarecrow unmapped sequences against those mapped by spipe
+
+# Extract mapped reads and convert to fastq
+sbatch -p uoa-compute ./scripts/mapped.sh --in ${PROJECT}/spipe/process/barcode_headAligned.out.bam
+sbatch -p uoa-compute ./scripts/unmapped.sh --in ${PROJECT}/star/SRR28867558_1_BQ0_trimmed.Aligned.out.bam
+
+
 
 
 
@@ -414,8 +429,6 @@ sbatch --partition uoa-compute ./scarecrow/scripts/umi_tools.sh \
     --out ${PROJECT}/umi_tools \
     --alias ${PROJECT}/umi_tools/alias.file
 ```
-2510478 umi_tools.sh
-
 
 
 

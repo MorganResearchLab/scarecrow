@@ -148,7 +148,7 @@ def run_sam2fastq(sam_file: str = None, fastq_file: str = None, json_file: str =
             r2_qual = "".join(chr(q + 33) for q in read.query_qualities)
 
             # Write interleaved FASTQ
-            fq.write(f"{r1_header}\n{r1_seq}\n+\n{r1_qual}\n")
+            fq.write(f"{r1_header}\n{r1_seq}\n+\n{r1_qual.replace("_", "")}\n")
             fq.write(f"{r2_header}\n{r2_seq}\n+\n{r2_qual}\n")
 
         # Generate JSON file
@@ -225,7 +225,7 @@ def parse_tags_from_header(header: str) -> list:
     tags = []
     fields = header.split()
     #logger.info(f"{header}")
-    allowed_keys = {"CB", "CR", "CY", "XP", "XM", "UY", "UR"}
+    allowed_keys = {"CB", "CR", "CY", "XQ", "XP", "XM", "UY", "UR"}
     for field in fields:
         if '=' in field:
             key, _, value = field.partition('=')
