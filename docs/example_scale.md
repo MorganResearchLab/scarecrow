@@ -364,5 +364,3 @@ Next, the umi_tools output can be converted to a matrix format for downstream pr
 COUNTS=${PROJECT}/umi_tools/J${JITTER}M${MISMATCH}/*.featureCounts.counts.tsv.gz
 sbatch --partition uoa-compute ./scarecrow/scripts/counts2mtx.sh --in ${COUNTS}
 ```
-
-# Finished
