@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md)
+[root](../README.md)
 
 ## scarecrow harvest
 The CSV file from each barcode whitelist are processed with `harvest` to identify barcode match peaks. The conserved sequences TSV file, which will be identical for any set of fastq files analysed with different barcode whitelists, can also be provided to mask peaks that fall within these regions. A minimum distance between barcodes can be provided, and the number of peaks (--barcode_count) to return per barcode whitelist. The results are recorded to a CSV file and a histogram of the peaks is plotted to a PNG file. *The CSV file should be edited if necessary to ensure that the barcode_whitelist values are unique*.

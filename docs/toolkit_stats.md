@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md)
+[root](../README.md)
 
 ## scarecrow stats
 The `stats` tool reads either a SAM or FASTQ file and generates count data from the TAGS detailed below. It also counts the number of times each unique combination of uncorrected barcodes and corrected barcodes is observed.

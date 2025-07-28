@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md)
+[root](../README.md)
 
 # deprecated
 

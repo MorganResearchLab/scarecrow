@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md)
+[root](../README.md)
 
 ## scarecrow reap
 The `reap` tool extracts a specified target sequence (e.g. cDNA on read 1 positions 1-64) and its associated quality values, together with cell barcodes and optionally the unique molecular index (UMI). The sequence data can be output to either an interleaved FASTQ file with `--out_fastq` or a SAM file with `--out_sam` (default), with the prefix `--out <prefix>`. If writing to SAM then the input FASTQ data should be trimmed beforehand to remove any adapter sequences. If output as a FASTQ file, a JSON file is also generated which contains the commandline parameters required to process the file with the kallisto-bustools workflow (kb count).

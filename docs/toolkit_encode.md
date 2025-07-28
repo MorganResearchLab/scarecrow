@@ -1,6 +1,6 @@
 <img style="float:right;width:100px;" src="../img/scarecrow.png" alt="scarecrow"/>
 
-[root](root.md)
+[root](../README.md)
 
 ## scarecrow encode
 This tool generates an Aho-Corasick trie and k-mer index from a whitelist of barcodes. Generating a trie for 6.9M 16-mer barcodes, pickling and compressing, takes around 3m30s. Note, the barcode label is stored in the trie, so the same trie should not be shared between barcodes even if based on the same whitelist. The trie is used for exact matching, the k-mer index is used for approximate matching to reduce the search space. The trie and k-mer index is written to a file with the input whtelist filename as the prefix, and `k{kmer_length}.pkl.gz` as the suffix.
