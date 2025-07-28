@@ -6,7 +6,7 @@
 
 scarecrow is a scRNA-seq pre-processing tool developed to increase the usable data generated from an experiment by idenifying jittered barcodes, correcting mismatches, and outputting the data in a format used by popular third-party tools. Below is a schematic diagram illustrating the scarecrow workflow. This begins with raw FASTQ files and barcode whitelists being passed to seed. The resulting barcode profiles are passed to harvest which outputs a file of expected barcode positions. These positions, together with the raw FASTQ files and barcode whitelists are passed to reap, which returns either a SAM or FASTQ file containing the target sequence and barcode information. Optional steps include extracting a barcode from the FASTQ read header with weed, if the reads were demultiplexed, and removing any reads containing unmatched barcodes with sift.
 
-<img src="../img/scarecrow_flow.svg" alt="scarecrow flowchart"/>
+<img style="float:center;width:400px;" src="../img/scarecrow_flow.svg" alt="scarecrow flowchart"/>
 
 We recommend adapter trimming after running scarecrow to ensure that read lengths are consistent when pre-processing the data, otherwise there is the potential for trimming to result in offset barcodes that might not subsequently be matched.
 
