@@ -505,11 +505,11 @@ def validate_harvest_args(parser, args):
     Validate arguments
     """
 
-    try: 
+    try:
         # Validate barcode input files
         if not isinstance(args.barcodes, list) or not all(isinstance(bc, str) for bc in args.barcodes):
             raise TypeError("barcode files must be a list of file paths")
-        
+
         for barcode_file in args.barcodes:
             if not os.path.exists(barcode_file):
                 raise ArgumentTypeError(f"Barcode file does not exist: {barcode_file}")
@@ -521,7 +521,7 @@ def validate_harvest_args(parser, args):
         # Validate output file and directory
         if not isinstance(args.out, str):
             raise TypeError("--out must be a string file path")
-        
+
         output_dir = os.path.dirname(os.path.abspath(args.out)) or '.'
         if not os.path.exists(output_dir):
             raise ArgumentTypeError(f"Output directory does not exist: {output_dir}")
@@ -638,9 +638,10 @@ def plot_peaks_optimized(
         """Helper function to add conserved region highlighting"""
         if conserved_regions:
             file_index = data["file_index"].iloc[0] if not data.empty else None
-            if file_index:
+            if file_index is not None:
                 for region in conserved_regions:
                     if region.file_index == file_index:  # Only add regions for matching read
+                        #logger.info(f"Adding conserved region: start={region.start}, end={region.end}")
                         # Add shaded region for conserved sequence
                         ax.axvspan(
                             region.start,
@@ -707,7 +708,11 @@ def plot_peaks_optimized(
         # Optimize plot rendering
         with plt.style.context("fast"):
             # Calculate the range of 'start' values
-            start_range = data["start"].max() - data["start"].min()
+            #start_range = data["start"].max() - data["start"].min()
+            # Calculate the range of 'start' values
+            start_min = data["start"].min()
+            start_max = data["start"].max()
+            start_range = start_max - start_min
 
             if start_range == 0:
                 # If all 'start' values are the same, plot a single bar
@@ -722,10 +727,25 @@ def plot_peaks_optimized(
             else:
                 # Use a default binwidth of 1, but ensure it's smaller than the range
                 binwidth = min(0.5, start_range)
-                bins = "auto"  # Let seaborn automatically determine the number of bins
+                #bins = "auto"  # Automatically determine the number of bins
+
+                # Create bins that explicitly include position 1
+                bin_start = max(0, start_min - 0.5)  # Start slightly before first data point
+                bin_end = start_max + 0.5  # End slightly after last data point
+                bins = np.arange(bin_start, bin_end + binwidth, binwidth)
+
+                # Calculate a reasonable number of bins based on the range
+                #bin_range = (data["start"].min(), data["start"].max())
+                #num_bins = max(10, int((bin_range[1] - bin_range[0]) / binwidth))
 
                 # Plot the histogram
-                g.map(sns.histplot, "start", binwidth = binwidth, bins = bins, kde = False)
+                #g.map(sns.histplot, "start", binwidth = binwidth, bins = bins, kde = False)
+                g.map(sns.histplot, "start", bins = bins, kde = False)
+                #g.map(sns.histplot, "start", bins=num_bins, kde=False)
+
+                # Set x-axis limits to ensure we see all bins
+                for ax in g.axes.flat:
+                    ax.set_xlim(bin_start, bin_end)
 
         g.set_axis_labels("Barcode start position", "Count", fontsize = 20)
         g.set_titles(row_template = "{row_name}", size = 20)  # Only row titles are needed

@@ -24,8 +24,9 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
     * [`weed`](./docs/toolkit_weed.md)
 
 ### To-do
+* Ensure Aho-Corasick Trie matching method returns same results as set-based matching method
+  - Unit-testing with reads generated to check edge cases
 * Check/fix harvest image file indices (Scale returns 0,1,2,2,3,3; Parse returns 1,1,2,2)
-* Unit tests
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read as barcodes, and downstream of any, then position *may* need adjusting dynamically before extracting sequence and qualities
 
