@@ -152,6 +152,12 @@ class BarcodeMatcherOptimized:
             sequence, original_start, original_end, jitter
         )
 
+        # NULL barcode
+        if sub_sequence and sub_sequence[0]:
+            NA_barcode = 'N' * len(sub_sequence[0][0])
+        else:
+            NA_barcode = 'N'
+
         if self.trie_matcher:
             # self.logger.info(f"-> start:{original_start} end:{original_end} jitter:{jitter}")
 
@@ -162,11 +168,12 @@ class BarcodeMatcherOptimized:
 
             # Filter matches based on jitter and select best match
             if matches:
-                # self.logger.info(f"\n> reap matches: {matches}")
+                #self.logger.info(f"\n> reap matches: {matches}")
                 filtered_matches = [
                     match
                     for match in matches
-                    if abs(match.start - original_start) <= jitter
+                    # If match starts in negative space have to +1 as we're skipping position 0
+                    if abs((match.start + 1 if match.start < 1 else match.start) - original_start) <= jitter
                 ]
                 if filtered_matches:
                     # Sort by number of mismatches and distance from expected start
@@ -185,23 +192,18 @@ class BarcodeMatcherOptimized:
                     else:
                         # Multiple matches with the same number of mismatches and distance
                         # self.logger.info("Multiple equidistant-error matches")
-                        return "NNNNNNNN", -1, "N"
+                        return NA_barcode, -1, "N"
                 else:
                     # No match found within the jitter range
                     # self.logger.info("No match found within jitter range")
-                    return "NNNNNNNN", -1, "N"
+                    return NA_barcode, -1, "N"
             else:
                 # No match found
                 # self.logger.info("No match")
-                return "NNNNNNNN", -1, "N"
+                return NA_barcode, -1, "N"
 
         else:
             # Default to set-based method
-            # NULL barcode
-            if sub_sequence and sub_sequence[0]:
-                NA_barcode = 'N' * len(sub_sequence[0][0])
-            else:
-                NA_barcode = 'N'
 
             # Check whitelist available
             if whitelist not in self.matchers:

@@ -446,7 +446,8 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         matches = []
         for candidate in candidates:
             dist = hamming_distance(sequence, candidate)
-            # self.logger.info(f"Dist: {dist} for {sequence},{candidate}")
+            #if sequence[:2] == "NN":
+            #    self.logger.info(f"Dist: {dist} [{max_mismatches}] for {sequence},{candidate}")
             if dist <= max_mismatches:
                 matches.append(candidate)
         return matches
@@ -514,10 +515,12 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     max_mismatches=self.mismatches,
                 )
                 # if approximate_matches:
-                # self.logger.info(f"Approximate matches (m={self.mismatches} for {seq}): {approximate_matches}")
+                #self.logger.info(f"Approximate matches (m={self.mismatches} for {seq}): {approximate_matches}")
                 for match in approximate_matches:
                     match_start = start_pos
                     match_dist = abs(match_start - original_start)
+                    if(match_start < 1):
+                        match_dist -= 1
                     match_mismatches = hamming_distance(seq, match)
                     matches.append(
                         MatchResult(
@@ -530,6 +533,8 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                             distance=match_dist,
                         )
                     )
+                    #if seq[:2] == "NN":
+                    #    self.logger.info(f"{seq} match:{match} start:{match_start} end:{match_start + len(match)} distance:{match_dist} mismatches:{match_mismatches}")
 
         return sorted(matches, key=lambda x: x.start)
 

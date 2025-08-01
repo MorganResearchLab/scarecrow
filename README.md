@@ -25,6 +25,8 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
 
 ### To-do
 * Ensure Aho-Corasick Trie matching method returns same results as set-based matching method
+  - If pickle file is missing gz suffix then it needs adding automatically
+  - Position counts returned are different vs set matched results
   - Unit-testing with reads generated to check edge cases
 * Check/fix harvest image file indices (Scale returns 0,1,2,2,3,3; Parse returns 1,1,2,2)
 * Jitter does not currently apply to UMI or insert sequence
