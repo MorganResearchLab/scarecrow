@@ -22,6 +22,8 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
     --conserved ./WTv2/barcodes.BC1_conserved.tsv \
     --out ./WTv2/barcode_positions_set.csv
 
+# barcode position file index is wrong (have to set to 1 instead of 2)
+
 # Reap (set-based approach)
 BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt
           BC2:v1:./WTv2/bc_data_v1.txt
@@ -32,9 +34,22 @@ time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     --out ./WTv2/cDNA --threads 2 --out_sam
 
 # Reap (trie and kmer index approach)
-BARCODES=(BC1:n99_v5:./WTv2/bc_data_n99_v5.txt.BC1.pkl.gz
-          BC2:v1:./WTv2/bc_data_v1.txt.BC2.pkl.gz
-          BC3:v1:./WTv2/bc_data_v1.txt.BC3.pkl.gz)
+# # Seed
+for BARCODE in ${BARCODES[@]}
+do
+    ID=${BARCODE%:*:*}
+    WHITELIST=${BARCODE#*:*:}
+    echo ${ID}
+    time scarecrow seed --fastqs ${R1} ${R2} \
+        -o ./WTv2/barcodes_${ID}_set.csv --barcodes ${BARCODE} -n 0 -u 0 --pickle ./WTv2${BARCODE%%:*}.pkl.gz --kmer_length 4
+done
+FILES=(./WTv2/barcodes.BC*.csv)
+scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
+    --conserved ./WTv2/barcodes.BC1_conserved.tsv \
+    --out ./WTv2/barcode_positions_trie.csv
+BARCODES=(BC1:n99_v5:./WTv2/BC1.pkl.gz
+          BC2:v1:./WTv2/BC2.pkl.gz
+          BC3:v1:./WTv2/BC3.pkl.gz)
 time scarecrow reap --fastqs ${R1} ${R2} -j 1 -m 2 -q 10 \
     -p ./WTv2/barcode_positions_trie.csv \
     --barcodes ${BARCODES[@]} --extract 1:1-74 --umi 2:1-10 \
@@ -51,7 +66,7 @@ kb ref -i ref/transcriptome.idx -g ref/transcripts_to_genes.txt -d human
 
 mkdir ./WTv2/kb
 
-# Whitelist not working, kallisto not getting correct barcode length 
+# Whitelist not working, kallisto not getting correct barcode length
 #cat ./WTv2/bc_data_n99_v5.txt ./WTv2/bc_data_v1.txt ./WTv2/bc_data_v1.txt > ./WTv2/WTv2_cmb.txt
 kb count -i ./ref/transcriptome.idx -g ./ref/transcripts_to_genes.txt \
     -x 0,0,7,0,8,15,0,16,23:0,24,33:1,0,0 -w NONE --h5ad \
@@ -157,7 +172,7 @@ scarecrow harvest ${FILES[@]} --barcode_count 1 --min_distance 10 \
 scarecrow reap --fastqs ${R1} ${R2} -j 2 -m 3 -q 10 \
     -p ./barcode_positions.csv \
     --barcodes ${BARCODES[@]} --extract 2:11-150 --umi 2:1-10 --base_quality 10 \
-    --out ./cDNA_v2 --threads 1 
+    --out ./cDNA_v2 --threads 1
 
 scarecrow weed --fastq P443A_index_10nt_1005_EKDL250000649-1A_22LJ3MLT4_L3_1.fq.gz \
     --in cDNA_v2.sam \

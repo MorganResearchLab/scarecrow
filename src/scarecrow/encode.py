@@ -669,7 +669,7 @@ def encode_dna_to_compact_string(sequence):
     """
     Encodes a DNA sequence into a compact string representation using 2 bits per nucleotide.
     """
-    nucleotide_to_char = {"A": "0", "C": "1", "G": "2", "T": "3"}
+    nucleotide_to_char = {"A": "0", "C": "1", "G": "2", "T": "3", "N": "4"}
     encoded = []
     for nucleotide in sequence:
         encoded.append(
