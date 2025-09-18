@@ -50,15 +50,15 @@ The accompanying JSON identifies the barcode and UMI positions for the interleav
     "barcodes": [
         {
             "range": "1:1-8",
-            "whitelist": ""
+            "whitelist": "v1_whitelist.txt"
         },
         {
             "range": "1:9-16",
-            "whitelist": ""
+            "whitelist": "v1_whitelist.txt"
         },
         {
             "range": "1:17-24",
-            "whitelist": ""
+            "whitelist": "n198_whitelist.txt"
         }
     ],
     "umi": [
@@ -68,7 +68,7 @@ The accompanying JSON identifies the barcode and UMI positions for the interleav
     ],
     "kallisto-bustools": [
         {
-            "kb count": "-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x 0,0,8,0,8,16,0,16,24:0,24,34:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./WTv2/cDNA.fastq"
+            "kb count": "-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x 0,0,8,0,8,16,0,16,24:0,24,34:1,0,0 -w NONE --h5ad --inleaved -o <outdir> ./cDNA.fastq"
         }
     ]
 }
@@ -79,7 +79,9 @@ The accompanying JSON identifies the barcode and UMI positions for the interleav
 The SAM output includes sequence tags for the barcodes and UMI, in addition to barcode start positions (XP) and mismatch counts (XM).
 
 ```bash
-SRR28867558.10002       4       *       0       255     *       *       0       0       GTTTCATATGTTGGCCAGGCTGGTCTCAAACTCCTGACCTCGTGAT  CCCCCCCCCCCCCCCCCCCCCCCCCCCCC-CCCCCCCCCCCCCCCC    CR:Z:CTGGCATA,GAGCTGAA,CCTGTTGC CY:Z:CCCCCCC;,CCCCCCCC,CCCCCCCC CB:Z:CTGGCATA,GAGCTGAA,CCTGTTGC XQ:Z:CCCCCCC;,CCCCCCCC,CCCCCCCC   XP:Z:11,49,79   XM:Z:0,0,0      UR:Z:CGCGGAGGTT UY:Z:CCCCCCCCCC
+@HD     VN:1.6
+@PG     PN:scarecrow    ID:reap VN:0.1.3        CL:--command recast --infile ./cDNA.fastq
+SRR28867558.280001      4       *       0       0       *       *       0       0       CCGTCTCGCCCGCCGCGCCGGGGAGGTGGAGCACGAGCGCACGTGTTAGGACCCGAAAGATGGTGAACTAT CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC CR:Z:GACAGTGC_ACAGATTC_TATGTGTC CY:Z:CCCCCCCC_CCCCCCCC_CCCCCCCC CB:Z:GACAGTGC_ACAGATTC_TATGTGTC XQ:Z:CCCCCCCC_CCCCCCCC_CCCCCCCC XP:Z:11_49_79   XM:Z:0_0_0      UR:Z:TTCGTAGCAC UY:Z:CCCCCCCCCC
 ```
 
 The sequence tags applied are listed below:
