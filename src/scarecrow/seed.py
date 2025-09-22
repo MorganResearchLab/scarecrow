@@ -451,7 +451,7 @@ def process_read_batch(
 
     for file_index, file_name, read in read_batch:
         for orientation in ["forward", "reverse"]:
-            self.logger.info(f"* {read.name} ({orientation})")
+            logger.info(f"* {read.name} ({orientation})")
             read_info = {
                 "file_index": file_index,
                 "file_name": file_name,
