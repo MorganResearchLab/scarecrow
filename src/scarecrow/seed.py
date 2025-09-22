@@ -256,7 +256,7 @@ Search reads in FASTQ files for barcodes in whitelists, record exact matches and
 
 Example:
 
-scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv 
+scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv
 ---
 """,
         help="Search fastq reads for barcodes",
@@ -365,7 +365,7 @@ def validate_seed_args(parser, args):
         # Check fastqs - should be list of strings
         if not isinstance(args.fastqs, list) or not all(isinstance(f, str) for f in args.fastqs):
             raise TypeError("--fastqs must be a list of file paths")
-        
+
         # Check that all FASTQ files exist and are readable
         for fastq in args.fastqs:
             if not os.path.exists(fastq):
@@ -384,15 +384,15 @@ def validate_seed_args(parser, args):
             raise TypeError("--batch_size must be a positive integer")
         if not isinstance(args.linker_min_length, int) or args.linker_min_length <= 0:
             raise TypeError("--linker_min_length must be a positive integer")
-        
+
         # Check float parameters
         if not isinstance(args.linker_base_frequency, float) or not (0 <= args.linker_base_frequency <= 1):
             raise TypeError("--linker_base_frequency must be a float between 0 and 1")
-        
+
         # Check barcodes format
         if not isinstance(args.barcodes, list) or not all(isinstance(bc, str) for bc in args.barcodes):
             raise TypeError("--barcodes must be a list of strings in format 'name:version:file'")
-        
+
         # Check output file is string
         if not isinstance(args.out, str):
             raise TypeError("--out must be a string file path")
@@ -409,8 +409,8 @@ def validate_seed_args(parser, args):
             raise TypeError("--pickle must be a string file path or None")
         if args.kmer_length is not None and (not isinstance(args.kmer_length, int) or args.kmer_length <= 0):
             raise TypeError("--kmer_length must be a positive integer or None")
-        
-            
+
+
     except TypeError as e:
         parser.error(str(e))
 
@@ -451,6 +451,7 @@ def process_read_batch(
 
     for file_index, file_name, read in read_batch:
         for orientation in ["forward", "reverse"]:
+            self.logger.info(f"* {read.name} ({orientation})")
             read_info = {
                 "file_index": file_index,
                 "file_name": file_name,
@@ -459,7 +460,7 @@ def process_read_batch(
                     [(read.sequence, 1)], whitelist_key, orientation, 1
                 ),
                 "seqlen": len(read.sequence),
-            }            
+            }
             results.append(read_info)
             if verbose:
                 logger.info(
@@ -587,7 +588,7 @@ def run_seed(
             # Add sequences to analyzers and track file index
             for file_index, read in enumerate(reads):
                 analyzers[file_index].add_sequence(read.sequence)
-                current_batch.append((file_index, os.path.basename(fastqs[file_index]), read)) 
+                current_batch.append((file_index, os.path.basename(fastqs[file_index]), read))
 
             if len(current_batch) >= batches:
                 # Process batch
