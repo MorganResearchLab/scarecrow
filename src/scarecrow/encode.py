@@ -504,8 +504,10 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     start = match_start + 1
                     end   = match_start + pat_len
 
+                match_dist = abs(start - original_start)
+
                 #match_start = start_pos + (end_index - len(original_seq))
-                match_dist = abs((match_start + 1) - original_start)
+                #match_dist = abs((match_start + 1) - original_start)
                 # self.logger.info(f"match_start: {match_start} start_pos: {original_start} match_dist: {match_dist}")
                 matches.append(
                     MatchResult(
