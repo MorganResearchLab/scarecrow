@@ -451,7 +451,6 @@ def process_read_batch(
 
     for file_index, file_name, read in read_batch:
         for orientation in ["forward", "reverse"]:
-            logger.info(f"* {read.name} ({orientation})")
             read_info = {
                 "file_index": file_index,
                 "file_name": file_name,
@@ -587,6 +586,7 @@ def run_seed(
 
             # Add sequences to analyzers and track file index
             for file_index, read in enumerate(reads):
+                logger.info(f"{read.name}")
                 analyzers[file_index].add_sequence(read.sequence)
                 current_batch.append((file_index, os.path.basename(fastqs[file_index]), read))
 
