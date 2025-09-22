@@ -476,7 +476,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
         # Iterate over possible sequences and their start positions
         for seq, start_pos in sequence:
-            self.logger.info(f"-> seq {seq} start_pos: {start_pos}")
+            #self.logger.info(f"-> seq {seq} start_pos: {start_pos}")
 
             # Reverse complement sequence if required
             if orientation == "reverse":

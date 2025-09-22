@@ -528,7 +528,6 @@ def run_seed(
     Optimized implementation of seed functionality
     """
     logger = logging.getLogger("scarecrow")
-    random.seed(random_seed)
 
     # Parse barcode whitelists
     expected_barcodes = parse_seed_arguments(barcodes)
@@ -552,6 +551,7 @@ def run_seed(
     analyzers = [SequenceFrequencyAnalyzer() for _ in fastqs]
 
     # If subsetting FASTQ, first get total read count
+    random.seed(random_seed)
     if num_reads > 0:
         if upper_read_count == 0:
             logger.info(
