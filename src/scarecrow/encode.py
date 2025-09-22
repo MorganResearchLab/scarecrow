@@ -497,14 +497,14 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     r_start = r_end - pat_len + 1
                     f_start = seq_len - r_end - 1
                     f_end   = seq_len - r_start - 1
-                    start = start_pos + f_start + 1
-                    end   = start_pos + f_end + 1
+                    start = start_pos + f_start
+                    end   = start_pos + f_end
                 else:
                     match_start = start_pos + (end_index - pat_len + 1)
-                    start = match_start + 1
-                    end   = match_start + pat_len
+                    start = match_start
+                    end   = match_start + pat_len - 1
 
-                match_dist = abs(start - original_start)
+                match_dist = abs((start + 1) - original_start)
 
                 #match_start = start_pos + (end_index - len(original_seq))
                 #match_dist = abs((match_start + 1) - original_start)
