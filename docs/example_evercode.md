@@ -95,6 +95,22 @@ scarecrow harvest \
     --out ${PROJECT}/barcode_profiles/barcode_positions.csv
 ```
 
+
+Problem-solve inconsistencies between set-based and trie-based methods:
+
+```bash
+./scripts/compare_barcodes.py \
+    --file1 ${PROJECT}/barcode_profiles/barcodes.BC1.csv \
+    --file2 ${PROJECT}/trie/barcode_profiles/barcodes.BC1.csv \
+    --output ${PROJECT}/barcodes.BC1.differences
+```
+file_index      file    read_name       seqlen  barcode_whitelist       barcode orientation     start   end     mismatches      source
+1       SRR28867558_2.fastq.gz  SRR28867558.10043       74      BC1:n99_v5      TCTCATGC        reverse 24      31      0       file1
+1       SRR28867558_2.fastq.gz  SRR28867558.10043       74      BC1:n99_v5      TCTCATGC        reverse 44      51      0       file2
+
+GCATGAGA
+GCTTGGTTTTATGTTTTAGGTTG[GCATGAGA]CATCAGTCAAATACATTAAATACATTGGTTTGGTCCAGGAAGG
+
 Both the set- and trie-based methods are processed in the same manner with `harvest`. However, to illustrate that the same barcode profiels are generated, we can repeat the above on the trie-based method outputs from `seed`.
 
 ```bash
