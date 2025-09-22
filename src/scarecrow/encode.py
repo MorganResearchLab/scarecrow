@@ -216,7 +216,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
     def _build_trie(self, barcode_sequences: Dict[str, Set[str]]):
         """
-        Constructs the Aho-Corasick trie from barcode sequences and their single-N mismatch variants.
+        Constructs the Aho-Corasick trie from barcode sequences
         """
         total_barcodes = sum(len(v) for v in barcode_sequences.values())
         self.logger.info(f"Building Aho-Corasick trie for {total_barcodes} barcodes")
@@ -366,6 +366,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
     def _generate_query_variants(self, sequence: str, mismatches: int) -> List[str]:
         """
+        * Redundant *
         Generates all possible variants of the query sequence with up to 'n' mismatches,
         treating 'N' as a wildcard.
         """
@@ -400,6 +401,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         self, sequence: str, mismatches: int, orientation: str, automaton: Automaton
     ) -> List[Dict]:
         """
+        * Redundant *
         Searches for matches with up to 'n' mismatches by generating query variants
         and checking them against the trie.
         """
@@ -442,15 +444,15 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         candidates = kmer_index.find_matches(sequence, max_mismatches=max_mismatches)
         # self.logger.info(f"{sequence} candidates: {candidates}")
 
-        # Filter candidates by Hamming distance
-        matches = []
-        for candidate in candidates:
-            dist = hamming_distance(sequence, candidate)
+        # Filter candidates by Hamming distance (now redundant as this is performed in kmer_index.find_matches)
+#        matches = []
+#        for candidate in candidates:
+#            dist = hamming_distance(sequence, candidate)
             #if sequence[:2] == "NN":
             #    self.logger.info(f"Dist: {dist} [{max_mismatches}] for {sequence},{candidate}")
-            if dist <= max_mismatches:
-                matches.append(candidate)
-        return matches
+#            if dist <= max_mismatches:
+#                matches.append(candidate)
+        return candidates
 
     def find_matches(
         self,
@@ -487,18 +489,33 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             for end_index, (wl_key, original_seq, mismatches) in automaton.iter(
                 encoded_seq
             ):
-                match_start = start_pos + (end_index - len(original_seq))
+                pat_len = len(original_seq)
+                seq_len = len(seq)
+
+                if orientation == "reverse":
+                    r_end = end_index
+                    r_start = r_end - pat_len + 1
+                    f_start = seq_len - r_end
+                    f_end   = seq_len - r_start
+                    start = start_pos + f_start
+                    end   = start_pos + f_end
+                else:
+                    match_start = start_pos + (end_index - pat_len + 1)
+                    start = match_start + 1
+                    end   = match_start + pat_len
+
+                #match_start = start_pos + (end_index - len(original_seq))
                 match_dist = abs((match_start + 1) - original_start)
                 # self.logger.info(f"match_start: {match_start} start_pos: {original_start} match_dist: {match_dist}")
                 matches.append(
                     MatchResult(
-                        barcode=original_seq,
-                        whitelist=wl_key,
-                        orientation=orientation,
-                        start=match_start + 1,
-                        end=match_start + len(original_seq),
-                        mismatches=mismatches,
-                        distance=match_dist,
+                        barcode     = original_seq,
+                        whitelist   = wl_key,
+                        orientation = orientation,
+                        start       = start,
+                        end         = end,
+                        mismatches  = mismatches,
+                        distance    = match_dist,
                     )
                 )
                 exact_match = True

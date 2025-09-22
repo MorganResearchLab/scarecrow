@@ -10,7 +10,7 @@ To install `scarecrow` first create a conda/mamba environment. After creating th
 mamba create --name scarecrow python=3.12
 mamba activate scarecrow
 mamba install git numpy pandas pip psutil pympler pysam rich scipy seaborn
-pip install git+https://github.com/MorganResearchLab/scarecrow.git
+pip install --force git+https://github.com/MorganResearchLab/scarecrow.git
 pip install pyahocorasick
 ```
 
