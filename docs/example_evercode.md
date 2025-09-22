@@ -95,22 +95,6 @@ scarecrow harvest \
     --out ${PROJECT}/barcode_profiles/barcode_positions.csv
 ```
 
-
-Problem-solve inconsistencies between set-based and trie-based methods:
-
-```bash
-./scripts/compare_barcodes.py \
-    --file1 ${PROJECT}/barcode_profiles/barcodes.BC1.csv \
-    --file2 ${PROJECT}/trie/barcode_profiles/barcodes.BC1.csv \
-    --output ${PROJECT}/barcodes.BC1.differences
-```
-file_index      file    read_name       seqlen  barcode_whitelist       barcode orientation     start   end     mismatches      source
-1       SRR28867558_2.fastq.gz  SRR28867558.10043       74      BC1:n99_v5      TCTCATGC        reverse 24      31      0       file1
-1       SRR28867558_2.fastq.gz  SRR28867558.10043       74      BC1:n99_v5      TCTCATGC        reverse 44      51      0       file2
-
-GCATGAGA
-GCTTGGTTTTATGTTTTAGGTTG[GCATGAGA]CATCAGTCAAATACATTAAATACATTGGTTTGGTCCAGGAAGG
-
 Both the set- and trie-based methods are processed in the same manner with `harvest`. However, to illustrate that the same barcode profiels are generated, we can repeat the above on the trie-based method outputs from `seed`.
 
 ```bash
@@ -174,6 +158,9 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:
         --out ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
 ```
+2703000
+
+
 
 
 Check that the read count in the resulting FASTQ file is equal to that of one of the input FASTQ files. This is a basic sanity check to ensure that nothing unexpected happened whilst running `scarecrow` on the HPC that might have resulted in some I/O issues. Here is an example of counting reads using `seqtk` and `awk` on non-interleaved and interleaved FASTQ files.
@@ -226,6 +213,34 @@ N,28026204
 ```
 
 This illustrates that millions of reads have barcodes not starting at the expected positions.
+
+If using the trie-based method, `reap` would be run as follows, using the pickle indices instead of the whitelists:
+
+```bash
+THREADS=16
+JITTER=1
+MISMATCH=2
+FASTQS=(${PROJECT}/fastq/*.fastq.gz)
+BARCODES=(BC1:n99_v5:${PROJECT}/trie/barcodes.BC1.pkl.gz
+          BC2:v1:${PROJECT}/trie/barcodes.BC2.pkl.gz
+          BC3:v1:${PROJECT}/trie/barcodes.BC3.pkl.gz)
+OUT=$(basename ${FASTQS[0]%.fastq*})
+mkdir -p ${PROJECT}/extracted/trie/J${JITTER}M${MISMATCH}
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
+    scarecrow reap \
+        --threads ${THREADS} \
+        --batch_size 20000 \
+        --fastqs ${FASTQS[@]} \
+        --barcode_positions ${PROJECT}/trie/barcode_profiles/barcode_positions.csv \
+        --barcodes ${BARCODES[@]} \
+        --extract 2:1-74 --umi 3:1-10 \
+        --jitter ${JITTER} \
+        --mismatch ${MISMATCH} \
+        --out ${PROJECT}/extracted/trie/J${JITTER}M${MISMATCH}/${OUT} \
+        --out_fastq
+```
+2703013
+
 
 
 ### 4. Sift reads with invalid barcodes

@@ -586,7 +586,7 @@ def run_seed(
 
             # Add sequences to analyzers and track file index
             for file_index, read in enumerate(reads):
-                logger.info(f"{read.name}")
+                #logger.info(f"{read.name}")
                 analyzers[file_index].add_sequence(read.sequence)
                 current_batch.append((file_index, os.path.basename(fastqs[file_index]), read))
 
