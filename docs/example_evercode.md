@@ -75,11 +75,10 @@ do
         --fastqs ${FASTQS[@]} \
         --barcodes ${BARCODE} \
         --pickle ${PROJECT}/trie/barcodes.${BARCODE%%:*}.pkl.gz \
-        --kmer_length 3 \
+        --kmer_length 2 \
         --out ${PROJECT}/trie/barcode_profiles/barcodes.${BARCODE%%:*}.csv
 done
 ```
-
 
 ### 2. Harvest barcode profiles
 
@@ -145,7 +144,8 @@ MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
 mkdir -p ${PROJECT}/extracted/J${JITTER}M${MISMATCH}
-sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} \
+    --mem 16G --time=12:00:00 -o reap.%j.out -e reap.%j.err \
     scarecrow reap \
         --threads ${THREADS} \
         --batch_size 20000 \
@@ -157,11 +157,13 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:
         --mismatch ${MISMATCH} \
         --out ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
+
+# CPU Utilized: 05:07:38
+# CPU Efficiency: 32.92% of 15:34:24 core-walltime
+# Job Wall-clock time: 00:58:24
+# Memory Utilized: 2.68 GB
+# Memory Efficiency: 16.77% of 16.00 GB
 ```
-2703000
-
-
-
 
 Check that the read count in the resulting FASTQ file is equal to that of one of the input FASTQ files. This is a basic sanity check to ensure that nothing unexpected happened whilst running `scarecrow` on the HPC that might have resulted in some I/O issues. Here is an example of counting reads using `seqtk` and `awk` on non-interleaved and interleaved FASTQ files.
 
@@ -176,45 +178,39 @@ In addition to generating an interleaved FASTQ file, `scarecrow` outputs a JSON 
 
 ```bash
 mismatches,count
--3,3434872
--2,2328623
--1,13064342
-0,126768927
-1,12071412
-2,6884512
-3,1214758
-4,991680
-5,422505
-6,293141
+-3,3815936
+-2,3592119
+-1,14412022
+0,125784335
+1,11300666
+2,6034666
+3,1023389
+4,822620
+5,390934
+6,298085
 ```
 
 Indicating the number of reads recorded for each sum of mismatches across its barcodes. For example, allowing up to 2 mismatches for 3 barcodes will sum to 6 if each barcode has 2 mismatches. Negative numbers indicate the number of reads for which no barcode was found (i.e. -1 is one barcode unmatched, -2 is two barcodes unmatched, ...).
 
-The position_stats CSV follows a similar format, indicating the count of barcodes starting at each position within `--jitter 2` :
+The position_stats CSV follows a similar format, indicating the count of barcodes starting at each position within `--jitter 1` :
 
 ```bash
 position,count
-10,3599189
-11,154669696
-12,1449340
-13,525384
-47,2067460
-48,9485814
-49,146188365
-50,2350402
-51,667344
-77,3619040
-78,13545713
-79,133008992
-80,2252858
-81,144060
-9,824455
-N,28026204
+10,3658309
+11,154983669
+12,1527298
+48,9795569
+49,146681602
+50,2644153
+78,13877626
+79,133791532
+80,2420490
+N,33044068
 ```
 
 This illustrates that millions of reads have barcodes not starting at the expected positions.
 
-If using the trie-based method, `reap` would be run as follows, using the pickle indices instead of the whitelists:
+If using the trie-based method, `reap` would be run using the pickle indices instead of the whitelists, as follows:
 
 ```bash
 THREADS=16
@@ -238,8 +234,23 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} --mem 16G --time=12:
         --mismatch ${MISMATCH} \
         --out ${PROJECT}/extracted/trie/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
+
+# 3-mer
+# CPU Utilized: 1-11:02:53
+# CPU Efficiency: 93.95% of 1-13:18:24 core-walltime
+# Job Wall-clock time: 02:19:54
+# Memory Utilized: 4.10 GB
+# Memory Efficiency: 25.61% of 16.00 GB
+
+# 2-mer
+# CPU Utilized: 4-05:16:23
+# CPU Efficiency: 97.67% of 4-07:41:36 core-walltime
+# Job Wall-clock time: 06:28:51
+# Memory Utilized: 4.48 GB
+# Memory Efficiency: 28.02% of 16.00 GB
 ```
-2703013
+
+The Parse barcode whitelists have 96 (v1) and 99 (n99_v5) 8-mer barcodes. Given the small size of these whitelists the default set-based method is more efficient, as evident from the SLURM job logs with the trie-based method taking more than twice as long to complete.
 
 
 

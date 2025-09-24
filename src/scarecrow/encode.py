@@ -444,14 +444,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         candidates = kmer_index.find_matches(sequence, max_mismatches=max_mismatches)
         # self.logger.info(f"{sequence} candidates: {candidates}")
 
-        # Filter candidates by Hamming distance (now redundant as this is performed in kmer_index.find_matches)
-#        matches = []
-#        for candidate in candidates:
-#            dist = hamming_distance(sequence, candidate)
-            #if sequence[:2] == "NN":
-            #    self.logger.info(f"Dist: {dist} [{max_mismatches}] for {sequence},{candidate}")
-#            if dist <= max_mismatches:
-#                matches.append(candidate)
         return candidates
 
     def find_matches(
@@ -504,11 +496,12 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     start = match_start
                     end   = match_start + pat_len - 1
 
-                match_dist = abs((start + 1) - original_start)
+                #match_dist = abs((start + 1) - original_start)
+                match_dist = abs(start - original_start)
 
                 #match_start = start_pos + (end_index - len(original_seq))
                 #match_dist = abs((match_start + 1) - original_start)
-                # self.logger.info(f"match_start: {match_start} start_pos: {original_start} match_dist: {match_dist}")
+                #self.logger.info(f"{seq} - {orientation} {original_seq} @ match_start: {match_start} expected_start: {original_start} match_dist: {match_dist}")
                 matches.append(
                     MatchResult(
                         barcode     = original_seq,

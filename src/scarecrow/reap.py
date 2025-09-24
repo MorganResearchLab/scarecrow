@@ -173,22 +173,39 @@ class BarcodeMatcherOptimized:
                     match
                     for match in matches
                     # If match starts in negative space have to +1 as we're skipping position 0
-                    if abs((match.start + 1 if match.start < 1 else match.start) - original_start) <= jitter
+                    # if abs((match.start + 1 if match.start < 1 else match.start) - original_start) <= jitter
+                    # suggest replacing above with, needs testing:
+                    if match.distance<= jitter
                 ]
                 if filtered_matches:
                     # Sort by number of mismatches and distance from expected start
                     filtered_matches.sort(key=lambda x: (x.mismatches, abs(x.distance)))
-                    if len(filtered_matches) == 1 or (
-                        filtered_matches[0].mismatches < filtered_matches[1].mismatches
-                        or filtered_matches[0].distance < filtered_matches[1].distance
-                    ):
-                        # Only one match or the best match is unique
-                        best_match = filtered_matches[0]
+                    # This block is a replacement for the commented block beneath
+                    best_mismatches = filtered_matches[0].mismatches
+                    best_distance = filtered_matches[0].distance
+                    # Keep only matches equally good
+                    best_group = [
+                        m for m in filtered_matches
+                        if m.mismatches == best_mismatches and m.distance == best_distance
+                    ]
+                    if len(best_group) == 1:
+                        best_match = best_group[0]
                         return (
                             best_match.barcode,
                             best_match.mismatches,
                             best_match.start,
                         )
+#                    if len(filtered_matches) == 1 or (
+#                        filtered_matches[0].mismatches < filtered_matches[1].mismatches
+#                        or filtered_matches[0].distance < filtered_matches[1].distance
+#                    ):
+#                        # Only one match or the best match is unique
+#                        best_match = filtered_matches[0]
+#                        return (
+#                            best_match.barcode,
+#                            best_match.mismatches,
+#                            best_match.start,
+#                        )
                     else:
                         # Multiple matches with the same number of mismatches and distance
                         # self.logger.info("Multiple equidistant-error matches")
@@ -218,6 +235,7 @@ class BarcodeMatcherOptimized:
             # First pass: Look for exact matches with best position
             exact_matches = []
             for seq, pos in sub_sequence:
+                #self.logger.info(f"subseq: {pos} -> {seq}")
                 if seq in self.matchers[whitelist]["exact"]:
                     pos_distance = abs(pos - original_start)
                     exact_matches.append((seq, pos_distance, pos))
@@ -285,7 +303,6 @@ class BarcodeMatcherOptimized:
 
             # No match found
             # self.logger.info("No match found")
-            #null_match = "N" * len(next(iter(self.matchers[whitelist]["exact"])))
             return NA_barcode, -1, "N"
 
     def _get_sequence_with_jitter(
@@ -880,7 +897,8 @@ def process_read_batch(
                 logger.info(
                     f"Looking for {original_barcode} + {barcode_quality} in range {start}-{end} with jitter {jitter}"
                 )
-            # logger.info(f"{reads[config['file_index']].name}")
+
+            #logger.info(f"{reads[config['file_index']].name}")
             if matcher.trie_matcher or whitelist in matcher.matchers.keys():
                 matched_barcode, mismatch_count, adj_position = matcher.find_match(
                     seq,
