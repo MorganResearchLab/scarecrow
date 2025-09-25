@@ -61,10 +61,10 @@ do
 done
 ```
 
-The above example uses the default set-based barcode matching method. The alternative is to use the trie-based method which is better suited to large barcode whitelists.
+The above example uses the default set-based barcode matching method. The alternative is to use the trie-based method which is better suited to much larger barcode whitelists. In the below example we generate a k-mer index with k-mers of length 2 (see [encode](../toolkit_encode.md)).
 
 ```bash
-K=6
+K=2
 mkdir -p ${PROJECT}/trie_k${K}/barcode_profiles
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 for BARCODE in ${BARCODES[@]}
