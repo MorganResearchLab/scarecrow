@@ -1407,7 +1407,6 @@ def combine_worker_outputs(output, num_workers, args_string):
     Combine output files from all workers into a single file.
     """
     logger = logging.getLogger("scarecrow")
-    total_lines = 0
 
     with open(output, "w") as outfile:
         if str(output).endswith('.sam'):
@@ -1475,14 +1474,14 @@ def generate_fastq_json(barcode_configs: List[Dict], barcode_files: Dict[str, st
         current_position = end_position
 
     # UMI information if present
-    star_umi = None
+    #star_umi = None
     if umi_range is not None:
         umi_length = umi_range[1] - umi_range[0]
         json_data["umi:"].append({
             "range": f"1:{current_position + 1}-{current_position + umi_length}"
         })
         kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length}"
-        star_umi = f"0_{current_position},0,{current_position + umi_length}"
+        #star_umi = f"0_{current_position},0,{current_position + umi_length}"
 
 
     json_data["kallisto-bustools"].append({

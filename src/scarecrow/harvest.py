@@ -126,11 +126,11 @@ class PeakAnalyzer:
         padded_values = np.zeros(len(position_counts) + 2)
         padded_values[1:-1] = position_counts.values
 
-        # Find peaks efficiently
+        # Find peaks
         peak_indices, _ = find_peaks(padded_values)
         peak_indices -= 1  # Adjust for padding
 
-        # Process peaks efficiently using numpy operations
+        # Process peaks
         peaks_with_details = []
         unique_names_count = len(np.unique(names))
 
@@ -159,65 +159,12 @@ class PeakAnalyzer:
                 (start, end, peak_unique_names, read_fraction, barcode_diversity)
             )
 
-        # Sort peaks efficiently
+        # Sort peaks
         peaks_with_details.sort(key=lambda x: x[2], reverse=True)
 
         # Cache results
         self._peak_cache[cache_key] = peaks_with_details
         return peaks_with_details
-
-
-class OptimizedPlotter:
-    """Efficient plotting with caching and optimized rendering"""
-
-    def __init__(self):
-        self._plot_cache = {}
-
-    @staticmethod
-    def _create_facet_plot(
-        data: pd.DataFrame, ylim: Tuple[float, float]
-    ) -> sns.FacetGrid:
-        """Optimized facet plot creation"""
-        g = sns.FacetGrid(
-            data,
-            col="read",
-            row="barcode_whitelist",
-            hue="read",
-            margin_titles=True,
-            height=3,
-            aspect=3,
-        )
-
-        # Optimize plot rendering
-        with plt.style.context("fast"):
-            g.map(sns.histplot, "start", binwidth=1, kde=False)
-
-        g.set_axis_labels("Barcode start position", "Count", fontsize=20)
-        g.set_titles(col_template="{col_name}", row_template="{row_name}", size=20)
-        g.set(xlim=(data["start"].min(), data["start"].max()))
-
-        if ylim is not None:
-            g.set(ylim=ylim)
-
-        # Optimize axis rendering
-        for ax in g.axes.flat:
-            ax.tick_params(axis="x", labelsize=16)
-            ax.tick_params(axis="y", labelsize=16)
-            ax.xaxis.set_major_locator(MaxNLocator(nbins=10))
-            if ax.texts:
-                txt = ax.texts[0]
-                ax.text(
-                    txt.get_unitless_position()[0],
-                    txt.get_unitless_position()[1],
-                    txt.get_text(),
-                    transform=ax.transAxes,
-                    va="center",
-                    fontsize=20,
-                )
-                ax.texts[0].remove()
-
-        return g
-
 
 class HarvestOptimizer:
     """Main class for optimized barcode harvesting"""
@@ -226,57 +173,8 @@ class HarvestOptimizer:
         self.peak_analyzer = PeakAnalyzer.from_conserved_file(
             min_distance, conserved_file
         )
-        self.plotter = OptimizedPlotter()
+        #self.plotter = OptimizedPlotter()
         self.logger = logging.getLogger("scarecrow")
-
-    def _overlaps_existing_peak(
-        self,
-        start: int,
-        file_index: int,
-        orientation: str,
-        selected_peaks: List[Dict],
-        min_distance: int,
-    ) -> bool:
-        """Check if a peak overlaps with any already selected peak across all whitelists"""
-        for peak in selected_peaks:
-            if (
-                peak["file_index"] == file_index
-                and peak["orientation"] == orientation
-                and abs(start - peak["start"]) < min_distance
-            ):
-                return True
-        return False
-
-    def _select_peaks_for_whitelist(
-        self,
-        peaks_df: pd.DataFrame,
-        num_barcodes: int,
-        min_distance: int,
-        existing_peaks: List[Dict],
-    ) -> pd.DataFrame:
-        """Select top peaks for a specific whitelist while avoiding overlap with existing peaks"""
-        sorted_df = peaks_df.sort_values(
-            ["read_count", "start"], ascending=[False, True]
-        )
-        selected_peaks = []
-
-        for _, row in sorted_df.iterrows():
-            # Check if peak overlaps with any existing peak across all whitelists
-            if not self._overlaps_existing_peak(
-                row["start"],
-                row["file_index"],
-                row["orientation"],
-                existing_peaks,
-                min_distance,
-            ):
-                selected_peaks.append(row.to_dict())
-                existing_peaks.append(
-                    row.to_dict()
-                )  # Add to existing peaks to prevent future overlap
-                if len(selected_peaks) == num_barcodes:
-                    break
-
-        return pd.DataFrame(selected_peaks)
 
     def _select_top_peaks(
         self, df: pd.DataFrame, num_barcodes: int, min_distance: int
@@ -345,34 +243,12 @@ class HarvestOptimizer:
             return result_df
         return pd.DataFrame()
 
-    def _verify_no_overlaps(self, df: pd.DataFrame, min_distance: int = 10) -> bool:
-        """Verify that no peaks overlap within each file_index and orientation group."""
-        # Group by file_index and orientation
-        for (file_index, orientation), group in df.groupby(["file_index", "orientation"]):
-            starts = group["start"].values
-            ends = group["end"].values
-
-            # Check for overlaps within this group
-            for i in range(len(starts)):
-                for j in range(i + 1, len(starts)):
-                    # Check if the peaks overlap
-                    if not (ends[i] < starts[j] or starts[i] > ends[j]):
-                        # Peaks overlap
-                        self.logger.error(
-                            f"Found overlapping peaks in file {file_index}, orientation {orientation}: "
-                            f"Peak 1 (start={starts[i]}, end={ends[i]}) overlaps with "
-                            f"Peak 2 (start={starts[j]}, end={ends[j]})"
-                        )
-                        return False
-
-        return True
-
     @log_errors
     def process_barcode_data(
         self, barcode_files: List[str], num_barcodes: int = 1, min_distance: int = 10
     ) -> pd.DataFrame:
         """Process barcode data and select unique top peaks per whitelist"""
-        # Read data efficiently
+        # Read data
         dfs = []
         for file in barcode_files:
             df = pd.read_csv(
@@ -394,10 +270,9 @@ class HarvestOptimizer:
 
         barcode_data = pd.concat(dfs, ignore_index=True)
 
-        # Process peaks efficiently
+        # Process peaks
         peaks_by_group = self._get_barcode_peaks(barcode_data)
         peaks_df = pd.DataFrame(peaks_by_group)
-
         self.logger.info(f"Top 10 peaks\n{peaks_df.head(10)}")
 
         # Select unique top peaks for each whitelist
@@ -407,7 +282,7 @@ class HarvestOptimizer:
         """Optimized peak detection with conserved region filtering"""
         results = []
 
-        # Group data efficiently
+        # Group data
         grouped = barcode_data.groupby(["file_index", "file", "barcode_whitelist", "orientation"])
 
         for (file_index, file, barcode_whitelist, orientation), group in grouped:
@@ -417,7 +292,6 @@ class HarvestOptimizer:
             end_arr = group["end"].values
             names_arr = group["read_name"].values
             barcodes_arr = group["barcode"].values
-
             peaks = self.peak_analyzer.find_peaks_optimized(
                 start_arr, end_arr, names_arr, barcodes_arr, file_index
             )
@@ -440,7 +314,7 @@ class HarvestOptimizer:
                 }
             )
 
-        # Sort efficiently using key function
+        # Sort using key function
         results.sort(
             key=lambda x: max((p["read_count"] for p in x["peaks"]), default=0),
             reverse=True,

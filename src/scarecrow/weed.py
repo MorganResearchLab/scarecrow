@@ -219,15 +219,6 @@ def validate_weed_args(parser, args):
     )
 
 
-def count_reads_no_header(bam_file):
-    """Count the number of reads in a BAM file without a header."""
-    read_count = 0
-    with pysam.AlignmentFile(bam_file, "rb", check_sq=False) as bam:
-        for _ in bam.fetch(until_eof=True):
-            read_count += 1
-    return read_count
-
-
 def split_bam_file(bam_file, num_chunks, out, args_string):
     """Split the BAM file into chunks, distributing reads evenly."""
     bam_chunks = [f"{out}_chunk_{i}.bam" for i in range(num_chunks)]
@@ -398,14 +389,6 @@ def decompress_gz_file(filepath):
     return decompressed_filepath
 
 
-def parse_fastq_header(header):
-    """Parse the FASTQ header to extract tags."""
-    tags = {}
-    for tag in header.split()[1:]:
-        key, value = tag.split("=", 1)
-        tags[key] = value
-    return tags
-
 
 def create_fastq_index(fastq_file, index_db):
     """Create an SQLite database mapping read names to file offsets."""
@@ -442,15 +425,6 @@ def create_fastq_index(fastq_file, index_db):
     conn.commit()
     conn.close()
 
-
-def load_fastq_index(index_file):
-    """Load the FASTQ index into memory."""
-    index = []
-    with open(index_file, "r") as idx:
-        for line in idx:
-            read_name, offset = line.strip().split("\t")
-            index.append((read_name, int(offset)))
-    return index
 
 
 def get_barcode_from_fastq(

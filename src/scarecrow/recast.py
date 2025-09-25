@@ -270,13 +270,13 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
         current_position = end_position
 
     # UMI information if present
-    star_umi = None
+    #star_umi = None
     if umi_length is not None:
         json_data["umi"].append({
             "range": f"1:{current_position + 1}-{current_position + umi_length}"
         })
         kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length}"
-        star_umi = f"0_{current_position},0,{current_position + umi_length}"
+        #star_umi = f"0_{current_position},0,{current_position + umi_length}"
 
     # Add kallisto-bustools command template
     json_data["kallisto-bustools"].append({

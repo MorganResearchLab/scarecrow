@@ -27,7 +27,6 @@ Download Scale Bio data from NCBI SRA accession:[SRR28867557](https://www.ncbi.n
 ```bash
 mkdir -p ${PROJECT}/fastq
 ACC=SRR28867557
-#sbatch ./scarecrow/scripts/fastq-dump.sh --out ${PROJECT}/fastq --acc ${ACC}
 prefetch --output-directory ${PROJECT}/fastq ${ACC}
 fasterq-dump ${PROJECT}/fastq/${ACC} -e 2 --split-files --include-technical --force --outdir ${PROJECT}/fastq
 gzip ${PROJECT}/fastq/${ACC}_1.fastq # Index 2

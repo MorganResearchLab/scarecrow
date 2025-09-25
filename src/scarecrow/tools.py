@@ -4,22 +4,15 @@
 @author: David Wragg
 """
 
-import gzip
+#import gzip
 import logging
 import os
 import psutil
 import random
-import resource
 import string
 import sys
 from functools import lru_cache
 from scarecrow.logger import log_errors
-
-
-class FastqProcessingError(Exception):
-    """Custom exception for FASTQ processing errors."""
-
-    pass
 
 
 def generate_random_string(n: int = 8):
@@ -31,17 +24,6 @@ def generate_random_string(n: int = 8):
         random.choices(characters, k=n)
     )  # Generate a random string of length n
     return random_string
-
-
-def get_memory_usage() -> float:
-    """
-    Get current memory usage of the process.
-
-    Returns:
-        float: Memory usage in MB
-    """
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
-
 
 def get_process_memory_usage():
     # Get the current process
@@ -63,13 +45,6 @@ def get_process_memory_usage():
     total_rss_mb = total_rss / (1024**2)  # Convert to MB
     total_rss_gb = total_rss / (1024**3)  # Convert to GB
     return total_rss_mb, total_rss_gb
-
-
-def count_fastq_reads(file):
-    opener = gzip.open if file.endswith(".gz") else open
-    with opener(file, "rt") as f:
-        return sum(1 for line in f) // 4
-
 
 @lru_cache(maxsize=1024)
 def reverse_complement(seq):

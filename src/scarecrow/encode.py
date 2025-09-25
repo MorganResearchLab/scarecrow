@@ -364,67 +364,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             self.logger.info(f"    First {num_values} barcodes: {barcodes}")
             self.logger.info(f"    Total barcodes: {total_values}")
 
-    def _generate_query_variants(self, sequence: str, mismatches: int) -> List[str]:
-        """
-        * Redundant *
-        Generates all possible variants of the query sequence with up to 'n' mismatches,
-        treating 'N' as a wildcard.
-        """
-        bases = ["A", "C", "G", "T"]
-        variants = set()
-        sequence_length = len(sequence)
-
-        # Iterate through mismatch counts (1 to n mismatches)
-        for mismatch_count in range(1, mismatches + 1):
-            # Get all combinations of mismatch_count positions in the sequence
-            for mismatch_positions in combinations(
-                range(sequence_length), mismatch_count
-            ):
-                # For each position, create all possible base replacements
-                for replacements in product(bases, repeat=mismatch_count):
-                    # Create a mutable list of characters from the sequence
-                    variant_list = list(sequence)
-
-                    # Replace specified positions with replacement bases
-                    for pos, base in zip(mismatch_positions, replacements):
-                        if (
-                            base != sequence[pos]
-                        ):  # Avoid generating the original sequence
-                            variant_list[pos] = base
-
-                    # Convert list back to a string and add to the set
-                    variants.add("".join(variant_list))
-
-        return list(variants)
-
-    def _search_with_n_mismatches(
-        self, sequence: str, mismatches: int, orientation: str, automaton: Automaton
-    ) -> List[Dict]:
-        """
-        * Redundant *
-        Searches for matches with up to 'n' mismatches by generating query variants
-        and checking them against the trie.
-        """
-        matches = []
-        query_variants = self._generate_query_variants(sequence, mismatches)
-        # self.logger.info(f"query variants: {query_variants}")
-        for variant in query_variants:
-            # Use the automaton's iter method to search for matches
-            for end_index, (whitelist_key, variant_seq, n) in automaton.iter(variant):
-                start_index = end_index - len(variant_seq) + 1
-                # self.logger.info(f"-> variant_seq: {variant_seq} start_index: {start_index} end_index: {end_index} n: {n} mismatches: {mismatches}")
-                matches.append(
-                    {
-                        "barcode": variant_seq,
-                        "whitelist": whitelist_key,
-                        "orientation": orientation,
-                        "start": start_index + 1,
-                        "end": end_index + 1,
-                        "mismatches": mismatches,  # Since we're generating n-mismatch variants
-                    }
-                )
-        return matches
-
     def _find_approximate_matches(
         self, sequence: str, whitelist_key: str, k: int = 4, max_mismatches: int = 1
     ) -> List[str]:

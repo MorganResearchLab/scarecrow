@@ -83,17 +83,17 @@ def run_sam2fastq(sam_file: str = None) -> None:
 
                     # Extract tags
                     tags = {k: str(v) for k, v in read.tags}
-                    
+
                     # Get barcode (CB tag) and UMI (UR tag)
                     barcode = tags.get("CB", "")
                     umi = tags.get("UR", "")
-                    
+
                     # Track lengths for JSON generation
                     if barcode and not barcode_lengths:
                         # Split barcode by underscores
                         barcode_parts = barcode.split(',')
                         barcode_lengths = [len(part)-1 for part in barcode_parts]
-                    
+
                     if umi and umi_length is None:
                         umi_length = len(umi)
 
@@ -102,14 +102,14 @@ def run_sam2fastq(sam_file: str = None) -> None:
                     r1_seq = barcode.replace(",", "")
                     r1_qual = tags.get("CY", "F" * len(r1_seq)).replace(",", "")  # Default to high quality if no quality scores
                     if umi:
-                        r1_seq += umi                    
+                        r1_seq += umi
                         r1_qual += tags.get("UY", "F" * umi_length).replace(",", "")  # Default to high quality if no quality scores
-                    
+
                     # R2 (sequence from SAM)
                     r2_header = f"@{read.query_name}/2"
                     r2_seq = read.query_sequence
                     r2_qual = "".join(chr(q + 33) for q in read.query_qualities)
-                    
+
                     # Write interleaved FASTQ
                     fq.write(f"{r1_header}\n{r1_seq}\n+\n{r1_qual}\n")
                     fq.write(f"{r2_header}\n{r2_seq}\n+\n{r2_qual}\n")
@@ -140,19 +140,19 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
         "umi": [],
         "kallisto-bustools": []
     }
-    
+
     # Barcode information
     current_position = 0
     kb_x = None
     star_x = None
-    
+
     for i, length in enumerate(barcode_lengths):
         end_position = current_position + length + 1
         json_data["barcodes"].append({
             "range": f"1:{current_position + 1}-{end_position}",
             "whitelist": ""  # Empty since we don't have whitelist info from SAM
         })
-        
+
         if kb_x is None:
             kb_x = f"0,{current_position},{end_position}"
             star_x = f"0_{current_position}_0_{end_position}"
@@ -160,16 +160,16 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
             kb_x = f"{kb_x},0,{current_position},{end_position}"
             star_x = f"{star_x} 0_{current_position}_0_{end_position}"
         current_position = end_position
-    
+
     # UMI information if present
-    star_umi = None
+    #star_umi = None
     if umi_length is not None:
         json_data["umi"].append({
             "range": f"1:{current_position + 1}-{current_position + umi_length}"
         })
         kb_x = f"{kb_x}:0,{current_position},{current_position + umi_length}"
-        star_umi = f"0_{current_position},0,{current_position + umi_length}"
-    
+        #star_umi = f"0_{current_position},0,{current_position + umi_length}"
+
     # Add kallisto-bustools command template
     json_data["kallisto-bustools"].append({
         "kb count": f"-i </path/to/transcriptome.idx> -g </path/to/transcripts_to_genes> -x {kb_x}:1,0,0 -w NONE --h5ad --inleaved -o <outdir> {fastq_file}"
@@ -178,5 +178,4 @@ def generate_json(barcode_lengths: list, umi_length: int, json_file: str, fastq_
     # Write JSON file
     with open(json_file, "w") as f:
         json.dump(json_data, f, indent=4)
-        f.write('\n') 
-
+        f.write('\n')
