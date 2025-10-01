@@ -277,7 +277,7 @@ class BarcodeMatcherOptimized:
                             mismatch_matches.append((barcode, n, pos, pos_distance))
 
                 if mismatch_matches:
-                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    #self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
                     match_groups = defaultdict(list)
                     for match in mismatch_matches:
