@@ -172,15 +172,11 @@ class BarcodeMatcherOptimized:
                 filtered_matches = [
                     match
                     for match in matches
-                    # If match starts in negative space have to +1 as we're skipping position 0
-                    # if abs((match.start + 1 if match.start < 1 else match.start) - original_start) <= jitter
-                    # suggest replacing above with, needs testing:
                     if match.distance<= jitter
                 ]
                 if filtered_matches:
                     # Sort by number of mismatches and distance from expected start
                     filtered_matches.sort(key=lambda x: (x.mismatches, abs(x.distance)))
-                    # This block is a replacement for the commented block beneath
                     best_mismatches = filtered_matches[0].mismatches
                     best_distance = filtered_matches[0].distance
                     # Keep only matches equally good
@@ -188,24 +184,22 @@ class BarcodeMatcherOptimized:
                         m for m in filtered_matches
                         if m.mismatches == best_mismatches and m.distance == best_distance
                     ]
-                    if len(best_group) == 1:
-                        best_match = best_group[0]
-                        return (
-                            best_match.barcode,
-                            best_match.mismatches,
-                            best_match.start,
-                        )
-#                    if len(filtered_matches) == 1 or (
-#                        filtered_matches[0].mismatches < filtered_matches[1].mismatches
-#                        or filtered_matches[0].distance < filtered_matches[1].distance
-#                    ):
-#                        # Only one match or the best match is unique
-#                        best_match = filtered_matches[0]
-#                        return (
-#                            best_match.barcode,
-#                            best_match.mismatches,
-#                            best_match.start,
-#                        )
+                    # Determine unique barcodes in the best group
+                    unique_barcodes = {m.barcode for m in best_group}
+                    if len(unique_barcodes) == 1:
+                        # Single unique barcode
+                        barcode = next(iter(unique_barcodes))
+                        unique_positions = {m.start for m in best_group}
+                        # Identical barcode and mismatches, different positions
+                        if len(unique_positions) == 1:
+                            # Unambiguous position
+                            pos = best_group[0].start
+                        else:
+                            # Multiple positions → ambiguous
+                            pos = "*"
+
+                        return barcode, best_mismatches, pos
+
                     else:
                         # Multiple matches with the same number of mismatches and distance
                         # self.logger.info("Multiple equidistant-error matches")
@@ -273,14 +267,17 @@ class BarcodeMatcherOptimized:
                                 break  # No point checking n+1 if there are results form n
 
                     if matching_barcodes:
-                        # Calculate distance from expected start
-                        pos_distance = abs(pos - original_start)
+                        # Calculate distance from expected start whilst accounting for negative space
+                        if pos < 1:
+                            pos_distance = abs((pos + 1) - original_start)
+                        else:
+                            pos_distance = abs(pos - original_start)
                         # Add all matching barcodes to mismatch_matches
                         for barcode, n in matching_barcodes:
                             mismatch_matches.append((barcode, n, pos, pos_distance))
 
                 if mismatch_matches:
-                    # self.logger.info(f"Mismatch matches: {mismatch_matches}")
+                    self.logger.info(f"Mismatch matches: {mismatch_matches}")
                     # Group matches by the number of mismatches and distance
                     match_groups = defaultdict(list)
                     for match in mismatch_matches:
@@ -291,11 +288,26 @@ class BarcodeMatcherOptimized:
                     best_key = min(match_groups.keys(), key=lambda x: (x[0], abs(x[1])))
                     best_matches = match_groups[best_key]
 
-                    if len(best_matches) == 1:
+                    unique_barcodes = {m[0] for m in best_matches}
+                    #if len(best_matches) == 1:
+                    if len(unique_barcodes) == 1:
                         # Only one match in the best group
-                        match = best_matches[0]
+                        #match = best_matches[0]
                         # self.logger.info(f"Selected best mismatch match: {match[0]} at position {match[2]}")
-                        return match[0], match[1], match[2]
+                        #return match[0], match[1], match[2]
+                        # Single unique barcode
+                        barcode = next(iter(unique_barcodes))
+                        # Check if all positions are identical
+                        unique_positions = {m[2] for m in best_matches}
+                        if len(unique_positions) == 1:
+                            # Unambiguous position → return normally
+                            pos = best_matches[0][2]
+                        else:
+                            # Multiple positions → ambiguous → return asterisk
+                            pos = "*"
+                        mismatches = best_matches[0][1]  # number of mismatches is same for all
+                        return barcode, mismatches, pos
+#
                     else:
                         # Multiple matches in the best group
                         # self.logger.info("Multiple mismatch matches with the same distance, returning no match")

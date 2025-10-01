@@ -94,7 +94,7 @@ scarecrow harvest \
     --out ${PROJECT}/barcode_profiles/barcode_positions.csv
 ```
 
-Both the set- and trie-based methods are processed in the same manner with `harvest`. However, to illustrate that the same barcode profiels are generated, we can repeat the above on the trie-based method outputs from `seed`.
+Both the set- and trie-based methods are processed in the same manner with `harvest`. However, to illustrate that the same barcode profiles are generated, we can repeat the above on the trie-based method outputs from `seed`.
 
 ```bash
 BARCODE_FILES=(${PROJECT}/trie_k${K}/barcode_profiles/barcodes.*.csv)

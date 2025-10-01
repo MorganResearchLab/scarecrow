@@ -435,11 +435,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     start = match_start
                     end   = match_start + pat_len - 1
 
-                #match_dist = abs((start + 1) - original_start)
                 match_dist = abs(start - original_start)
-
-                #match_start = start_pos + (end_index - len(original_seq))
-                #match_dist = abs((match_start + 1) - original_start)
                 #self.logger.info(f"{seq} - {orientation} {original_seq} @ match_start: {match_start} expected_start: {original_start} match_dist: {match_dist}")
                 matches.append(
                     MatchResult(
@@ -466,7 +462,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     max_mismatches=self.mismatches,
                 )
                 # if approximate_matches:
-                #self.logger.info(f"Approximate matches (m={self.mismatches} for {seq}): {approximate_matches}")
+                self.logger.info(f"Approximate matches (m={self.mismatches} for {seq}): {approximate_matches}")
                 for match in approximate_matches:
                     match_start = start_pos
                     match_dist = abs(match_start - original_start)

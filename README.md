@@ -24,14 +24,9 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
     * [`weed`](./docs/toolkit_weed.md)
 
 ### To-do
-* Ensure Aho-Corasick Trie matching method returns same results as set-based matching method
-  - If pickle file is missing gz suffix then it needs adding automatically
-  - Position counts returned are different vs set matched results
-  - Unit-testing with reads generated to check edge cases
-* Check/fix harvest image file indices (Scale returns 0,1,2,2,3,3; Parse returns 1,1,2,2)
 * Jitter does not currently apply to UMI or insert sequence
   - if UMI on same read as barcodes, and downstream of any, then position *may* need adjusting dynamically before extracting sequence and qualities
 
 ### Wishlist
 * Some tools would benefit from multi-threading (i.e. recast, stats)
-* Weed should be refactored to work on FASTQ as well as SAM
+* Would be helpful if `weed` could be refactored to work on FASTQ input format rather than just SAM

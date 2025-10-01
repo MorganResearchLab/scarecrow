@@ -63,19 +63,11 @@ echo "samtools index --threads  ${SLURM_CPUS_PER_TASK} ${OUT}/${ID}.featureCount
 samtools index --threads  ${SLURM_CPUS_PER_TASK} ${OUT}/${ID}.featureCounts.bam
 rm ${OUT}/${ID}.bam.featureCounts.bam
 
-#echo "Running umi_tools dedup..."
-#umi_tools dedup --stdin ${OUT}/${ID}.featureCounts.bam \
-#    --output-stats=${OUT}/${ID}.dedup \
-#    --extract-umi-method=tag --umi-tag=UR --cell-tag=CB \
-#    --per-gene --gene-tag=XT --assigned-status-tag=XS --per-cell \
-#    --mapping-quality 0 --stdout ${OUT}/${ID}.featureCounts.dedup.bam
-
 echo "Running umi_tools count..."
 umi_tools count --stdin ${OUT}/${ID}.featureCounts.bam \
     --wide-format-cell-counts \
     --extract-umi-method=tag --umi-tag=UR --cell-tag=CB \
     --per-gene --gene-tag=XT --assigned-status-tag=XS --per-cell \
     --mapping-quality 0 --stdout ${OUT}/${ID}.featureCounts.counts.tsv.gz
-
 
 echo "Finished"
