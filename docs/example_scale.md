@@ -2,7 +2,7 @@
 
 [Back to root](../README.md)
 
-# Example: Scale Biosciences (RNA)
+# Example: Scale Biosciences (QuantumnScale)
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../img/scale_dark.svg">

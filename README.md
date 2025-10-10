@@ -7,11 +7,11 @@
 A library-agnostic toolkit for pre-processing combinatorial indexed single-cell RNA sequence data.
 
 * [Installation](./docs/installation.md)
-* [Workflow](./docs/workflow.md)
+* [Introduction](./docs/workflow.md)
 * [Troubleshooting](./docs/troubleshooting.md)
 * Examples
     * [Parse Evercode WTv2](./docs/example_evercode.md)
-    * [Scale Bio RNA](./docs/example_scale.md)
+    * [Scale QuantumnScale RNA](./docs/example_scale.md)
     * [Scarecrow paper code](https://github.com/MorganResearchLab/scarecrow_paper)
 * Toolkit
     * [`encode`](./docs/toolkit_encode.md)
