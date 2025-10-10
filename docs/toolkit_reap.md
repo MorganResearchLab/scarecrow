@@ -103,31 +103,33 @@ This reports the count of mismatches observed across reads. In the below example
 
 ```bash
 mismatches,count
--3,2330
--2,2112
--1,8941
-0,75424
-1,6230
-2,3565
-3,588
-4,449
-5,189
-6,172
+-3,3814125
+-2,3590285
+-1,14409173
+0,125784335
+1,11300683
+2,6035706
+3,1026087
+4,823998
+5,391577
+6,298803
 ```
 
 ### Example position_stats format
 
-This reports the count of of barcode start positions observed. In the below example the data has 3 barcodes and has been processed with `--jitter 1`. Invalid barcodes have a position of N, and this count should equal the absolute summed mismatch count of negative mismatch counts (i.e. `3 x 2330 + 2 x 2112 + 1 x 8941`). We observe 3 peaks across the remaining positions, at 11, 49, and 79, corresponding with the expected start positions of the 3 barcodes.
+This reports the count of of barcode start positions observed. In the below example the data has 3 barcodes and has been processed with `--jitter 1`. Invalid barcodes have a position of N, and this count should equal the absolute summed mismatch count of negative mismatch counts (i.e. `(3 x 3814125) + (2 x 3590285) + (1 x 14409173)`). We observe 3 peaks across the remaining positions, at 11, 49, and 79, corresponding with the expected start positions of the 3 barcodes. The asterisk (*) position indicates for those barcodes that more than one match for the same barcode sequence was found with the same number of mismatches and distance. In such instances, the barcode and number of mismatches are known however the exact position is not.
 
 ```bash
 position,count
-10,2112
-11,92716
-12,906
-48,5791
-49,87725
-50,1563
-78,8525
-79,80507
-N,20155
+*,11950
+10,3658309
+11,154983669
+12,1527298
+48,9795569
+49,146681602
+50,2644153
+78,13877626
+79,133791532
+80,2420490
+N,33032118
 ```

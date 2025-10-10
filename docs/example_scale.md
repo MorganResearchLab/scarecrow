@@ -142,7 +142,7 @@ We're running this on a SLURM HPC and it takes around an 2h30m using 16 cores.
 ```bash
 THREADS=16
 BQ=10
-JITTER=1
+JITTER=0
 MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
@@ -162,8 +162,9 @@ sbatch --ntasks 1 --cpus-per-task ${THREADS} \
         --out ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
 ```
+# 2711017 (J0)
 
-Check that the read count in the resulting FASTQ file is equal to that of one of the input FASTQ files. Here is an example of counting reads using `seqtk` and `awk` on non-interleaved and interleaved FASTQ files.
+**(Optional)** Check that the read count in the resulting FASTQ file is equal to that of one of the input FASTQ files. Here is an example of counting reads using `seqtk` and `awk` on non-interleaved and interleaved FASTQ files.
 
 ```bash
 # A non-interleaved input FASTQ file
@@ -176,14 +177,14 @@ In addition to generating an interleaved FASTQ file, `scarecrow` outputs a JSON 
 
 ```bash
 mismatches,count
--2,5001277
--1,38931650
+-2,6675291
+-1,37366978
 0,293542244
-1,12622956
-2,4992085
-3,361193
-4,419936
-5,18072
+1,12593597
+2,4935434
+3,357517
+4,401159
+5,17193
 ```
 
 Indicating the number of reads recorded for each sum of mismatches across its barcodes. Negative numbers indicate the number of reads for which no barcode was found (i.e. -1 is one barcode unmatched, -2 is two barcodes unmatched, ...). Although we used `--mismatch 2`, a mismatch count of three is possible if for example each of the three barcodes has one mismatch, or one barcode has two mismatches and another has 1 mismatch.
@@ -192,13 +193,14 @@ The position_stats CSV follows a similar format, indicating the count of barcode
 
 ```bash
 position,count
+*,1551
 -1,1372346
 1,700463986
-2,4231456
+2,2446549
 23,4500938
 24,186144490
 25,122020819
-N,48934204
+N,50717560
 ```
 
 This illustrates that millions of reads have barcodes not starting at the expected positions. Note, the Scale Bio RNA library structure is as follows:
@@ -268,38 +270,70 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} \
         --out ${PROJECT}/extracted/trie_k${K}/J${JITTER}M${MISMATCH}/${OUT} \
         --out_fastq
 ```
-<-----------------------------------------------------------------------------
-2707884
 
-The Scale barcode whitelists have 96 (3lvlRNA_rt and 3lvlRNA_pcr) and 384 (3lvlRNA_lig) 9-mer barcodes. Given the small size of these whitelists the default set-based method is more efficient, as evident from the SLURM job logs summarised below.
+The below table summarises the number of mismatches identified at each jitter from 0 to 1, allowing upto 2 mismatches.
 
-| Method     | CPU Utilized | CPU Efficiency | Wall-clock time | Memory Utilized |
-| ---------- | ------------ | -------------- | --------------- | --------------- |
-| Set        | 15:38:23     | 37.90%         | 02:34:45        | 3.67 GB         |
-| Trie 2-mer | 9-01:00:56   | 97.54%         | 13:54:19        | 5.38 GB         |
-| Trie 3-mer | 2-20:06:04   | 94.97%         | 04:28:55        | 5.13 GB         |
+| Mis | Jitter 0  | Jitter 1  |
+| --- | --------- | --------- |
+| -2  | 10191330  | 6675291
+| -1  | 156364488 | 37366978
+| 0   | 175732492 | 293542244
+| 1   | 6870125   | 12593597
+| 2   | 6255723   | 4935434
+| 3   | 231657    | 357517
+| 4   | 234255    | 401159
+| 5   | 9343      | 17193
 
+The number of valid barcodes is the sum of those with >=0 mismatches. This can be easily calculated from the mismatch stats file.
+
+```bash
+OUT=$(basename ${FASTQS[0]%.gz})
+awk -F, 'NR>1 && $1 >= 0 {sum += $2} END {print sum}' $PROJECT/extracted/J${JITTER}M${MISMATCH}/${OUT}_mismatch_stats.csv
+```
+
+The below table summarises the number of barcode position matches identified at each jitter from 0 to 1, allowing upto 2 mismatches.
+
+| Pos | Jitter 0  | Jitter 1  |
+| --- | --------- | --------- |
+| *   |           | 1551      |
+| -1  |           | 1372346   |
+| 1   | 700879847 | 700463986 |
+| 2   |           | 2446549   |
+| 23  |           | 4500938   |
+| 24  | 190041244 | 186144490 |
+| 25  |           | 122020819 |
+| N   | 176747148 | 50717560  |
+
+The Scale barcode whitelists have 96 (3lvlRNA_rt and 3lvlRNA_pcr) and 384 (3lvlRNA_lig) 9-mer barcodes. Given the small size of these whitelists the default set-based method is more efficient, as evident from the SLURM job logs summarised below (JITTER = 1, MISMATCH = 2). Whilst both k-mer lengths reported the same results, as would be expected for the k lengths tested (see [encode](./toolkit_encode.md)), there is a significant difference in run-time between k = 2 and k = 3.
+
+| Method            | CPU Utilized | CPU Efficiency | Wall-clock time | Memory Utilized |
+| ----------------- | ------------ | -------------- | --------------- | --------------- |
+| Set (J0M2)        | 16:08:54     | 30.57%         | 03:18:06        | 3.53 GB         |
+| Set (J1M2)        | 19:51:06     | 38.79%         | 03:11:56        | 3.52 GB         |
+| Trie 2-mer (J1M2) | 9-05:21:50   | 98.10%         | 14:06:14        | 5.41 GB         |
+| Trie 3-mer (J1M2) | 2-23:22:17   | 94.94%         | 04:41:55        | 5.18 GB         |
 
 | Pos | Set       | Trie 2-mer | Trie 3-mer |
 | --- | --------- | ---------- | ---------- |
+| *   | 1551      | 1551       | 1551
 | -1  | 1372346   | 1372346    | 1372346    |
 | 1   | 700463986 | 700463986  | 700463986  |
-| 2   | 4231456   | 2446549    | 2446549    | <- these not being identified?
+| 2   | 2446549   | 2446549    | 2446549    |
 | 23  | 4500938   | 4500938    | 4500938    |
 | 24  | 186144490 | 186144490  | 186144490  |
 | 25  | 122020819 | 122020819  | 122020819  |
-| N   | 48934204  | 50719111   | 50719111   |
+| N   | 50717560  | 50717560   | 50717560   |
 
 | Mis | Set       | Trie 2-mer | Trie 3-mer |
 | --- | --------- | ---------- | ---------- |
-| -2  | 5001277   | 6676515    | 6676515    |
-| -1  | 38931650  | 37366081   | 37366081   |
+| -2  | 6675291   | 6676515    | 6675291    |
+| -1  | 37366978  | 37366978   | 37366978   |
 | 0   | 293542244 | 293542244  | 293542244  |
-| 1   | 12622956  | 12593597   | 12593597   |
-| 2   | 4992085   | 4935302    | 4935302    |
-| 3   | 361193    | 357465     | 357465     |
-| 4   | 419936    | 401017     | 401017     |
-| 5   | 18072     | 17192      | 17192      |
+| 1   | 12593597  | 12593597   | 12593597   |
+| 2   | 4935434   | 4935434    | 4935434    |
+| 3   | 357517    | 357517     | 357517     |
+| 4   | 401159    | 401159     | 401159     |
+| 5   | 17193     | 17193      | 17193      |
 
 
 ### 4. Sift reads with invalid barcodes
@@ -307,14 +341,15 @@ The Scale barcode whitelists have 96 (3lvlRNA_rt and 3lvlRNA_pcr) and 384 (3lvlR
 Reads with one or more invalid barcode are uninformative in downstream analyses as they could not be confidently demultiplexed. We can filter these reads out either by using the `--sift` flag when running `reap`, or by using the `sift` tool afterwards. Here we demonstrate `sift` after running `reap`. As we are providing a `scarecrow` FASTQ input we also need to provide the accompanying JSON file. If a `scarecrow` SAM input is provided then no JSON file is required.
 
 ```bash
-FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*.fastq
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 2G --time=12:00:00 -o sift.%j.out -e sift.%j.err \
             scarecrow sift --in ${FASTQ} --json ${FASTQ%.fastq}.json
 ```
+# 2711158 (J0)
+# 2711125 (J1)
 
-
-
-### 5. Trimming (needs repeating with the cutadapt -G flag)
+### 5. Trimming
 
 To improve downstream alignment results it is highly recommended to trim the reads to remove and adapter sequences or template switching oligo (TSO) sequences. Not all reads possess these sequences, and those that do will not necessarily share the same start position. There is a contaminants list in the Parse splitpipe repo which can be formatted for use with cutadapt. Note, we use the `-G` rather than the `-g` flag for `cutadapt` because the sequence to be trimmed is on the read 2 output by `scarecrow`, rather than read 1.
 
@@ -338,23 +373,27 @@ NF && $0 !~ /^#/ {
 }
 ' ${CONTAMINANTS} > ${PROJECT}/contaminants.fasta
 
-FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_sift.fastq)
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_sift.fastq)
 sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out -e cutadapt.%j.err \
     cutadapt --cores 4 --trim-n --minimum-length 30 --interleaved \
         -G file:${PROJECT}/contaminants.fasta \
         -o ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ%_sift.fastq}_trimmed.fastq \
         ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ}
 ```
-
+# 2711164 (J0)
+# 2711159 (J1)
 
 ### 6. Generate barcode statistics
 
 ```bash
-FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o stats.%j.out -e stats.%j.err \
             scarecrow stats --in ${FASTQ}
 ```
-
+# 2711458 (J0)
+# 2711459 (J1)
 
 ### 7. Generate count matrix via kallisto-bustools
 
@@ -367,12 +406,12 @@ XSTR=$(${jq} -r '."kallisto-bustools"[0]."kb count" | capture("-x (?<x>[^ ]+)").
 The `kallisto.sh` script requires the `kallisto` `--index` and `--genes` for the reference assembly in question, in addition to the FASTQ and JSON files generated by `scarecrow`.
 
 ```bash
-mkdir -p ${PROJECT}/kallisto
-FASTQ=$(basename ${PROJECT}/extracted/*_trimmed.fastq)
-
+#conda deactivate
+#mamba activate kallisto
 mkdir -p ${PROJECT}/kallisto/J${JITTER}M${MISMATCH}
-FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq)
-sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 \
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+FASTQ=$(basename ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.fastq)
+sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 --dependency=afterok:2711459 \
     ~/sharedscratch/scarecrow/scripts/kallisto.sh \
         --index /uoa/scratch/users/s14dw4/software/kallisto/hg38/transcriptome.idx \
         --genes /uoa/scratch/users/s14dw4/software/kallisto/hg38/transcripts_to_genes.txt \
@@ -381,6 +420,8 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 \
         --out ${PROJECT}/kallisto/J${JITTER}M${MISMATCH}/${FASTQ%.fastq}
 ```
 
+# 2712596 (J0)
+# 2712597 (J1)
 
 
 ### 8. Generate count matrix via STAR and umi-tools
@@ -388,10 +429,14 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 \
 Before aligning with STAR, if we wish to incoprorate the barcode and UMI read tags we should first recast the FASTQ file to SAM format.
 
 ```bash
-FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.fastq
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 2G --time=24:00:00 -o recast.%j.out -e recast.%j.err \
             scarecrow recast --in ${FASTQ}
 ```
+
+# 2712650 (J0)
+# 2712649 (J1)
 
 
 Given the compute requirements for running STAR this is best performed on a HPC. Alignment first requires the reference genome be indexed with STAR. Below is an example using 8 threads and used 48G on a SLURM HPC. The GRCh38 reference genome and annotation (GTF) were indexed using an overhang of 74 - the length of the read containing the sequence to align.
@@ -422,8 +467,11 @@ ID=$(basename ${SAM%.sam})
 The script is run on the HPC as follows:
 
 ```bash
+mkdir -p ${PROJECT}/star/J${JITTER}M${MISMATCH}
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
+SAM=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.sam
+ID=$(basename ${SAM%.sam})
 GENOME=/uoa/scratch/users/s14dw4/spipe/genomes/hg38
-SAM=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/*_trimmed.sam
 sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o star.%j.out -e star.%j.err \
     ./scarecrow/scripts/star_align_sam_scale.sh \
         --genome ${GENOME} \
@@ -431,11 +479,15 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o
         --out ${PROJECT}/star/J${JITTER}M${MISMATCH}
 ```
 
+# 2712852 (J0)
+# 2712889 (J1)
+
 
 Next step is to run `umi-tools`. The reference GTF file we use for this has a slighltly different config naming convention to the reference we used for alignment with `STAR`. To address this issue we generate an alias file for use with `featureCounts` from the `subread` package, see the `umi-tools` [single-cell tutorial](https://umi-tools.readthedocs.io/en/latest/Single_cell_tutorial.html) for more details. We have included a script in the `scarecrow` repo, [umi_tools.sh](../src/HPC/umi_tools.sh) which runs `featureCounts` followed by `umi-tools count` to generate a counts matrix.
 
 ```bash
 GTF=/uoa/scratch/shared/Morgan_Lab/common_resources/cellranger/reference/refdata-gex-GRCh38-2020-A/genes/genes.gtf
+OUT=$(basename ${FASTQS[0]%.fastq.gz})
 BAM=${PROJECT}/star/J${JITTER}M${MISMATCH}/*.bam
 
 # Need to create contig look-up as GTF does not have hg38_ prefix to contigs
@@ -450,6 +502,10 @@ sbatch --partition uoa-compute ./scarecrow/scripts/umi_tools.sh \
     --out ${PROJECT}/umi_tools/J${JITTER}M${MISMATCH} \
     --alias ${PROJECT}/umi_tools/alias.file
 ```
+# 2712929 (J0)
+# 2712930 (J1)
+
+# <------------------------------------------------------------------ here
 
 
 Next, the umi_tools output can be converted to a matrix format for downstream processing in R in a similar manner to the `kallisto` output.
