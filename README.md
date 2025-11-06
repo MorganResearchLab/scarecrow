@@ -2,8 +2,6 @@
 
 <img style="float:right;width:200px;" src="./img/scarecrow.png" alt="scarecrow"/>
 
-**scarecrow is being actively developed, some kinks still being ironed out, and so it may not currently behave as expected.**
-
 A library-agnostic toolkit for pre-processing combinatorial indexed single-cell RNA sequence data.
 
 * [Installation](./docs/installation.md)
