@@ -120,6 +120,11 @@ class BarcodeMatcherOptimized:
                             f"Barcode whitelist file not found: {file}"
                         )
 
+        # Output summary
+        if self.trie_matcher:
+            self.trie_matcher.summarize()
+
+
     def find_match(
         self,
         sequence: str,
@@ -851,6 +856,13 @@ def run_reap(
     logger.info("Finished!")
 
 
+def update_length_in_comment(comment: str, new_length: int) -> str:
+    """
+    Replace length=<int> in a FASTQ comment if present.
+    If not present, return comment unchanged.
+    """
+    return re.sub(r"length=\d+", f"length={new_length}", comment)
+
 @log_errors
 def process_read_batch(
     read_batch: List[Tuple],
@@ -977,7 +989,7 @@ def process_read_batch(
         """
         Should probably check if UMI or cDNA is on a read with barcodes
             if so, is it downstream of barcodes?
-            if barcode is jittered then UMI/cDNA needs to be jittered
+            if barcode is jittered then UMI/cDNA might need to be jittered
         """
 
         #  Output interleaved FASTQ
@@ -1006,7 +1018,6 @@ def process_read_batch(
                 tags.append(f"UY={umi_qual}")
 
             # R1
-            r1_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)} /1"
             r1_barcodes = f"{('').join(matched_barcodes)}"
             r1_quality = f"{('').join(matched_qualities)}"
             if umi_index is not None:
@@ -1015,8 +1026,16 @@ def process_read_batch(
                 r1_barcodes += f"{umi_sequence}"
                 r1_quality += f"{umi_quality}"
 
+            # Update length in comment if present
+            r1_comment = source_entry.comment
+            r2_comment = source_entry.comment
+            if "length=" in source_entry.comment:
+                r1_comment = update_length_in_comment(r1_comment, len(r1_barcodes))
+                r2_comment = update_length_in_comment(r2_comment, len(filtered_seq))
+            r1_header = f"@{source_entry.name} {r1_comment} {' '.join(tags)} /1"
+            r2_header = f"@{source_entry.name} {r2_comment} {' '.join(tags)} /2"
+
             # R2
-            r2_header = f"@{source_entry.name} {source_entry.comment} {' '.join(tags)} /2"
             output_entries.append(f"{r1_header}\n{r1_barcodes}\n+\n{r1_quality}\n{r2_header}\n{filtered_seq}\n+\n{filtered_qual}\n")
 
 

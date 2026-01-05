@@ -6,3 +6,4 @@
 *.sam
 *.cram
 *.bai
+__pycache__/

@@ -134,15 +134,12 @@ class SeedIndex:
 class CompactKmerIndex:
     def __init__(self, k: int | None = None):
         self.k = k
-        self.barcodes = []
-
-        # build-time only
-        self.kmer_to_barcode_indices = defaultdict(list)
-
-        # finalized arrays (NO dtype=object)
-        self.kmer_array = None              # uint16 / uint32 [N]
-        self.barcode_offsets = None         # int64 [N+1]
-        self.barcode_indices = None         # int32 [M]
+        self.barcodes = []  # List to store unique barcodes
+        self.kmer_to_barcode_indices = {}  # Temporary dictionary for fast lookups during build
+        self.kmer_array = None  # Will store k-mers as a numpy array after finalization
+        self.barcode_indices = (
+            None  # Will store barcode indices as a numpy array after finalization
+        )
 
     def add_barcode(self, barcode: str):
         """Add a barcode to the index."""
@@ -161,30 +158,24 @@ class CompactKmerIndex:
 
     def finalize(self):
         """
-        Convert the temporary dictionary to compact numeric arrays.
-        Eliminates dtype=object completely.
+        Convert the temporary dictionary to numpy arrays for memory efficiency.
+        This should be called after all barcodes have been added.
         """
-        items = sorted(self.kmer_to_barcode_indices.items())
-        n_kmers = len(items)
-        total_hits = sum(len(v) for _, v in items)
-
+        # Convert k-mer dictionary to numpy arrays
         if self.k > 8:
-            self.kmer_array = np.empty(n_kmers, dtype=np.uint32)
+            self.kmer_array = np.array(
+                list(self.kmer_to_barcode_indices.keys()), dtype=np.uint32
+            )
         else:
-            self.kmer_array = np.empty(n_kmers, dtype=np.uint16)
+            self.kmer_array = np.array(
+                list(self.kmer_to_barcode_indices.keys()), dtype=np.uint16
+            )
 
-        self.barcode_offsets = np.empty(n_kmers + 1, dtype=np.int64)
-        self.barcode_indices = np.empty(total_hits, dtype=np.int32)
+        self.barcode_indices = np.array(
+            list(self.kmer_to_barcode_indices.values()), dtype=object
+        )
 
-        offset = 0
-        for i, (kmer_int, barcode_list) in enumerate(items):
-            self.kmer_array[i] = kmer_int
-            self.barcode_offsets[i] = offset
-            self.barcode_indices[offset : offset + len(barcode_list)] = barcode_list
-            offset += len(barcode_list)
-
-        self.barcode_offsets[n_kmers] = offset
-
+        # Free the temporary dictionary
         del self.kmer_to_barcode_indices
 
     def _kmer_to_int(self, kmer: str) -> int:
@@ -198,49 +189,43 @@ class CompactKmerIndex:
         return result
 
     def query(self, sequence: str, max_mismatches: int = None) -> Set[str]:
+        """
+        Return all barcodes within max_mismatches of the input sequence.
+        Uses k-mer seed lookup followed by bit-packed Hamming verification.
+        """
         if max_mismatches is None:
             max_mismatches = 1
 
         matches = set()
 
-        if (
-            self.kmer_array is None
-            or self.kmer_array.size == 0
-            or len(self.barcodes) == 0
-        ):
+        if self.kmer_array is None or self.kmer_array.size == 0 or len(self.barcodes) == 0:
             return matches
 
+        # Determine effective k if not set
         k = self.k
         n_seeds = max_mismatches + 1
         seq_len = len(sequence)
         if k is None or k <= 0:
             k = seq_len // n_seeds
 
+        # Encode full sequence into bits
         seq_bits = _encode_dna_to_bits(sequence)
-        seen = set()
 
+        seen_candidates = set()
         for i in range(seq_len - k + 1):
             kmer = sequence[i : i + k]
             kmer_int = self._kmer_to_int(kmer)
-
+            # Find matching barcodes for this k-mer
             idx_matches = np.where(self.kmer_array == kmer_int)[0]
             for idx in idx_matches:
-                start = self.barcode_offsets[idx]
-                end = self.barcode_offsets[idx + 1]
-
-                for barcode_index in self.barcode_indices[start:end]:
-                    if barcode_index in seen:
+                for barcode_index in self.barcode_indices[idx]:
+                    if barcode_index in seen_candidates:
                         continue
-                    seen.add(barcode_index)
-
                     candidate = self.barcodes[barcode_index]
-                    if (
-                        _hamming_distance_bits(
-                            seq_bits, _encode_dna_to_bits(candidate)
-                        )
-                        <= max_mismatches
-                    ):
+                    barcode_bits = _encode_dna_to_bits(candidate)
+                    if _hamming_distance_bits(seq_bits, barcode_bits) <= max_mismatches:
                         matches.add(candidate)
+                    seen_candidates.add(barcode_index)
 
         return matches
 
@@ -295,125 +280,22 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
         if not hasattr(self, "automata"):
             self.automata = {}
 
-        self.index_type = None
+        self.index_type = index_type
         self.kmer_index = {}
         self.kmer_length = kmer_length
-        self.barcode_length = None
         self.jitter = jitter
         self.mismatches = mismatches
         self.logger = setup_worker_logger()
 
         if pickle_file is not None and os.path.exists(pickle_file):
             self._load_trie(pickle_file, mismatches = mismatches)
-            if index_type is None:
-                self.index_type = self.index_type  # loaded from pickle
+
         else:
             self._build_trie(barcode_sequences)
-            self._build_index(barcode_sequences, index_type=index_type or "seed")
+            self._build_index(barcode_sequences, index_type = self.index_type)
             self._save_trie(pickle_file)
 
         self.report_memory_usage()
-
-    def summarize(self, limit: int = 3):
-        """
-        Log a summary of the loaded automata and indexes, matching inspect_pkl output.
-        """
-        logger = self.logger
-
-        logger.info("=== BarcodeMatcherAhoCorasick Summary ===")
-
-        # Top-level metadata
-        logger.info(f"Index type: {self.index_type}")
-        logger.info(f"Mismatches: {self.mismatches}")
-        logger.info(f"Barcode length: {self.barcode_length}")
-        logger.info(f"kmer length: {self.kmer_length}")
-
-        # Version is only known if loaded from pickle
-        version = getattr(self, "version", None)
-        logger.info(f"Pickle version: {version}")
-
-        # Automata
-        logger.info(f"Whitelists in automata: {list(self.automata.keys())}")
-
-        # Indexes
-        for whitelist_key, idx_obj in self.kmer_index.items():
-            logger.info(f"Whitelist: {whitelist_key}")
-
-            # Barcodes
-            barcodes = getattr(idx_obj, "barcodes", [])
-            logger.info(f"  Number of barcodes: {len(barcodes)}")
-
-            # Index type
-            if isinstance(idx_obj, SeedIndex):
-                index_type = "seed"
-                has_seed = bool(getattr(idx_obj, "seed_index", None))
-                kmer_array = []
-            elif isinstance(idx_obj, CompactKmerIndex):
-                index_type = "kmer"
-                has_seed = False
-                kmer_array = (
-                    idx_obj.kmer_array.tolist()
-                    if idx_obj.kmer_array is not None
-                    else []
-                )
-            else:
-                index_type = "unknown"
-                has_seed = False
-                kmer_array = []
-
-            logger.info(f"  Index type stored: {index_type}")
-            logger.info(f"  Has seed_index?: {'Yes' if has_seed else 'No'}")
-
-            # Automaton preview
-            automaton = self.automata.get(whitelist_key)
-            if automaton is None:
-                trie_preview = []
-            elif isinstance(automaton, dict):
-                trie_preview = list(automaton.keys())[:limit]
-            else:
-                # e.g. pyahocorasick Automaton
-                try:
-                    trie_preview = [k for k, _ in list(automaton.items())[:limit]]
-                except Exception:
-                    trie_preview = []
-
-            logger.info(
-                f"  Automaton (first {limit} keys/values): "
-                f"{trie_preview}{'...' if automaton and len(trie_preview) == limit else ''}"
-            )
-
-            # Index-specific preview
-            if isinstance(idx_obj, CompactKmerIndex):
-                kmer_array = (
-                    idx_obj.kmer_array.tolist()
-                    if idx_obj.kmer_array is not None
-                    else []
-                )
-                preview = kmer_array[:limit]
-                logger.info(
-                    f"  k-mer array (first {limit} values): "
-                    f"{preview}{'...' if len(kmer_array) > limit else ''}"
-                )
-
-            elif isinstance(idx_obj, SeedIndex):
-                seed_index = idx_obj.seed_index or {}
-                seed_lengths = sorted(seed_index.keys())
-                preview_lengths = seed_lengths[:limit]
-
-                logger.info(
-                    f"  Seed index lengths (first {limit}): "
-                    f"{preview_lengths}{'...' if len(seed_lengths) > limit else ''}"
-                )
-
-                if preview_lengths:
-                    L = preview_lengths[0]
-                    seeds = list(seed_index[L].keys())[:limit]
-                    logger.info(
-                        f"  Example seeds for length {L}: "
-                        f"{seeds}{'...' if len(seed_index[L]) > limit else ''}"
-                    )
-
-        logger.info("=== End Summary ===")
 
     def report_memory_usage(self):
         """
@@ -441,9 +323,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                 # Memory usage of barcode_indices (if finalized)
                 if hasattr(kmer_index, "barcode_indices"):
                     kmer_index_memory += asizeof.asizeof(kmer_index.barcode_indices)
-                # Memory usage of barcode_offsets (if finalized)
-                if hasattr(kmer_index, "barcode_offsets"):
-                    kmer_index_memory += asizeof.asizeof(kmer_index.barcode_offsets)
                 # Memory usage of barcodes
                 if hasattr(kmer_index, "barcodes"):
                     kmer_index_memory += asizeof.asizeof(kmer_index.barcodes)
@@ -485,8 +364,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             seed_index = SeedIndex(max_mismatches=self.mismatches)
             seed_index.build_from_barcodes(list(sequences), logger=self.logger)
             self.kmer_index[whitelist_key] = seed_index
-            first_seq = next(iter(sequences))
-            self.barcode_length = len(first_seq)  # <-- set here
         self.logger.info("Finished building seed index")
 
 
@@ -514,7 +391,6 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
                     f"for k-mer indexing. Found lengths: {sorted(lengths)}"
                 )
             L = lengths.pop()
-            self.barcode_length = L
             k = max(1, L // (d + 1))
             self.logger.info(
                 f"Derived k-mer length for whitelist '{whitelist_key}': "
@@ -552,160 +428,92 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
     def _load_trie(self, pickle_file: str, mismatches: int):
         """
-        Load a pre-built Aho-Corasick trie and k-mer/seed indexes from a pickle file.
-        Supports multiple pickle files without overwriting existing data.
-        Rebuilds indexes if the mismatch budget differs from the stored value.
+        Loads a pre-built Aho-Corasick trie and index from a pickle file.
         """
         self.logger.info(f"Importing pickle from '{pickle_file}'")
-
-        if not os.path.exists(pickle_file):
-            raise FileNotFoundError(f"Pickle file not found: {pickle_file}")
-
         try:
+            # Load automata and k-mer index data
             with gzip.open(pickle_file, "rb") as f:
                 loaded_data = pickle.load(f)
 
-            # Stored metadata
-            stored_index_type = loaded_data.get("index_type")
-            stored_mismatches = loaded_data.get("index_mismatches", 0)
-            stored_barcode_length = loaded_data.get("barcode_length", None)
-            top_level_kmer_length = loaded_data.get("kmer_length", None)
-            version = loaded_data.get("version", "unknown")
-
-            self.logger.info(f"Pickle version: {version}")
-            self.logger.info(f"Stored index type: {stored_index_type}")
-            self.logger.info(f"Stored mismatches: {stored_mismatches}")
-            self.logger.info(f"Stored barcode length: {stored_barcode_length}")
-
-            # Set mismatch budget (requested by caller)
+            # Set mismatch budget
             self.mismatches = mismatches
 
-            # Load automata (merge with existing)
+            # Load trie
             automaton = loaded_data.get("automata", {})
             for whitelist_key, trie in automaton.items():
                 self.automata[whitelist_key] = trie
-            self.logger.info(f"Loaded automata whitelists: {list(automaton.keys())}")
+            self.logger.info(f"Loaded trie for whitelists: {list(self.automata.keys())}")
 
-            # Load k-mer / seed indexes
+            # Load k-mer index (legacy or new SeedIndex)
             kmer_index_data = loaded_data.get("kmer_index", {})
+            self.kmer_length = loaded_data.get("kmer_length", None)
+            version = loaded_data.get("version", "unknown")
+            self.logger.info(f"Pickle version: {version}")
+
             for whitelist_key, ki_data in kmer_index_data.items():
-                barcodes = ki_data.get("barcodes", [])
+                index_type = ki_data.get("index_type", "seed")
+                self.index_type = index_type
 
-                # Determine if rebuild is needed
-                need_rebuild = self.mismatches != stored_mismatches
-
-                # Handle SeedIndex
-                if stored_index_type == "seed":
-                    if need_rebuild:
-                        idx_obj = SeedIndex(max_mismatches=self.mismatches)
-                        idx_obj.build_from_barcodes(barcodes, logger=self.logger)
-                        self.index_type = "seed"
-                        if barcodes:
-                            self.barcode_length = len(barcodes[0])
-                        self.kmer_length = None
+                if index_type == "seed":
+                    idx_obj = SeedIndex(max_mismatches=self.mismatches)
+                    idx_obj.build_from_barcodes(ki_data.get("barcodes", []), logger=self.logger)
+                elif index_type == "kmer":
+                    idx_obj = CompactKmerIndex(k=self.kmer_length)
+                    idx_obj.barcodes = ki_data.get("barcodes", [])
+                    arr = ki_data.get("kmer_array", [])
+                    if self.kmer_length > 8:
+                        idx_obj.kmer_array = np.array(arr, dtype=np.uint32)
                     else:
-                        idx_obj = SeedIndex(max_mismatches=self.mismatches)
-                        idx_obj.barcodes = barcodes
-                        idx_obj.seed_index = ki_data.get("seed_index", None)
-
-                # Handle CompactKmerIndex
-                elif stored_index_type == "kmer":
-                    # Determine k-mer length for this whitelist
-                    k = top_level_kmer_length
-                    if k is None:
-                        if barcodes:
-                            k = max(1, len(barcodes[0]) // (self.mismatches + 1))
-                        else:
-                            raise ValueError(
-                                f"No barcodes found for whitelist '{whitelist_key}' to derive k-mer length"
-                            )
-
-                    if need_rebuild:
-                        idx_obj = CompactKmerIndex(k=k)
-                        for bc in barcodes:
-                            idx_obj.add_barcode(bc)
-                        idx_obj.finalize()
-                        self.index_type = "kmer"
-                        if barcodes:
-                            self.barcode_length = len(barcodes[0])
-                        self.kmer_length = k
-                    else:
-                        idx_obj = CompactKmerIndex(k=k)
-                        idx_obj.barcodes = barcodes
-                        arr = ki_data.get("kmer_array", [])
-                        idx_obj.kmer_array = np.array(
-                            arr, dtype=np.uint32 if k > 8 else np.uint16
-                        )
-                        idx_obj.barcode_indices = np.array(
-                            ki_data.get("barcode_indices", []), dtype=np.int32
-                        )
-                        idx_obj.barcode_offsets = np.array(
-                            ki_data.get("barcode_offsets", []), dtype=np.int64
-                        )
+                        idx_obj.kmer_array = np.array(arr, dtype=np.uint16)
+                    idx_obj.barcode_indices = ki_data.get("barcode_indices", [])
                 else:
-                    raise ValueError(f"Unknown index_type in pickle: {stored_index_type}")
+                    raise ValueError(f"Unknown index_type in pickle: {index_type}")
 
-                # Store index against its whitelist
                 self.kmer_index[whitelist_key] = idx_obj
+                self.logger.info(f"Loaded index for whitelists: {list(self.kmer_index.keys())}")
 
-            # Optionally save rebuilt indexes once
-            if need_rebuild:
-                self.logger.info(f"Rebuilt indexes with mismatches={self.mismatches}, saving back to pickle")
-                self._save_trie(pickle_file)
-
-            self.logger.info(f"Loaded k-mer/seed indexes for whitelists: {list(self.kmer_index.keys())}")
-
-        except (ImportError, FileNotFoundError, ValueError) as e:
+        except (ImportError, FileNotFoundError) as e:
             self.logger.error(f"Error loading trie and index from {pickle_file}: {e}")
-            raise
+            raise ImportError
 
     def _save_trie(self, pickle_file: str):
         """
-        Save the Aho-Corasick automata and k-mer/seed indexes to a pickle file.
-        Preserves all whitelist keys and automata.
+        Save the Aho-Corasick trie and k-mer index to a pickle file,
         """
-        self.logger.info(f"Pickling and compressing automata and indexes to '{pickle_file}'")
+        self.logger.info(
+            f"Pickling and compressing Aho-Corasick trie and index to '{pickle_file}'"
+        )
 
         kmer_index_serializable = {}
-
         for whitelist_key, idx_obj in self.kmer_index.items():
 
             if isinstance(idx_obj, SeedIndex):
                 index_type = "seed"
                 barcodes = idx_obj.barcodes
-                seed_index = idx_obj.seed_index  # store seed index if already built
                 kmer_array = []
                 barcode_indices = []
-                barcode_offsets = []
-
             elif isinstance(idx_obj, CompactKmerIndex):
                 index_type = "kmer"
                 barcodes = idx_obj.barcodes
-                seed_index = None
                 kmer_array = idx_obj.kmer_array.tolist() if idx_obj.kmer_array is not None else []
-                barcode_indices = idx_obj.barcode_indices.tolist() if idx_obj.barcode_indices is not None else []
-                barcode_offsets = idx_obj.barcode_offsets.tolist() if idx_obj.barcode_offsets is not None else []
-
+                barcode_indices = [list(v) for v in idx_obj.barcode_indices] if idx_obj.barcode_indices is not None else []
             else:
                 raise TypeError(f"Unknown index object type: {type(idx_obj)}")
 
             kmer_index_serializable[whitelist_key] = {
                 "index_type": index_type,
                 "barcodes": barcodes,
-                "seed_index": seed_index,
                 "kmer_array": kmer_array,
                 "barcode_indices": barcode_indices,
-                "barcode_offsets": barcode_offsets,
             }
+
 
         data_to_save = {
             "version": __version__,
-            "automata": self.automata,               # preserve all automata
+            "automata": self.automata,
             "kmer_index": kmer_index_serializable,
             "kmer_length": self.kmer_length,
-            "index_type": self.index_type,           # "seed" or "kmer"
-            "index_mismatches": self.mismatches,     # mismatches used
-            "barcode_length": self.barcode_length,
         }
 
         with gzip.open(pickle_file, "wb") as f:
@@ -762,9 +570,7 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
 
             for i in range(min(num_keys, len(idx.kmer_array))):
                 kmer_int = idx.kmer_array[i]
-                start = idx.barcode_offsets[i]
-                end = idx.barcode_offsets[i + 1]
-                barcode_ids = idx.barcode_indices[start:end][:num_values]
+                barcode_ids = idx.barcode_indices[i][:num_values]
                 barcodes = [idx.barcodes[j] for j in barcode_ids]
                 kmer = int_to_kmer(kmer_int, idx.k)
 
@@ -791,21 +597,11 @@ class BarcodeMatcherAhoCorasick(BarcodeMatcher):
             List of barcodes from the whitelist matching within max_mismatches
         """
         if whitelist_key not in self.kmer_index:
-            self.logger.warning(
-                f"No index found for whitelist: '{whitelist_key}'. "
-                f"Available keys: {list(self.kmer_index.keys())}"
-            )
+            self.logger.warning(f"No seed index found for whitelist: {whitelist_key}")
             return []
 
-        idx_obj = self.kmer_index[whitelist_key]
-        if isinstance(idx_obj, SeedIndex):
-            candidates = idx_obj.query(sequence)
-        elif isinstance(idx_obj, CompactKmerIndex):
-            candidates = idx_obj.query(sequence, max_mismatches=self.mismatches)
-        else:
-            self.logger.warning(f"Unknown index type for whitelist: {whitelist_key} (object type: {type(idx_obj)})")
-            return []
-
+        seed_index = self.kmer_index[whitelist_key]
+        candidates = seed_index.query(sequence)  # get candidate barcodes using seeds
         matched_barcodes = []
 
         for candidate in candidates:

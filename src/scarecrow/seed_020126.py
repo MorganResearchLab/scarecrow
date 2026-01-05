@@ -316,12 +316,12 @@ scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC
         default = None,
     )
     subparser.add_argument(
-        "-i",
-        "--index",
-        metavar = "<str>",
-        help = ("Indexing method, can be either seed or kmer [seed]"),
-        type = str,
-        default = "seed",
+        "-k",
+        "--kmer_length",
+        metavar = "<int>",
+        help = ("K-mer length for building k-mer index for approximate matching"),
+        type = int,
+        default = None,
     )
     subparser.add_argument(
         "-b",
@@ -407,8 +407,9 @@ def validate_seed_args(parser, args):
         # Check optional parameters
         if args.pickle is not None and not isinstance(args.pickle, str):
             raise TypeError("--pickle must be a string file path or None")
-        if args.index not in ("seed", "kmer"):
-            raise TypeError("--index must be either 'seed' or 'kmer'")
+        if args.kmer_length is not None and (not isinstance(args.kmer_length, int) or args.kmer_length <= 0):
+            raise TypeError("--kmer_length must be a positive integer or None")
+
 
     except TypeError as e:
         parser.error(str(e))
@@ -426,7 +427,7 @@ def validate_seed_args(parser, args):
         upper_read_count = args.upper_read_count,
         barcodes = args.barcodes,
         pickle_file = args.pickle,
-        index = args.index,
+        kmer_length = args.kmer_length,
         output_file = args.out,
         batches = args.batch_size,
         linker_base_frequency = args.linker_base_frequency,
@@ -516,7 +517,7 @@ def run_seed(
     upper_read_count: int = 10000000,
     barcodes: List[str] = None,
     pickle_file: str = None,
-    index: str = "seed",
+    kmer_length: int = None,
     output_file: str = None,
     batches: int = 10000,
     linker_base_frequency: float = 0.75,
@@ -537,8 +538,8 @@ def run_seed(
         matcher = BarcodeMatcherAhoCorasick(
             barcode_sequences = {k: set(v) for k, v in expected_barcodes.items()},
             pickle_file = pickle_file,
+            kmer_length = kmer_length,
             mismatches = 0,
-            index_type = index,
         )
     else:
         matcher = BarcodeMatcherOptimized(
