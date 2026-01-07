@@ -935,19 +935,19 @@ def _hamming_distance_bits(a: int, b: int) -> int:
     x = a ^ b
     return bin(x).count("1") // 2
 
-def parser_encode(parser):
+def parser_pickle(parser):
     subparser = parser.add_parser(
-        "encode",
+        "pickle",
         description="""
-Generate Aho-Corasick Trie.
+Generate and pickle to file an Aho-Corasick Trie and seed or k-mer index.
 
 Example:
 
-scarecrow encode --barcodes whitelist.txt --pickle
+scarecrow pickle --barcodes BC1:v1:barcodes1.txt --index seed --mismatches 2
 ---
 """,
         epilog="If the out file exists then this will be loaded rather than re-generated.",
-        help="Generate Aho-Corasick trie and k-mer index, pickle to compressed file",
+        help="Generate and pickle an Aho-Corasick trie and seed or k-mer index",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
@@ -957,13 +957,6 @@ scarecrow encode --barcodes whitelist.txt --pickle
         help="Barcode whitelist files in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt)",
         type=str,
         default=None,
-    )
-    out_format = subparser.add_mutually_exclusive_group(required=True)
-    out_format.add_argument(
-        "-p",
-        "--pickle",
-        action="store_true",
-        help="Pickle whitelist as an Aho-Corasick trie and k-mer index [true]",
     )
     subparser.add_argument(
         "-i",
@@ -990,21 +983,20 @@ scarecrow encode --barcodes whitelist.txt --pickle
     return subparser
 
 
-def validate_encode_args(parser, args):
+def validate_pickle_args(parser, args):
     """
     Validate arguments
     """
     # Global logger setup
     logfile = "{}_{}.{}".format(
-        "./scarecrow_sam2fastq", generate_random_string(), "log"
+        "./scarecrow_pickle", generate_random_string(), "log"
     )
     logger = setup_logger(logfile)
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
 
-    run_encode(
+    run_pickle(
         barcodes = args.barcodes,
-        pickle = args.pickle,
         force_overwrite = args.force_overwrite,
         index = args.index,
         mismatches = args.mismatches,
@@ -1012,9 +1004,8 @@ def validate_encode_args(parser, args):
 
 
 @log_errors
-def run_encode(
+def run_pickle(
     barcodes: str = None,
-    pickle: bool = True,
     force_overwrite: bool = False,
     index: str = "seed",
     mismatches: int = 1,
@@ -1031,17 +1022,16 @@ def run_encode(
         expected_barcodes = parse_seed_arguments([barcodes])
 
         # Generate Aho-Corasick Trie
-        pickle_file = f"{file_path}.{index}.pkl.gz"
-        if pickle:
-            if force_overwrite and os.path.exists(pickle_file):
-                logger.info(f"Removing existing file '{pickle_file}'")
-                os.remove(pickle_file)
-            matcher = BarcodeMatcherAhoCorasick(
-                barcode_sequences = {k: set(v) for k, v in expected_barcodes.items()},
-                pickle_file = pickle_file,
-                index_type = index,
-                mismatches = mismatches,
-            )
+        pickle_file = f"{file_path}.{index}.m{mismatches}.pkl.gz"
+        if force_overwrite and os.path.exists(pickle_file):
+            logger.info(f"Removing existing file '{pickle_file}'")
+            os.remove(pickle_file)
+        matcher = BarcodeMatcherAhoCorasick(
+            barcode_sequences = {k: set(v) for k, v in expected_barcodes.items()},
+            pickle_file = pickle_file,
+            index_type = index,
+            mismatches = mismatches,
+        )
     else:
         logger.info(f"{file_path} not found")
 

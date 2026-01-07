@@ -25,7 +25,7 @@ Example:
 scarecrow sam2fastq --sam cdna.sam
 ---
 """,
-        help="Converts a SAM file to a scarecrow interleaved FASTQ with accompanying JSON file.",
+        help="Converts a SAM file to a scarecrow interleaved FASTQ with accompanying JSON file",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(

@@ -26,9 +26,10 @@ Recasts either a scarecrow SAM file to an interleaved FASTQ with accompanying JS
 Example:
 
 scarecrow recast --in cdna.sam
+scarecrow recast --in cdna.fastq
 ---
 """,
-        help="Recasts either a SAM file to a scarecrow interleaved FASTQ with accompanying JSON file, or a FASTQ file into a SAM file.",
+        help="Recasts either a SAM file to a scarecrow interleaved FASTQ with accompanying JSON file, or a FASTQ file into a SAM file",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(

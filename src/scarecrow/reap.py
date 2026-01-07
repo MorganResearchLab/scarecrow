@@ -119,10 +119,12 @@ class BarcodeMatcherOptimized:
                         raise FileNotFoundError(
                             f"Barcode whitelist file not found: {file}"
                         )
+                self.trie_matcher.output_kmer_index_details(num_keys=1, num_values=3)
 
         # Output summary
         if self.trie_matcher:
             self.trie_matcher.summarize()
+
 
 
     def find_match(

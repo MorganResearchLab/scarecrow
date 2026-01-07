@@ -27,7 +27,7 @@ Example:
 scarecrow sift --in cdna.sam
 ---
 """,
-        help="Removes reads with invalid barcodes from SAM file.",
+        help="Removes reads from a SAM file where one or more barcodes on the read failed to match to a whitelist barcode",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
@@ -47,7 +47,7 @@ scarecrow sift --in cdna.sam
         help=("JSON file to accompany interleaved FASTQ file, to identify barcode ranges"),
         type=str,
         default=None,
-    )    
+    )
     return subparser
 
 
@@ -77,7 +77,7 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
         # Validate input file
         if not isinstance(input_file, str):
             raise TypeError("Input file path must be a string")
-        
+
         input_path = Path(input_file)
         if not input_path.exists():
             raise FileNotFoundError(f"Input file does not exist: {input_file}")
@@ -87,7 +87,7 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
         # Validate file extensions
         valid_sam_extensions = {'.sam'}
         valid_fastq_extensions = {'.fastq', '.fq', '.fastq.gz', '.fq.gz'}
-        
+
         input_ext = input_path.suffix.lower()
         if input_ext in valid_sam_extensions:
             sift_sam(input_file)
@@ -96,7 +96,7 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
             # Validate JSON file for FASTQ input
             if not isinstance(json_file, str):
                 raise TypeError("JSON file path must be a string when processing FASTQ")
-            
+
             json_path = Path(json_file)
             if not json_path.exists():
                 raise FileNotFoundError(f"JSON file does not exist: {json_file}")
@@ -104,9 +104,9 @@ def run_sift(input_file: str = None, json_file: str = None) -> None:
                 raise PermissionError(f"JSON file is not readable: {json_file}")
             if not json_path.suffix.lower() == '.json':
                 raise ValueError(f"JSON file must have .json extension: {json_file}")
-                
+
             sift_fastq(input_file, json_file)
-            
+
         else:
             valid_extensions = valid_sam_extensions.union(valid_fastq_extensions)
             raise ValueError(
@@ -168,7 +168,7 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
     # Load JSON file
     with open(json_file) as f:
         config = json.load(f)
-    
+
     # Extract barcode ranges
     barcode_ranges = []
     for bc in config['barcodes']:
@@ -179,14 +179,14 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
     output_fastq = fastq_file.replace(".fastq", "_sift.fastq")
     output_fastq = output_fastq[:-3] if output_fastq.endswith('.gz') else output_fastq
     open_func = gzip.open if fastq_file.endswith('.gz') else open
-    logger.info(f"Sifting '{fastq_file}', results will be written to '{output_fastq}' and '{json_file}'")            
+    logger.info(f"Sifting '{fastq_file}', results will be written to '{output_fastq}' and '{json_file}'")
     with open_func(fastq_file, 'rt') as infile, open(output_fastq, 'wt') as outfile:
         while True:
             # Read 4 lines (one record)
             lines = [infile.readline() for _ in range(8)]
             if not lines[0]:  # end of file
                 break
-            
+
             # Extract read 1 sequence (2nd line of the first 4-line block)
             seq = lines[1].strip()
             #logger.info(f"{seq}")
@@ -195,15 +195,15 @@ def sift_fastq(fastq_file: str = None, json_file: str = None):
             keep = True
             for read_num, start, end in barcode_ranges:
                 # Get the sequence line (2nd line of the record)
-                barcode = seq[start:end+1]  # end is inclusive                        
+                barcode = seq[start:end+1]  # end is inclusive
                 #logger.info(f"{barcode}")
                 if 'N' in barcode:
                     keep = False
                     break
-            
+
             if keep:
                 outfile.writelines(lines)
-    
+
 def parse_range(range_str):
     """Parse a range string like '1:0-7' into (read_num, start, end)."""
     read_part, coords = range_str.split(':')

@@ -33,7 +33,7 @@ Example:
 scarecrow weed --fastq in.fastq --in in.sam --barcode_index 1 --barcodes BC3:P7:BC3.txt --mismatches 1
 ---
 """,
-        help="Update SAM file with barcode tag from a FASTQ sequence header",
+        help="Update SAM file with barcode tag extracted from the original FASTQ sequence header",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(

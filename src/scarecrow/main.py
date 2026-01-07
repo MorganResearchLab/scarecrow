@@ -25,7 +25,7 @@ from scarecrow.sam2fastq import parser_sam2fastq, validate_sam2fastq_args
 from scarecrow.json import parser_json, validate_json_args
 from scarecrow.recast import parser_recast, validate_recast_args
 from scarecrow.sift import parser_sift, validate_sift_args
-from scarecrow.encode import parser_encode, validate_encode_args
+from scarecrow.encode import parser_pickle, validate_pickle_args
 from scarecrow.inspect import parser_inspect, validate_inspect_args
 from scarecrow.weed import parser_weed, validate_weed_args
 
@@ -43,7 +43,7 @@ def main():
 '     `'  `'  `  `  `'  `'   '  `
 {__version__}
 \033[32m
-A toolkit to parse seqspec.yaml files for downstream analysis of single-cell sequencing data.
+A toolkit for harvesting more reads from single-cell combinatorial barcoding data.
 \033[0m
 GitHub: https://github.com/MorganResearchLab/scarecrow
 Documentation: https://www.morganlab.co.uk/software/scarecrow
@@ -54,7 +54,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
 
     subparsers = parser.add_subparsers(
         dest="command",
-        metavar="<CMD>",
+        metavar="tool",
     )
 
     # Setup the arguments for all subcommands
@@ -68,7 +68,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "recast": parser_recast(subparsers),
         "json": parser_json(subparsers),
         "sift": parser_sift(subparsers),
-        "encode": parser_encode(subparsers),
+        "pickle": parser_pickle(subparsers),
         "inspect": parser_inspect(subparsers),
         "weed": parser_weed(subparsers),
     }
@@ -99,7 +99,7 @@ Documentation: https://www.morganlab.co.uk/software/scarecrow
         "recast": validate_recast_args,
         "json": validate_json_args,
         "sift": validate_sift_args,
-        "encode": validate_encode_args,
+        "pickle": validate_pickle_args,
         "inspect": validate_inspect_args,
         "weed": validate_weed_args,
     }

@@ -256,7 +256,7 @@ Search reads in FASTQ files for barcodes in whitelists, record exact matches and
 
 Example:
 
-scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:BC1.txt BC2:BC2.txt BC3:BC3.txt\n\t--out barcode_counts.csv
+scarecrow seed --fastqs R1.fastq.gz R2.fastq.gz\n\t--barcodes BC1:x:BC1.txt BC2:y:BC2.txt BC3:z:BC3.txt\n\t--out barcode_counts.csv
 ---
 """,
         help="Search fastq reads for barcodes",

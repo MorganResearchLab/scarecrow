@@ -23,10 +23,10 @@ Generate a JSON file to accompany a scarecrow FASTQ file.
 
 Example:
 
-scarecrow json --sam cdna.sam
+scarecrow json --in cdna.fastq
 ---
 """,
-        help="Converts a SAM file to a scarecrow interleaved FASTQ with accompanying JSON file.",
+        help="Generates a JSON file from a scarecrow FASTQ file",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(

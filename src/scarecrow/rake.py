@@ -25,7 +25,7 @@ Example:
 scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatches.json
 ---
 """,
-        help="Rake barcodes to output mismatch lists",
+        help="Deprecated",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
