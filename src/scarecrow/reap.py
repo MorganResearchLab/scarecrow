@@ -1145,6 +1145,16 @@ def extract_sequences(
         umi_index = None
         umi_range = None
 
+    # Initiate the matcher to rebuild if necessary (i.e. index based on a different number of mismatches)
+    # this should prevent worker processes attempting to rebuild the index potentially resulting in a corrupted pickle
+    matcher = BarcodeMatcherOptimized(
+        barcode_files=barcode_files,
+        mismatches=mismatches,
+        base_quality_threshold=base_quality,
+        verbose=verbose,
+    )
+    del matcher
+
     # Set number of threads to use
     if threads is None:
         threads = min(mp.cpu_count() - 1, 8)

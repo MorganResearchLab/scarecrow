@@ -4,21 +4,21 @@
 @author: David Wragg
 """
 
+import gzip
+import sys
+from collections import defaultdict
 from argparse import RawTextHelpFormatter
 import logging
-import json
-import itertools
 from typing import Dict
 from scarecrow import __version__
 from scarecrow.logger import log_errors, setup_logger
 from scarecrow.tools import generate_random_string
 
-
 def parser_rake(parser):
     subparser = parser.add_parser(
         "rake",
         description="""
-Generate barcode mismatch lists.
+Rake valid barcodes from scarecrow SAM file and inject into source FASTQ file.
 
 Example:
 
@@ -29,10 +29,19 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
-        "-b",
-        "--barcodes",
+        "-s",
+        "--sam",
         metavar="<file>",
-        help=("Path to barcode text file"),
+        help=("Input scarecrow SAM file"),
+        type=str,
+        required=True,
+        default=None,
+    )
+    subparser.add_argument(
+        "-f",
+        "--fastq",
+        metavar="<file>",
+        help=("Input source FASTQ file"),
         type=str,
         required=True,
         default=None,
@@ -41,17 +50,26 @@ scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatche
         "-o",
         "--out",
         metavar="<file>",
-        help=("Path to output barcode mismatch file"),
+        help=("Output corrected FASTQ file"),
         type=str,
+        required=True,
         default=None,
     )
     subparser.add_argument(
-        "-m",
-        "--max_mismatches",
+        "-p",
+        "--position",
         metavar="<int>",
-        help=("Maximum number of mismatches in a barcode to characterise [1]"),
+        help=("Position for barcode sequence injection [1]"),
         type=int,
         default=1,
+    )
+    subparser.add_argument(
+        "-l",
+        "--length",
+        metavar="<int>",
+        help=("Expected barcode length [16]"),
+        type=int,
+        default=16,
     )
     return subparser
 
@@ -66,66 +84,132 @@ def validate_rake_args(parser, args):
     logger.info(f"scarecrow version {__version__}")
     logger.info(f"logfile: '{logfile}'")
 
+    if args.position < 1:
+        sys.exit("ERROR: --insert-pos must be >= 1")
+
     run_rake(
-        barcodes=args.barcodes, output_file=args.out, max_mismatches=args.max_mismatches
+        sam_file=args.sam, fastq_file=args.fastq, output_file=args.out, position=args.position, length=args.length,
     )
 
 
 @log_errors
 def run_rake(
-    barcodes: str = None, output_file: str = None, max_mismatches: int = 1
+    sam_file: str = None, fastq_file: str = None, output_file: str = None, position: int = 1, length: int = 16
 ) -> None:
     """
-    Function to rake barcodes for mismatches
+    Function to rake barcodes from SAM file and inject into FASTQ file
     """
     logger = logging.getLogger("scarecrow")
 
-    if barcodes:
-        logger.info(f"Processing barcodes in {barcodes}")
-        if output_file is None:
-            output_file = f"{barcodes}.json"
-        process_barcodes(barcodes, 2, output_file)
+    sys.stderr.write("[INFO] Extracting valid CB tags from SAM...\n")
+    cb_map = extract_valid_cb_tags(sam_file, length)
+
+    if not cb_map:
+        sys.stderr.write("[WARNING] No valid CB tags found\n")
+
+    sys.stderr.write("[INFO] Modifying FASTQ...\n")
+    modify_fastq(
+        fastq_gz_in=fastq_file,
+        fastq_gz_out=output_file,
+        cb_map=cb_map,
+        insert_pos=position,
+    )
+
 
     logger.info("Finished!")
 
 
-def generate_mismatches(
-    sequence: str, max_mismatches: int
-) -> Dict[int, Dict[str, str]]:
-    bases = {"A", "C", "G", "T"}
-    mismatch_dict = {i: {} for i in range(1, max_mismatches + 1)}
+def extract_valid_cb_tags(sam_path, cb_length):
+    """
+    Returns dict: read_id -> CB sequence
+    """
+    cb_map = {}
+    total = 0
+    kept = 0
 
-    seq_length = len(sequence)
-    for num_mismatches in range(1, max_mismatches + 1):
-        for positions in itertools.combinations(range(seq_length), num_mismatches):
-            for replacements in itertools.product(bases, repeat=num_mismatches):
-                mutated_seq = list(sequence)
-                for pos, new_base in zip(positions, replacements):
-                    if mutated_seq[pos] != new_base:  # Ensure we introduce a mismatch
-                        mutated_seq[pos] = new_base
-                mutated_seq = "".join(mutated_seq)
-                if mutated_seq not in mismatch_dict[num_mismatches]:
-                    mismatch_dict[num_mismatches][mutated_seq] = sequence
+    with open(sam_path) as fh:
+        for line in fh:
+            if line.startswith("@"):
+                continue
 
-    return mismatch_dict
+            total += 1
+            fields = line.rstrip().split("\t")
+            qname = fields[0]
+            tags = fields[11:]
 
+            cb = None
+            for tag in tags:
+                if tag.startswith("CB:Z:"):
+                    cb = tag[5:]
+                    break
 
-def process_barcodes(input_file: str, max_mismatches: int, output_file: str):
-    with open(input_file, "r") as f:
-        barcodes = [line.strip() for line in f if line.strip()]
+            if cb is None:
+                continue
 
-    result = {
-        0: {barcode: [barcode] for barcode in barcodes}
-    }  # Mismatch=0 is the original
+            if len(cb) != cb_length:
+                continue
 
-    for barcode in barcodes:
-        mismatches = generate_mismatches(barcode, max_mismatches)
-        for mismatch_level, seq_dict in mismatches.items():
-            if mismatch_level not in result:
-                result[mismatch_level] = {}
-            result[mismatch_level].update(seq_dict)
+            if set(cb) == {"N"}:
+                continue
 
-    with open(output_file, "w") as f:
-        json.dump(result, f, indent=4)
+            cb_map[qname] = cb
+            kept += 1
 
-    print(f"JSON file saved: {output_file}")
+    sys.stderr.write(
+        f"[INFO] SAM reads processed: {total}\n"
+        f"[INFO] Valid CB reads kept: {kept}\n"
+    )
+
+    return cb_map
+
+def modify_fastq(
+    fastq_gz_in,
+    fastq_gz_out,
+    cb_map,
+    insert_pos,
+    progress_interval = 1000000,
+):
+    insert_idx = insert_pos - 1
+
+    total = 0
+    modified = 0
+
+    with gzip.open(fastq_gz_in, "rt") as fin, \
+         gzip.open(fastq_gz_out, "wt") as fout:
+
+        while True:
+            header = fin.readline()
+            if not header:
+                break
+
+            seq = fin.readline().rstrip()
+            plus = fin.readline()
+            qual = fin.readline().rstrip()
+
+            total += 1
+
+            read_id = header.split()[0][1:]
+
+            if read_id in cb_map:
+                cb = cb_map[read_id]
+                k = len(cb)
+
+                if insert_idx + k <= len(seq):
+                    seq = seq[:insert_idx] + cb + seq[insert_idx + k:]
+                    modified += 1
+
+            fout.write(header)
+            fout.write(seq + "\n")
+            fout.write(plus)
+            fout.write(qual + "\n")
+
+            if total % progress_interval == 0:
+                sys.stderr.write(
+                    f"[INFO] FASTQ reads processed: {total:,} | "
+                    f"modified: {modified:,}\n"
+                )
+
+    sys.stderr.write(
+        f"[DONE] FASTQ reads processed: {total:,}\n"
+        f"[DONE] Reads modified: {modified:,}\n"
+    )

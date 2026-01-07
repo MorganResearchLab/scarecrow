@@ -27,7 +27,7 @@ Example:
 scarecrow inspect --in BC1.seed.pkl.gz
 ---
 """,
-        help="Inspects a pickle file and returns a summary of the data structure.",
+        help="Inspects a pickle file and returns a summary of the data structure",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
