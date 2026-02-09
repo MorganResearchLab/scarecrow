@@ -23,10 +23,3 @@ A library-agnostic toolkit for pre-processing combinatorial indexed single-cell 
     * [`sift`](./docs/toolkit_sift.md)
     * [`stats`](./docs/toolkit_stats.md)
     * [`weed`](./docs/toolkit_weed.md)
-
-### To-do
-* Jitter does not currently apply to UMI or insert sequence
-  - if UMI on same read as barcodes, and downstream of any, then position *may* need adjusting dynamically before extracting sequence and qualities
-* Some tools would benefit from multi-threading
-  - i.e. recast, stats
-* Would be helpful if `weed` could be refactored to work on FASTQ input format rather than just SAM
