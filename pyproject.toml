@@ -16,6 +16,7 @@ dependencies = [
     "pip",
     "psutil",
     "pympler",
+    "pyahocorasick",
     "pysam",
     "rich",
     "scipy",
