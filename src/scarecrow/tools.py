@@ -4,7 +4,6 @@
 @author: David Wragg
 """
 
-#import gzip
 import logging
 import os
 import psutil

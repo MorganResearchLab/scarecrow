@@ -18,14 +18,14 @@ def parser_rake(parser):
     subparser = parser.add_parser(
         "rake",
         description="""
-Rake valid barcodes from scarecrow SAM file and inject into source FASTQ file.
+Rake valid barcodes from scarecrow SAM file and inject into matching reads in source FASTQ file.
 
 Example:
 
 scarecrow rake --barcodes whitelist.txt --max_mismatch 3 --out barcode_mismatches.json
 ---
 """,
-        help="Deprecated",
+        help="Rake valid barcodes from scarecrow SAM file and inject into matching reads in target FASTQ file",
         formatter_class=RawTextHelpFormatter,
     )
     subparser.add_argument(
