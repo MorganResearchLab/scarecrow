@@ -9,5 +9,19 @@ description = "A library-agnostic toolkit for pre-processing combinatorial index
 authors = [{name = "David Wragg", email = "david.wragg@abdn.ac.uk"}]
 requires-python = ">=3.7"
 
+# Dependencies
+dependencies = [
+    "numpy",
+    "pandas",
+    "git",
+    "pip",
+    "psutil",
+    "pympler",
+    "pysam",
+    "rich",
+    "scipy",
+    "seaborn"
+]
+
 [project.scripts]
 scarecrow = "scarecrow.main:main"
