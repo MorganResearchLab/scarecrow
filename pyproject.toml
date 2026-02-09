@@ -13,10 +13,10 @@ requires-python = ">=3.7"
 dependencies = [
     "numpy",
     "pandas",
-    "git",
     "pip",
     "psutil",
     "pympler",
+    "pyahocorasick",
     "pysam",
     "rich",
     "scipy",
