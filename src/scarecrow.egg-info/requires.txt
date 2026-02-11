@@ -1,0 +1,10 @@
+numpy
+pandas
+pip
+psutil
+pympler
+pyahocorasick
+pysam
+rich
+scipy
+seaborn

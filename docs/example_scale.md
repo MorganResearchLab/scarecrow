@@ -339,8 +339,6 @@ FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 2G --time=12:00:00 -o sift.%j.out -e sift.%j.err \
             scarecrow sift --in ${FASTQ} --json ${FASTQ%.fastq}.json
 ```
-# 2711158 (J0)
-# 2711125 (J1)
 
 ### 5. Trimming
 
@@ -374,8 +372,6 @@ sbatch --ntasks 1 --cpus-per-task 4 --mem 16G --time=12:00:00 -o cutadapt.%j.out
         -o ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ%_sift.fastq}_trimmed.fastq \
         ${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${FASTQ}
 ```
-# 2711164 (J0)
-# 2711159 (J1)
 
 ### 6. Generate barcode statistics
 
@@ -385,8 +381,6 @@ FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 4G --time=12:00:00 -o stats.%j.out -e stats.%j.err \
             scarecrow stats --in ${FASTQ}
 ```
-# 2711458 (J0)
-# 2711459 (J1)
 
 ### 7. Generate count matrix via kallisto-bustools
 
@@ -413,9 +407,6 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task 8 --mem 4G --time=12:00:00 --de
         --out ${PROJECT}/kallisto/J${JITTER}M${MISMATCH}/${FASTQ%.fastq}
 ```
 
-# 2712596 (J0)
-# 2712597 (J1)
-
 
 ### 8. Generate count matrix via STAR and umi-tools
 
@@ -427,9 +418,6 @@ FASTQ=${PROJECT}/extracted/J${JITTER}M${MISMATCH}/${OUT}_trimmed.fastq
 sbatch -p uoa-compute --ntasks 1 --mem 2G --time=24:00:00 -o recast.%j.out -e recast.%j.err \
             scarecrow recast --in ${FASTQ}
 ```
-
-# 2712650 (J0)
-# 2712649 (J1)
 
 
 Given the compute requirements for running STAR this is best performed on a HPC. Alignment first requires the reference genome be indexed with STAR. Below is an example using 8 threads and used 48G on a SLURM HPC. The GRCh38 reference genome and annotation (GTF) were indexed using an overhang of 74 - the length of the read containing the sequence to align.
@@ -472,9 +460,6 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task 32 --mem 24G --time=02:00:00 -o
         --out ${PROJECT}/star/J${JITTER}M${MISMATCH}
 ```
 
-# 2712852 (J0)
-# 2712889 (J1)
-
 
 Next step is to run `umi-tools`. The reference GTF file we use for this has a slighltly different config naming convention to the reference we used for alignment with `STAR`. To address this issue we generate an alias file for use with `featureCounts` from the `subread` package, see the `umi-tools` [single-cell tutorial](https://umi-tools.readthedocs.io/en/latest/Single_cell_tutorial.html) for more details. We have included a script in the `scarecrow` repo, [umi_tools.sh](../src/HPC/umi_tools.sh) which runs `featureCounts` followed by `umi-tools count` to generate a counts matrix.
 
@@ -495,11 +480,6 @@ sbatch --partition uoa-compute ./scarecrow/scripts/umi_tools.sh \
     --out ${PROJECT}/umi_tools/J${JITTER}M${MISMATCH} \
     --alias ${PROJECT}/umi_tools/alias.file
 ```
-# 2712929 (J0)
-# 2712930 (J1)
-
-# <------------------------------------------------------------------ here
-
 
 Next, the umi_tools output can be converted to a matrix format for downstream processing in R in a similar manner to the `kallisto` output.
 
