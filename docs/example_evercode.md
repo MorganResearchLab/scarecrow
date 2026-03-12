@@ -164,6 +164,7 @@ sbatch -p uoa-compute --ntasks 1 --cpus-per-task ${THREADS} \
         --out_fastq
 ```
 
+
 **(Optional)**  Check that the read count in the resulting FASTQ file is equal to that of one of the input FASTQ files. This is a basic sanity check to ensure that nothing unexpected happened whilst running `scarecrow` on the HPC that might have resulted in some I/O issues. Here is an example of counting reads using `seqtk` and `awk` on non-interleaved and interleaved FASTQ files.
 
 ```bash

@@ -121,6 +121,11 @@ class BarcodeMatcherOptimized:
                         )
                 self.trie_matcher.output_kmer_index_details(num_keys=1, num_values=3)
 
+            else:
+                raise ValueError(
+                    f"Unrecognized barcode whitelist file type for '{file}', supported types are .txt and .pkl.gz"
+                )
+
         # Output summary
         if self.trie_matcher:
             self.trie_matcher.summarize()
@@ -1379,16 +1384,17 @@ def worker_process(queue, barcode_files, output_file, constant_args, stats_queue
             verbose,
             sift
         ) = constant_args
+
+        stats = BarcodeStats()  # Create a stats object for this worker
+        logger = setup_worker_logger()  # Ensure the logger is set up
+        batch_count = 0  # Track the number of batches processed
+
         matcher = BarcodeMatcherOptimized(
             barcode_files=barcode_files,
             mismatches=mismatches,
             base_quality_threshold=base_quality,
             verbose=verbose,
         )
-
-        stats = BarcodeStats()  # Create a stats object for this worker
-        logger = setup_worker_logger()  # Ensure the logger is set up
-        batch_count = 0  # Track the number of batches processed
 
         with open(output_file, "a") as outfile:
             while True:

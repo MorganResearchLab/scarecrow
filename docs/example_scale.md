@@ -150,7 +150,7 @@ We're running this on a SLURM HPC and it takes around an 2h30m using 16 cores.
 ```bash
 THREADS=16
 BQ=10
-JITTER=0
+JITTER=2
 MISMATCH=2
 FASTQS=(${PROJECT}/fastq/*.fastq.gz)
 OUT=$(basename ${FASTQS[0]%.fastq*})
