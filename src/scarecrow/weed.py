@@ -459,7 +459,7 @@ def get_barcode_from_fastq(
         if barcode_field:
             # Split the barcode field on '+' to get individual barcodes
             barcodes = barcode_field.split("+")
-            if len(barcodes) > barcode_index:
+            if len(barcodes) >= barcode_index:
                 return barcodes[
                     barcode_index - 1
                 ]  # index is 0-based, user input is 1-based
