@@ -47,18 +47,21 @@ scarecrow weed --fastq in.fastq --in in.sam --barcode_index 1 --barcodes BC3:P7:
     subparser.add_argument(
         "-x",
         "--barcode_index",
-        metavar="<file>",
-        help=("Barcode index to extract (i.e. first sequence in header is -i 1) [1]"),
+        metavar="<int>",
+        help=("One or more barcode indices to extract (1-based)"),
         type=int,
-        default=1,
+        nargs="+",
+        required=True,
     )
     subparser.add_argument(
         "-c",
         "--barcodes",
         metavar="<string>",
         type=str,
+        nargs="+",
         required=True,
-        help="A single barcode whitelist file in format <barcode_name>:<whitelist_name>:<whitelist_file>\n\t(e.g. BC1:v1:barcodes1.txt)",
+        help=("Barcode whitelist(s), one per index, format name:version:file\n"
+              "Example: BC1:v1:bc1.txt BC2:v1:bc2.txt"),
     )
     subparser.add_argument(
         "-i",
@@ -140,21 +143,31 @@ def validate_weed_args(parser, args):
         if not args.infile.lower().endswith('.sam'):
             raise ArgumentTypeError("Input file must have .sam extension")
 
+        # Check number of indices matches number of barcode strings
+        if len(args.barcode_index) != len(args.barcodes):
+            raise ArgumentTypeError("Number of --barcode_index values must match number of --barcodes")
+
         # Validate barcode whitelist
-        if not isinstance(args.barcodes, str):
-            raise TypeError("--barcodes must be a string in format 'name:version:file'")
-        try:
-            barcode_name, whitelist_name, whitelist_file = args.barcodes.split(':')
+        barcode_files = []
+        for bc_arg in args.barcodes:
+            try:
+                barcode_name, whitelist_name, whitelist_file = bc_arg.split(":")
+            except ValueError:
+                raise ArgumentTypeError("--barcodes must be in format name:version:file")
             if not os.path.exists(whitelist_file):
-                raise ArgumentTypeError(f"Barcode whitelist file does not exist: {whitelist_file}")
-            if not os.access(whitelist_file, os.R_OK):
-                raise ArgumentTypeError(f"Barcode whitelist file is not readable: {whitelist_file}")
-        except ValueError:
-            raise ArgumentTypeError("--barcodes must be in format 'name:version:file'")
+                raise ArgumentTypeError(f"Whitelist not found: {whitelist_file}")
+            barcode_files.append(bc_arg)
+
 
         # Validate numeric parameters
-        if not isinstance(args.barcode_index, int) or args.barcode_index <= 0:
-            raise TypeError("--barcode_index must be a positive integer")
+        if not isinstance(args.barcode_index, list) or len(args.barcode_index) == 0:
+            raise TypeError("--barcode_index must be one or more integers")
+        for idx in args.barcode_index:
+            if not isinstance(idx, int):
+                raise TypeError("--barcode_index values must be integers")
+            if idx <= 0:
+                raise TypeError("--barcode_index values must be positive integers")
+
         if not isinstance(args.mismatches, int) or args.mismatches < 0:
             raise TypeError("--mismatches must be a non-negative integer")
         if not isinstance(args.jitter, int) or args.jitter < 0:
@@ -296,17 +309,22 @@ def run_weed(
     logger.info(f"{bam_chunks}")
 
     # Extract barcodes and convert whitelist to set
-    barcode_files = parse_seed_arguments([barcodes])
-    for whitelist, filename in barcode_files.items():
-        pass
+    barcode_pairs = []  # [(index, whitelist_name, filename)]
+    for idx, bc_arg in zip(barcode_index, barcodes):
+        name, version, filename = bc_arg.split(":")
+        whitelist = f"{name}:{version}"
+        barcode_pairs.append((idx, whitelist, filename))
 
-    # Create matcher
-    matcher = BarcodeMatcherOptimized(
-        barcode_files=barcode_files,
-        mismatches=mismatches,
-        base_quality_threshold=base_quality,
-        verbose=verbose,
-    )
+    matchers = {}
+    for _, whitelist, filename in barcode_pairs:
+        if whitelist not in matchers:
+            matchers[whitelist] = BarcodeMatcherOptimized(
+                barcode_files={whitelist: filename},
+                mismatches=mismatches,
+                base_quality_threshold=base_quality,
+                verbose=verbose,
+            )
+
 
     # Process each chunk in parallel
     logger.info("Processing BAM chunks")
@@ -319,9 +337,9 @@ def run_weed(
                 index_db,
                 f"{outpath}{rnd_string}_chunk_{i}.sam",
                 barcode_index,
-                matcher,
+                barcode_pairs,
+                matchers,
                 jitter,
-                whitelist,
                 verbose
             )
             for i, chunk in enumerate(bam_chunks)
@@ -467,9 +485,39 @@ def get_barcode_from_fastq(
     return None
 
 
+def get_barcodes_from_fastq(
+    fastq_handle, offset: int, barcode_indices: list[int]
+):
+    fastq_handle.seek(offset)
+    header = fastq_handle.readline().strip()
+
+    description = header.split(" ", 1)[1] if " " in header else ""
+    fields = description.split(":")
+
+    barcode_field = None
+    for field in fields:
+        if "+" in field:
+            barcode_field = field
+            break
+
+    if not barcode_field:
+        return [None] * len(barcode_indices)
+
+    barcodes = barcode_field.split("+")
+
+    result = []
+    for idx in barcode_indices:
+        if len(barcodes) >= idx:
+            result.append(barcodes[idx - 1])
+        else:
+            result.append(None)
+
+    return result
+
+
 def process_chunk(args):
     """Process a chunk of the BAM file and add tags from the FASTQ file."""
-    bam_chunk, fastq_file, index_db, output_sam, barcode_index, matcher, jitter, whitelist, verbose = (
+    bam_chunk, fastq_file, index_db, output_sam, barcode_indices, barcode_pairs, matchers, jitter, verbose = (
         args
     )
     logger = setup_worker_logger()  # Ensure the logger is set up
@@ -477,6 +525,8 @@ def process_chunk(args):
     # Connect to the SQLite database
     conn = sqlite3.connect(index_db)
     cursor = conn.cursor()
+
+    fastq_handle = open(fastq_file, "r")
 
     # Open the output SAM file for writing
     with pysam.AlignmentFile(
@@ -494,45 +544,57 @@ def process_chunk(args):
                 )
                 result = cursor.fetchone()
                 if result:
+
                     offset = result[0]
-                    barcode = get_barcode_from_fastq(fastq_file, offset, barcode_index)
+                    raw_barcodes_all = []
+                    matched_barcodes_all = []
+                    mismatch_all = []
 
-                    # Search for barcode in forward orientation
-                    matched_barcode, mismatch_count, adj_position = matcher.find_match(
-                        barcode, None, whitelist, "forward", 1, len(barcode), jitter, None
-                    )
+                    barcodes = get_barcodes_from_fastq(fastq_handle, offset, barcode_indices)
+                    for barcode, (barcode_index, whitelist, filename) in zip(barcodes, barcode_pairs):
 
-                    # If none found, search in reverse orientation
-                    if "NN" in matched_barcode:
-                        matched_barcode, mismatch_count, adj_position = (
-                            matcher.find_match(
-                                barcode,
-                                None,
-                                whitelist,
-                                "reverse",
-                                1,
-                                len(barcode),
-                                jitter,
-                                None,
-                            )
+                        if not barcode:
+                            raw_barcodes_all.append("")
+                            matched_barcodes_all.append("NN")
+                            mismatch_all.append("")
+                            continue
+
+                        matcher = matchers[whitelist]
+
+                        matched_barcode, mismatch_count, _ = matcher.find_match(
+                            barcode, None, whitelist, "forward", 1, len(barcode), jitter, None
                         )
-                    if verbose:
-                        logger.info(f"{matched_barcode}")
-                    # Update read tags
-                    if barcode:
-                        cr_tag = read.get_tag("CR") if read.has_tag("CR") else ""
-                        cy_tag = read.get_tag("CY") if read.has_tag("CY") else ""
-                        cb_tag = read.get_tag("CB") if read.has_tag("CB") else ""
-                        xm_tag = read.get_tag("XM") if read.has_tag("XM") else ""
-                        xp_tag = read.get_tag("XP") if read.has_tag("XP") else ""
-                        xq_tag = read.get_tag("XQ") if read.has_tag("XQ") else ""
-                        read.set_tag("CR", f"{cr_tag}_{barcode}")
-                        read.set_tag("CY", f"{cy_tag}_{'!' * len(barcode)}")
-                        read.set_tag("XQ", f"{xq_tag}_{'!' * len(barcode)}")
-                        if matched_barcode:
-                            read.set_tag("CB", f"{cb_tag}_{matched_barcode}")
-                            read.set_tag("XM", f"{xm_tag}_{mismatch_count}")
-                            read.set_tag("XP", f"{xp_tag}_0")
+
+                        if "NN" in matched_barcode:
+                            matched_barcode, mismatch_count, _ = matcher.find_match(
+                                barcode, None, whitelist, "reverse", 1, len(barcode), jitter, None
+                            )
+
+                        raw_barcodes_all.append(barcode)
+                        matched_barcodes_all.append(matched_barcode)
+                        mismatch_all.append(str(mismatch_count))
+
+                    # Combine strings
+                    raw_bc_string = "_".join(raw_barcodes_all)
+                    matched_bc_string = "_".join(matched_barcodes_all)
+                    mismatch_string = "_".join(mismatch_all)
+                    position_string = "_".join(["0"] * len(mismatch_all))
+                    qual_string = "_".join("!" * len(bc) for bc in raw_barcodes_all if bc)
+
+                    # Update tags
+                    cr_tag = read.get_tag("CR") if read.has_tag("CR") else ""
+                    cy_tag = read.get_tag("CY") if read.has_tag("CY") else ""
+                    cb_tag = read.get_tag("CB") if read.has_tag("CB") else ""
+                    xm_tag = read.get_tag("XM") if read.has_tag("XM") else ""
+                    xp_tag = read.get_tag("XP") if read.has_tag("XP") else ""
+                    xq_tag = read.get_tag("XQ") if read.has_tag("XQ") else ""
+
+                    read.set_tag("CR", f"{cr_tag}_{raw_bc_string}")
+                    read.set_tag("CY", f"{cy_tag}_{qual_string}")
+                    read.set_tag("XQ", f"{xq_tag}_{qual_string}")
+                    read.set_tag("CB", f"{cb_tag}_{matched_bc_string}")
+                    read.set_tag("XM", f"{xm_tag}_{mismatch_string}")
+                    read.set_tag("XP", f"{xp_tag}_{position_string}")
 
                 out_sam.write(read)  # Write the modified read to the output SAM file
 
