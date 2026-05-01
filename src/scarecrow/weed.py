@@ -349,8 +349,10 @@ def run_weed(
         temp_files = pool.imap_unordered(process_chunk, args, chunksize=1)
 
         # Combine the temporary SAM files into the final output
+        sam_size = 0
         with pysam.AlignmentFile(out_file, "w", header=headers) as out_sam:
             for temp_file in temp_files:
+                sam_size += os.path.getsize(temp_file)
                 with pysam.AlignmentFile(temp_file, "r", check_sq=False) as in_sam:
                     for read in in_sam.fetch(until_eof=True):
                         out_sam.write(read)
@@ -358,10 +360,7 @@ def run_weed(
 
     # Report disk space used
     bam_size = sum(
-        f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.bam")
-    )
-    sam_size = sum(
-        f.stat().st_size for f in Path(".").glob(f"{outpath}/{rnd_string}_chunk*.sam")
+        f.stat().st_size for f in Path(outpath).glob(f"{rnd_string}_chunk*.bam")
     )
     logger.info(f"Total BAM chunk disk space used: {bam_size}")
     logger.info(f"Total SAM chunk disk space used: {sam_size}")
