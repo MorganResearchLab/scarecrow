@@ -26,6 +26,11 @@ dependencies = [
 [project.scripts]
 scarecrow = "scarecrow.main:main"
 
+[tool.setuptools]
+packages = ["scarecrow"]
+
 [tool.setuptools_scm]
-fallback_version = "0.0.0"
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
 write_to = "src/scarecrow/_version.py"
+fallback_version = "0.0.0"
