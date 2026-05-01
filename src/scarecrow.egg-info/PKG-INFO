@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: scarecrow
-Version: 0.3.1
+Version: 0.3.2.dev2+g6de6ef8f3.d20260501
 Summary: A library-agnostic toolkit for pre-processing combinatorial indexed single-cell RNA sequence data.
 Author-email: David Wragg <david.wragg@abdn.ac.uk>
 Requires-Python: >=3.7

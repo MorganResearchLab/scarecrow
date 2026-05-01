@@ -12,4 +12,13 @@ mamba activate scarecrow
 pip install git+https://github.com/MorganResearchLab/scarecrow.git
 ```
 
+Alternatively, instead of using pip, clone and install the git repo.
+
+```bash
+git clone https://github.com/MorganResearchLab/scarecrow.git
+cd scarecrow
+pip install -e .
+```
+
+
 Whenever using `scarecrow` ensure that the environment is first activated (`mamba activate scarecrow`).

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=45", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -25,3 +25,6 @@ dependencies = [
 
 [project.scripts]
 scarecrow = "scarecrow.main:main"
+
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
