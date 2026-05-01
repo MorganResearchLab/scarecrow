@@ -4,6 +4,7 @@
 @author: David Wragg
 """
 
-from importlib.metadata import version
-
-__version__ = version("scarecrow")
+try:
+    from ._version import version as __version__
+except ImportError:
+    __version__ = "0.0.0"

@@ -72,6 +72,7 @@ src/HPC/samtags.sh
 src/HPC/umi_tools.sh
 src/scarecrow/.DS_Store
 src/scarecrow/__init__.py
+src/scarecrow/_version.py
 src/scarecrow/encode.py
 src/scarecrow/harvest.py
 src/scarecrow/inspect.py
